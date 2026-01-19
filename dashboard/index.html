@@ -1282,6 +1282,20 @@
             const workerPercent = status.swarm?.max_workers > 0 ? (status.swarm.active_workers / status.swarm.max_workers) * 100 : 0;
             document.getElementById('worker-progress').style.width = workerPercent + '%';
 
+            // Worker Scaling card - 3-tier model (GPT 5.2 feedback)
+            const ws = status.worker_state || {};
+            document.getElementById('workers-active-lg').textContent = ws.online_workers || 0;
+            document.getElementById('workers-cap-lg').textContent = ws.runtime_cap || 10;
+            document.getElementById('workers-target').textContent = ws.runtime_target || 0;
+            document.getElementById('workers-pending').textContent = Math.max(0, (ws.runtime_target || 0) - (ws.online_workers || 0));
+            const scalePercent = ws.runtime_cap > 0 ? ((ws.online_workers || 0) / ws.runtime_cap) * 100 : 0;
+            document.getElementById('worker-scale-progress').style.width = scalePercent + '%';
+            // Update Boss recommended display if Agent Boss Analysis is visible (teamplan)
+            if (ws.teamplan_recommended) {
+                const bossWorkers = document.getElementById('boss-recommended-workers');
+                if (bossWorkers) bossWorkers.textContent = ws.teamplan_recommended;
+            }
+
             const swarmStatus = document.getElementById('swarm-status');
             if (status.swarm?.paused) {
                 swarmStatus.innerHTML = '<span class="dot"></span> Paused';
@@ -1713,12 +1727,19 @@
 
                 if (data.recent_adjustments && data.recent_adjustments.length > 0) {
                     countBadge.textContent = data.recent_adjustments.length;
-                    feed.innerHTML = data.recent_adjustments.slice(-10).reverse().map(adj => `
-                        <div style="padding: 0.5rem; border-bottom: 1px solid var(--border-color);">
-                            <div style="font-weight: 500; color: var(--accent-yellow);">${adj.type || 'Adjustment'}</div>
-                            <div style="font-size: 0.75rem; color: var(--text-secondary);">${adj.reason || 'No reason'}</div>
-                        </div>
-                    `).join('');
+                    // Enhanced rendering with explainability (GPT 5.2 Fix 3)
+                    feed.innerHTML = data.recent_adjustments.slice(-10).reverse().map(adj => {
+                        const thresholdInfo = adj.threshold ? `| Threshold: ${adj.threshold}` : '';
+                        const currentInfo = adj.current_value ? `| Was: ${adj.current_value}` : '';
+                        const cooldownInfo = adj.cooldown_until ? `<div style="font-size: 0.65rem; color: var(--text-tertiary); margin-top: 0.25rem;">Cooldown: ${new Date(adj.cooldown_until).toLocaleTimeString()}</div>` : '';
+                        return `
+                            <div style="padding: 0.5rem; border-bottom: 1px solid var(--border-color);">
+                                <div style="font-weight: 500; color: var(--accent-yellow);">${adj.type || 'Adjustment'}</div>
+                                <div style="font-size: 0.75rem; color: var(--text-secondary);">${adj.reason || 'No reason'} ${thresholdInfo} ${currentInfo}</div>
+                                ${cooldownInfo}
+                            </div>
+                        `;
+                    }).join('');
                 } else {
                     countBadge.textContent = '0';
                     feed.innerHTML = '<div style="color: var(--text-secondary); padding: 1rem; text-align: center;">No adjustments yet</div>';

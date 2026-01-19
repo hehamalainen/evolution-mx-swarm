@@ -10,6 +10,7 @@ FastAPI backend providing:
 """
 
 import asyncio
+from dataclasses import dataclass
 import json
 import os
 import random
@@ -85,6 +86,27 @@ class RiskTier(int, Enum):
     HIGH = 2      # Manual review required
 
 
+@dataclass
+class WorkerState:
+    """3-tier worker state model for UI consistency.
+    
+    Separates:
+    - teamplan_recommended: What Boss analysis recommends
+    - runtime_target: What operator has set as target
+    - runtime_cap: Maximum allowed workers (never exceed)
+    - online_workers: Actually running workers
+    """
+    teamplan_recommended: int = 5   # From Boss/OrgBuilder analysis
+    runtime_target: int = 10        # Operator setting
+    runtime_cap: int = 10           # Hard cap
+    online_workers: int = 0         # Actual running (never > cap)
+    
+    def enforce_invariant(self):
+        """Ensure online never exceeds cap."""
+        if self.online_workers > self.runtime_cap:
+            self.online_workers = self.runtime_cap
+
+
 # ============================================================================
 # State Management
 # ============================================================================
@@ -93,8 +115,9 @@ class SwarmState:
     """Global swarm state tracker with enhanced metrics."""
 
     def __init__(self):
-        # Worker tracking
+        # Worker tracking - 3-tier model
         self.workers: dict[str, dict] = {}  # worker_id -> {last_seen, task_id, ...}
+        self.worker_state = WorkerState()   # 3-tier: recommended, target, cap, online
 
         # Task tracking
         self.active_tasks: dict[str, dict] = {}
@@ -492,6 +515,14 @@ async def get_swarm_status() -> dict:
             "active_60s": state.get_active_workers(60),
             "idle": len([w for w in state.workers.values() if w["status"] == "idle"]),
         },
+        
+        # Worker State - 3-tier model (GPT 5.2 feedback)
+        "worker_state": {
+            "teamplan_recommended": state.worker_state.teamplan_recommended,
+            "runtime_target": state.worker_state.runtime_target,
+            "runtime_cap": state.worker_state.runtime_cap,
+            "online_workers": state.worker_state.online_workers,
+        },
 
         # CI Health tile
         "ci_health": {
@@ -572,8 +603,12 @@ async def get_swarm_status() -> dict:
         # Requirements list
         "requirements": requirements,
 
-        # Task contracts table
-        "task_contracts": task_contracts[:20],
+        # Task contracts table - combine SPEC tasks with simulation tasks (GPT 5.2 Fix 2)
+        "task_contracts": task_contracts[:20] + list(state.active_tasks.values())[:20],
+        
+        # Active tasks from simulation (separate for UI convenience)
+        "active_tasks": list(state.active_tasks.values()),
+        "active_tasks_count": len(state.active_tasks),
 
         # Config
         "config": {
@@ -845,7 +880,7 @@ async def simulation_event(event: dict):
         state.ci_passes += m.get("ci_passes", 0)
         state.ci_fails += m.get("ci_fails", 0)
         
-        # Update workers
+        # Update workers and worker_state
         if "workers_active" in m:
             # Register simulated workers with proper structure
             from datetime import datetime
@@ -857,6 +892,18 @@ async def simulation_event(event: dict):
                     "task": f"task-{i}",
                     "last_seen": now
                 }
+            # Update 3-tier worker_state
+            state.worker_state.online_workers = m["workers_active"]
+            state.worker_state.enforce_invariant()
+            
+        # Update teamplan recommended (from Boss analysis)
+        if "teamplan_workers" in m:
+            state.worker_state.teamplan_recommended = m["teamplan_workers"]
+            
+        # Update runtime target
+        if "target_workers" in m:
+            state.worker_state.runtime_target = m["target_workers"]
+            state.worker_state.runtime_cap = m["target_workers"]  # Cap = target
         
         # Update governor state
         if "governor_state" in m:
@@ -870,6 +917,27 @@ async def simulation_event(event: dict):
         if "cost" in m:
             state.total_cost += m["cost"]
             state.current_hour_cost += m["cost"]
+    
+    # Task registry for Active Task Contracts table (GPT 5.2 Fix 2)
+    if event_type == "PR_OPEN" and "task_id" in event:
+        state.active_tasks[event["task_id"]] = {
+            "id": event["task_id"],
+            "spec_ref": event.get("spec_ref", "-"),
+            "goal": event.get("message", "")[:50],
+            "worker": event.get("worker_id", "-"),
+            "risk_tier": event.get("risk_tier", 1),
+            "status": event.get("status", "RUNNING"),
+            "progress": 50,
+            "pr_number": event.get("pr_number"),
+            "created_at": datetime.utcnow().isoformat()
+        }
+    elif event_type == "PR_MERGE" and "task_id" in event:
+        if event["task_id"] in state.active_tasks:
+            state.active_tasks[event["task_id"]]["status"] = "MERGED"
+            state.active_tasks[event["task_id"]]["progress"] = 100
+    elif event_type == "CI_FAIL" and "task_id" in event:
+        if event["task_id"] in state.active_tasks:
+            state.active_tasks[event["task_id"]]["status"] = "FAILED"
         
     await state.broadcast_status()
     return {"status": "received"}

@@ -119,22 +119,36 @@ class SimulationRunner:
             # Avg 1 PR per agent per hour = 1/60 PR per minute
             prob_pr = (1.0 / 60.0) * self.agents
             if random.random() < prob_pr:
-                pr = await self.github.create_pr(f"Task [task-{random.randint(100,999)}] implementation")
+                # Generate task with traceability fields
+                task_id = f"task-{random.randint(100,999)}"
+                spec_ref = f"SPEC-{random.randint(1, 20):03d}"
+                worker_id = f"worker-{random.randint(1, self.agents)}"
+                risk_tier = random.choice([0, 1, 2])
+                
+                pr = await self.github.create_pr(f"Task [{task_id}] implementation")
                 logger.info("Agent opened PR")
                 
-                # Notify dashboard with full state
+                # Notify dashboard with full state + traceability (GPT 5.2 feedback)
                 open_prs = await self.github.list_prs("open")
                 try:
                     async with httpx.AsyncClient() as client:
                         await client.post("http://localhost:8000/api/simulation/event", json={
                             "type": "PR_OPEN",
                             "message": f"Agent opened PR: {pr.title}",
+                            # Traceability fields (Fix 2)
+                            "task_id": task_id,
+                            "spec_ref": spec_ref,
+                            "worker_id": worker_id,
+                            "risk_tier": risk_tier,
+                            "status": "RUNNING",
+                            "pr_number": pr.id,
+                            # Metrics
                             "metrics": {
                                 "prs_opened": 1,
                                 "prs_open": len(open_prs),
                                 "workers_active": self.agents,
-                                "ci_passes": 1 if random.random() > 0.2 else 0,
-                                "ci_fails": 0 if random.random() > 0.2 else 1,
+                                "ci_passes": 1 if pr.ci_status == "success" else 0,
+                                "ci_fails": 1 if pr.ci_status == "failure" else 0,
                                 "cost": round(random.uniform(0.02, 0.10), 3)
                             }
                         })
@@ -143,10 +157,10 @@ class SimulationRunner:
                 
                 # Record metric
                 self.metrics_collector.record_task(TaskMetrics(
-                    task_id=f"task-{random.randint(100,999)}",
+                    task_id=task_id,
                     stream="simulation",
-                    tier=0,
-                    spec_ref="spec-123",
+                    tier=risk_tier,
+                    spec_ref=spec_ref,
                     started_at=current_time,
                     llm_calls=random.randint(1, 5),
                     estimated_cost_usd=0.05,

@@ -127,12 +127,29 @@ class GovernorState:
 
 @dataclass
 class Adjustment:
-    """A single adjustment made by the governor."""
+    """A single adjustment made by the governor.
+    
+    Enhanced for explainability (GPT 5.2 Fix 3):
+    - threshold: What threshold triggered (e.g., "CI < 85%")
+    - current_value: What the actual value was (e.g., "84.6%")
+    - before_settings: State before adjustment
+    - after_settings: State after adjustment
+    - cooldown_until: When cooldown period ends
+    - next_eval_at: When next evaluation will happen
+    """
     timestamp: datetime
     type: AdjustmentType
     reason: str
     details: Dict
     trigger: Optional[TriggerType] = None
+    # Explainability fields
+    threshold: Optional[str] = None
+    current_value: Optional[str] = None
+    before_settings: Optional[Dict] = None
+    after_settings: Optional[Dict] = None
+    cooldown_until: Optional[datetime] = None
+    next_eval_at: Optional[datetime] = None
+
 
 
 class Governor:
@@ -450,15 +467,32 @@ class Governor:
         adj_type: AdjustmentType,
         reason: str,
         details: Dict,
-        trigger: Optional[TriggerType] = None
+        trigger: Optional[TriggerType] = None,
+        # Explainability parameters (GPT 5.2 Fix 3)
+        threshold: Optional[str] = None,
+        current_value: Optional[str] = None,
+        before_settings: Optional[Dict] = None,
+        after_settings: Optional[Dict] = None
     ):
         """Record and notify about an adjustment."""
+        # Calculate cooldown
+        cooldown_minutes = self.teamplan.reorg_policy.hysteresis_minutes
+        cooldown_until = datetime.utcnow() + timedelta(minutes=cooldown_minutes)
+        next_eval_at = datetime.utcnow() + timedelta(minutes=5)  # Next eval in 5 min
+        
         adjustment = Adjustment(
             timestamp=datetime.utcnow(),
             type=adj_type,
             reason=reason,
             details=details,
-            trigger=trigger
+            trigger=trigger,
+            # Explainability fields
+            threshold=threshold,
+            current_value=current_value,
+            before_settings=before_settings,
+            after_settings=after_settings,
+            cooldown_until=cooldown_until,
+            next_eval_at=next_eval_at
         )
         self.adjustments.append(adjustment)
 
@@ -487,13 +521,22 @@ class Governor:
                 "open_pr_cap": self.teamplan.caps.open_pr_cap,
                 "max_workers": self.teamplan.total_max_workers()
             },
+            # Enhanced adjustment serialization (GPT 5.2 Fix 3)
             "recent_adjustments": [
                 {
                     "timestamp": adj.timestamp.isoformat(),
                     "type": adj.type.value,
-                    "reason": adj.reason
+                    "reason": adj.reason,
+                    "trigger": adj.trigger.value if adj.trigger else None,
+                    # Explainability fields
+                    "threshold": adj.threshold,
+                    "current_value": adj.current_value,
+                    "before_settings": adj.before_settings,
+                    "after_settings": adj.after_settings,
+                    "cooldown_until": adj.cooldown_until.isoformat() if adj.cooldown_until else None,
+                    "next_eval_at": adj.next_eval_at.isoformat() if adj.next_eval_at else None,
                 }
-                for adj in self.adjustments[-5:]
+                for adj in self.adjustments[-10:]  # Last 10 adjustments
             ]
         }
 
