@@ -1,0 +1,63 @@
+{
+  "version": "1.0.0",
+  "queue": {
+    "provider": "memory",
+    "gcp": {
+      "project_id": null,
+      "topic_id": "mx-tasks",
+      "subscription_id": "mx-worker-sub"
+    },
+    "azure": {
+      "connection_string": null,
+      "namespace": null,
+      "queue_name": "mx-tasks"
+    }
+  },
+  "secrets": {
+    "provider": "env",
+    "env": {
+      "prefix": "MX_",
+      "env_file": ".env"
+    },
+    "gcp": {
+      "project_id": null
+    },
+    "azure": {
+      "vault_url": null
+    }
+  },
+  "llm": {
+    "provider": "anthropic",
+    "model": "claude-sonnet-4-20250514",
+    "api_key": null,
+    "base_url": null,
+    "max_tokens": 4096,
+    "temperature": 0.7
+  },
+  "worker": {
+    "max_workers": 10,
+    "timebox_minutes": 60,
+    "retry_max": 3,
+    "poll_interval_seconds": 5,
+    "visibility_timeout_seconds": 300
+  },
+  "judge": {
+    "interval_minutes": 60,
+    "failure_rate_threshold": 0.3,
+    "no_progress_timeout_minutes": 60,
+    "auto_reset_enabled": true
+  },
+  "github": {
+    "repo_owner": "",
+    "repo_name": "",
+    "default_branch": "main",
+    "token": null,
+    "auto_merge_low_risk": false
+  },
+  "budget": {
+    "daily_usd_cap": 100.0,
+    "max_llm_calls_per_task": 50,
+    "max_tokens_per_task": 100000
+  },
+  "paused": false
+}

@@ -1,0 +1,93 @@
+version: '3.8'
+
+services:
+  # Planner service - runs once to generate tasks
+  planner:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: python -m planner.service --repo /repo
+    volumes:
+      - ./:/app:ro
+      - repo-data:/repo
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - MX_QUEUE_PROVIDER=memory
+    depends_on:
+      - init
+    profiles:
+      - plan
+
+  # Worker service - scalable workers
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    command: python -m worker.service
+    volumes:
+      - ./mx.config.json:/app/mx.config.json:ro
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - MX_QUEUE_PROVIDER=memory
+    deploy:
+      replicas: 3
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+    restart: unless-stopped
+    profiles:
+      - run
+
+  # Judge service - periodic evaluation
+  judge:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: python -m judge.service --repo /repo
+    volumes:
+      - ./:/app:ro
+      - repo-data:/repo
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - MX_QUEUE_PROVIDER=memory
+    restart: unless-stopped
+    profiles:
+      - run
+
+  # CLI for interactive use
+  cli:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: python -m cli.main status
+    volumes:
+      - ./:/app
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+    profiles:
+      - cli
+
+  # Initialize repo data
+  init:
+    image: alpine/git
+    command: sh -c "if [ ! -d /repo/.git ]; then git clone https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}.git /repo; fi"
+    volumes:
+      - repo-data:/repo
+    environment:
+      - GITHUB_OWNER=${GITHUB_OWNER:-owner}
+      - GITHUB_REPO=${GITHUB_REPO:-repo}
+    profiles:
+      - plan
+      - run
+
+volumes:
+  repo-data:
+
+networks:
+  default:
+    name: mx-swarm-network

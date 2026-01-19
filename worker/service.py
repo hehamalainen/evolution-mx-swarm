@@ -1,0 +1,633 @@
+"""Worker Service - The Ralph Wiggum Loop.
+
+Workers are the execution engines of MX Swarm:
+1. Pull TaskContract from queue
+2. Clone repo and checkout branch
+3. Implement changes using LLM
+4. Run acceptance checks
+5. Open PR with evidence pack
+6. Ack/Nack based on result
+"""
+
+import asyncio
+import json
+import os
+import signal
+import subprocess
+import tempfile
+import time
+import uuid
+from dataclasses import dataclass, field
+from datetime import datetime
+from typing import Optional
+
+from ..shared.schemas import (
+    TaskContract,
+    TaskType,
+    MergePolicy,
+    RiskLevel,
+)
+from ..shared.adapters import QueueAdapter, QueueMessage, create_queue_adapter
+from ..shared.utils import (
+    MXConfig,
+    LLMClient,
+    Message,
+    create_llm_client,
+    GitRepo,
+    GitHubAPI,
+)
+
+
+WORKER_SYSTEM_PROMPT = """You are an expert software engineer implementing tasks autonomously.
+
+When implementing a task:
+1. Read and understand the codebase structure
+2. Make minimal, focused changes
+3. Follow existing code style and patterns
+4. Add tests for new functionality
+5. Document complex logic with comments
+
+Guidelines:
+- Never modify files in do_not_touch list
+- Keep changes small and reviewable
+- Prefer simple solutions over clever ones
+- Ensure all tests pass before submitting
+
+When outputting code changes, use this format:
+```file:path/to/file.py
+<complete file content>
+```
+
+For each file you modify, output the COMPLETE new content."""
+
+
+@dataclass
+class WorkerMetrics:
+    """Worker execution metrics."""
+    tasks_processed: int = 0
+    tasks_succeeded: int = 0
+    tasks_failed: int = 0
+    prs_opened: int = 0
+    llm_calls: int = 0
+    total_tokens: int = 0
+    start_time: str = field(default_factory=lambda: datetime.utcnow().isoformat())
+
+
+@dataclass
+class EvidencePack:
+    """Evidence pack for PR description."""
+    task_id: str
+    task_goal: str
+    commands_run: list[tuple[str, bool, str]]  # (command, passed, output_summary)
+    files_changed: list[str]
+    verification_method: str
+    known_risks: list[str]
+
+    def to_markdown(self) -> str:
+        """Generate markdown for PR description."""
+        md = f"""## Evidence Pack
+
+**Task ID:** `{self.task_id}`
+**Goal:** {self.task_goal}
+
+### Commands Run
+| Command | Status | Summary |
+|---------|--------|---------|
+"""
+        for cmd, passed, summary in self.commands_run:
+            status = "✅ Pass" if passed else "❌ Fail"
+            md += f"| `{cmd[:50]}` | {status} | {summary[:100]} |\n"
+
+        md += f"""
+### Files Changed
+"""
+        for f in self.files_changed:
+            md += f"- `{f}`\n"
+
+        md += f"""
+### Verification
+{self.verification_method}
+
+### Known Risks
+"""
+        if self.known_risks:
+            for risk in self.known_risks:
+                md += f"- {risk}\n"
+        else:
+            md += "- No significant risks identified\n"
+
+        return md
+
+
+class Worker:
+    """
+    Worker service for MX Swarm.
+
+    Implements the "Ralph Wiggum Loop":
+    - Infinite loop with timeboxes
+    - Automatic retries
+    - Evidence-based PR creation
+    """
+
+    def __init__(
+        self,
+        config: MXConfig,
+        worker_id: Optional[str] = None,
+        queue: Optional[QueueAdapter] = None,
+        llm: Optional[LLMClient] = None,
+    ):
+        self.config = config
+        self.worker_id = worker_id or f"worker-{str(uuid.uuid4())[:8]}"
+        self.queue = queue or create_queue_adapter(config.queue.to_dict())
+        self.llm = llm or create_llm_client(config.llm.to_dict())
+        self.metrics = WorkerMetrics()
+        self._running = False
+        self._github: Optional[GitHubAPI] = None
+
+    @property
+    def github(self) -> GitHubAPI:
+        """Lazy-initialize GitHub API."""
+        if self._github is None:
+            token = self.config.github.token or os.environ.get("GITHUB_TOKEN")
+            if not token:
+                raise RuntimeError("GITHUB_TOKEN not configured")
+            self._github = GitHubAPI(
+                token=token,
+                owner=self.config.github.repo_owner,
+                repo=self.config.github.repo_name,
+            )
+        return self._github
+
+    async def initialize(self) -> None:
+        """Initialize worker connections."""
+        await self.queue.connect()
+
+    async def shutdown(self) -> None:
+        """Cleanup worker connections."""
+        self._running = False
+        await self.queue.disconnect()
+
+    def _get_repo_url(self) -> str:
+        """Get repository URL."""
+        owner = self.config.github.repo_owner
+        repo = self.config.github.repo_name
+        return f"https://github.com/{owner}/{repo}.git"
+
+    async def _read_file(self, repo: GitRepo, path: str) -> Optional[str]:
+        """Read file from repo."""
+        full_path = os.path.join(repo.local_path, path)
+        if os.path.exists(full_path):
+            with open(full_path) as f:
+                return f.read()
+        return None
+
+    async def _write_file(self, repo: GitRepo, path: str, content: str) -> None:
+        """Write file to repo."""
+        full_path = os.path.join(repo.local_path, path)
+        os.makedirs(os.path.dirname(full_path), exist_ok=True)
+        with open(full_path, "w") as f:
+            f.write(content)
+
+    async def _list_files(self, repo: GitRepo, pattern: str = "**/*") -> list[str]:
+        """List files in repo matching pattern."""
+        import glob
+        files = glob.glob(
+            os.path.join(repo.local_path, pattern),
+            recursive=True,
+        )
+        # Return relative paths
+        return [
+            os.path.relpath(f, repo.local_path)
+            for f in files
+            if os.path.isfile(f)
+        ]
+
+    async def _run_command(
+        self,
+        command: str,
+        cwd: str,
+        timeout: int = 300,
+    ) -> tuple[bool, str]:
+        """
+        Run shell command and return (success, output).
+        """
+        try:
+            proc = await asyncio.create_subprocess_shell(
+                command,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+                cwd=cwd,
+            )
+
+            stdout, _ = await asyncio.wait_for(
+                proc.communicate(),
+                timeout=timeout,
+            )
+
+            output = stdout.decode("utf-8", errors="replace")
+            success = proc.returncode == 0
+
+            return success, output[:5000]  # Truncate long outputs
+
+        except asyncio.TimeoutError:
+            return False, f"Command timed out after {timeout}s"
+        except Exception as e:
+            return False, f"Error: {str(e)}"
+
+    async def _get_codebase_context(self, repo: GitRepo, task: TaskContract) -> str:
+        """Build context about the codebase for LLM."""
+        context_parts = []
+
+        # List relevant files
+        if task.context.files_hint:
+            for path in task.context.files_hint[:5]:
+                content = await self._read_file(repo, path)
+                if content:
+                    context_parts.append(f"### {path}\n```\n{content[:3000]}\n```")
+
+        # Try to find key files
+        key_files = ["README.md", "pyproject.toml", "package.json", "setup.py"]
+        for key_file in key_files:
+            content = await self._read_file(repo, key_file)
+            if content:
+                context_parts.append(f"### {key_file}\n```\n{content[:2000]}\n```")
+                break
+
+        # List directory structure
+        all_files = await self._list_files(repo, "**/*.py")
+        all_files.extend(await self._list_files(repo, "**/*.ts"))
+        all_files.extend(await self._list_files(repo, "**/*.js"))
+
+        # Filter out common non-essential paths
+        filtered = [
+            f for f in all_files[:50]
+            if not any(x in f for x in ["node_modules", "__pycache__", ".git", "dist", "build"])
+        ]
+
+        if filtered:
+            context_parts.append(f"### File Structure\n```\n" + "\n".join(filtered[:30]) + "\n```")
+
+        return "\n\n".join(context_parts)
+
+    async def _implement_task(
+        self,
+        repo: GitRepo,
+        task: TaskContract,
+    ) -> tuple[list[str], str]:
+        """
+        Use LLM to implement the task.
+
+        Returns:
+            (list of changed files, implementation notes)
+        """
+        context = await self._get_codebase_context(repo, task)
+
+        # Read AGENTS.md for guidelines
+        agents_md = await self._read_file(repo, "AGENTS.md") or ""
+
+        prompt = f"""Implement this task:
+
+**Goal:** {task.goal}
+
+**Task Type:** {task.type.value}
+
+**Acceptance Criteria:**
+{chr(10).join(f'- {c}' for c in task.acceptance.criteria)}
+
+**Files to consider modifying:** {task.context.files_hint}
+**DO NOT modify these files:** {task.context.do_not_touch}
+
+**Agent Guidelines:**
+{agents_md[:2000]}
+
+**Codebase Context:**
+{context}
+
+Implement the task. For each file you create or modify, output:
+```file:path/to/file.ext
+<complete new file content>
+```
+
+After the implementation, provide a brief summary of what you did and any notes.
+"""
+
+        response = await self.llm.chat(
+            messages=[Message(role="user", content=prompt)],
+            system=WORKER_SYSTEM_PROMPT,
+            max_tokens=self.config.llm.max_tokens,
+            temperature=0.4,
+        )
+
+        self.metrics.llm_calls += 1
+        if hasattr(response, "usage"):
+            self.metrics.total_tokens += response.usage.get("input_tokens", 0)
+            self.metrics.total_tokens += response.usage.get("output_tokens", 0)
+
+        content = response.content
+
+        # Parse file changes
+        changed_files = []
+        import re
+        file_pattern = r'```file:([^\n]+)\n(.*?)```'
+        matches = re.findall(file_pattern, content, re.DOTALL)
+
+        for path, file_content in matches:
+            path = path.strip()
+
+            # Skip if in do_not_touch
+            if path in task.context.do_not_touch:
+                continue
+
+            await self._write_file(repo, path, file_content.strip())
+            changed_files.append(path)
+
+        # Extract notes (text after last code block)
+        parts = content.split("```")
+        notes = parts[-1].strip() if len(parts) > 1 else "Implementation complete."
+
+        return changed_files, notes
+
+    async def _run_acceptance_checks(
+        self,
+        repo: GitRepo,
+        task: TaskContract,
+    ) -> list[tuple[str, bool, str]]:
+        """Run acceptance check commands."""
+        results = []
+
+        for check in task.acceptance.checks:
+            passed, output = await self._run_command(
+                check,
+                cwd=repo.local_path,
+                timeout=120,
+            )
+
+            # Summarize output
+            lines = output.strip().split("\n")
+            summary = lines[-1] if lines else "No output"
+            if not passed and len(lines) > 1:
+                summary = f"{lines[0]}...{lines[-1]}"
+
+            results.append((check, passed, summary[:200]))
+
+        return results
+
+    async def _create_pr(
+        self,
+        repo: GitRepo,
+        task: TaskContract,
+        evidence: EvidencePack,
+        draft: bool = False,
+    ) -> Optional[dict]:
+        """Create pull request with evidence pack."""
+        # Generate PR title
+        task_type_emoji = {
+            TaskType.FEATURE: "✨",
+            TaskType.BUGFIX: "🐛",
+            TaskType.TEST: "🧪",
+            TaskType.REFACTOR: "♻️",
+            TaskType.OPS: "🔧",
+            TaskType.DOC: "📝",
+        }
+        emoji = task_type_emoji.get(task.type, "📦")
+        title = f"{emoji} [{task.id}] {task.goal[:60]}"
+
+        # Generate PR body
+        body = f"""## Task
+
+**ID:** `{task.id}`
+**Type:** {task.type.value}
+**Goal:** {task.goal}
+
+{evidence.to_markdown()}
+
+---
+*This PR was created automatically by MX Swarm Worker `{self.worker_id}`*
+"""
+
+        try:
+            pr = await self.github.create_pull_request(
+                title=title,
+                body=body,
+                head=task.branch_name(),
+                base=self.config.github.default_branch,
+                draft=draft,
+            )
+            self.metrics.prs_opened += 1
+            return pr
+        except Exception as e:
+            print(f"Failed to create PR: {e}")
+            return None
+
+    async def process_task(self, message: QueueMessage) -> bool:
+        """
+        Process a single task from queue.
+
+        Returns:
+            True if task completed successfully
+        """
+        # Parse task
+        task = TaskContract.from_json(message.body)
+        task.attempt_count = message.receive_count
+        task.assigned_worker = self.worker_id
+
+        print(f"[{self.worker_id}] Processing task {task.id}: {task.goal}")
+
+        # Clone repo
+        token = self.config.github.token or os.environ.get("GITHUB_TOKEN")
+        repo = GitRepo(
+            repo_url=self._get_repo_url(),
+            token=token,
+        )
+
+        try:
+            # Clone and checkout branch
+            result = await repo.clone(
+                branch=self.config.github.default_branch,
+                depth=1,
+            )
+            if not result.success:
+                raise RuntimeError(f"Clone failed: {result.stderr}")
+
+            # Create task branch
+            branch_name = task.branch_name()
+            await repo.checkout(branch_name, create=True)
+
+            # Implement the task
+            changed_files, notes = await self._implement_task(repo, task)
+
+            if not changed_files:
+                print(f"[{self.worker_id}] No changes made for task {task.id}")
+                await self.queue.ack(message.receipt_handle)
+                return True
+
+            # Run acceptance checks
+            check_results = await self._run_acceptance_checks(repo, task)
+            all_passed = all(passed for _, passed, _ in check_results)
+
+            # Determine risks
+            risks = []
+            if task.constraints.risk == RiskLevel.HIGH:
+                risks.append("High-risk task - requires careful review")
+            if any("TODO" in f for f in changed_files):
+                risks.append("Contains TODO markers")
+
+            # Create evidence pack
+            evidence = EvidencePack(
+                task_id=task.id,
+                task_goal=task.goal,
+                commands_run=check_results,
+                files_changed=changed_files,
+                verification_method=notes,
+                known_risks=risks,
+            )
+
+            # Stage and commit changes
+            await repo.add()
+            commit_msg = f"[{task.id}] {task.goal}\n\n{notes[:500]}"
+            await repo.commit(
+                message=commit_msg,
+                author="MX Swarm <mx-swarm@automated.local>",
+            )
+
+            # Push branch
+            push_result = await repo.push(branch_name)
+            if not push_result.success:
+                raise RuntimeError(f"Push failed: {push_result.stderr}")
+
+            # Create PR
+            draft = not all_passed  # Draft if checks failed
+            pr = await self._create_pr(repo, task, evidence, draft=draft)
+
+            if pr:
+                print(f"[{self.worker_id}] Created PR #{pr.get('number')} for task {task.id}")
+
+            # Success
+            await self.queue.ack(message.receipt_handle)
+            self.metrics.tasks_succeeded += 1
+            return True
+
+        except Exception as e:
+            print(f"[{self.worker_id}] Task {task.id} failed: {e}")
+            task.last_error = str(e)
+
+            # Nack with delay for retry
+            if task.attempt_count < task.constraints.retry_max:
+                delay = min(30 * (2 ** task.attempt_count), 300)  # Exponential backoff
+                await self.queue.nack(message.receipt_handle, delay=delay)
+            else:
+                # Max retries exceeded - acknowledge to remove from queue
+                # In production, would move to dead letter queue
+                await self.queue.ack(message.receipt_handle)
+                print(f"[{self.worker_id}] Task {task.id} exceeded max retries")
+
+            self.metrics.tasks_failed += 1
+            return False
+
+        finally:
+            repo.cleanup()
+            self.metrics.tasks_processed += 1
+
+    async def run_once(self) -> bool:
+        """
+        Process one task from queue.
+
+        Returns:
+            True if a task was processed
+        """
+        messages = await self.queue.receive(
+            max_messages=1,
+            visibility_timeout=self.config.worker.visibility_timeout_seconds,
+        )
+
+        if not messages:
+            return False
+
+        return await self.process_task(messages[0])
+
+    async def run_loop(self) -> None:
+        """
+        Run the Ralph Wiggum Loop - infinite worker loop.
+
+        Polls for tasks and processes them until stopped.
+        """
+        self._running = True
+        print(f"[{self.worker_id}] Starting worker loop")
+
+        while self._running:
+            # Check if paused
+            try:
+                config = MXConfig.load()
+                if config.paused:
+                    print(f"[{self.worker_id}] Paused, waiting...")
+                    await asyncio.sleep(30)
+                    continue
+            except Exception:
+                pass
+
+            # Process task
+            processed = await self.run_once()
+
+            if not processed:
+                # No task available, wait before polling again
+                await asyncio.sleep(self.config.worker.poll_interval_seconds)
+
+        print(f"[{self.worker_id}] Worker loop stopped")
+
+    async def run(self) -> WorkerMetrics:
+        """
+        Main entry point - initialize, run loop, cleanup.
+
+        Returns:
+            Worker metrics
+        """
+        await self.initialize()
+
+        # Handle graceful shutdown
+        loop = asyncio.get_event_loop()
+
+        def signal_handler():
+            print(f"\n[{self.worker_id}] Shutdown signal received")
+            self._running = False
+
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            try:
+                loop.add_signal_handler(sig, signal_handler)
+            except NotImplementedError:
+                pass  # Windows doesn't support add_signal_handler
+
+        try:
+            await self.run_loop()
+        finally:
+            await self.shutdown()
+
+        return self.metrics
+
+
+async def main():
+    """CLI entry point for worker."""
+    import argparse
+
+    parser = argparse.ArgumentParser(description="MX Swarm Worker")
+    parser.add_argument("--config", default="mx.config.json", help="Config file path")
+    parser.add_argument("--worker-id", help="Worker ID (auto-generated if not set)")
+    parser.add_argument("--once", action="store_true", help="Process one task and exit")
+    args = parser.parse_args()
+
+    config = MXConfig.load(args.config)
+    worker = Worker(config, worker_id=args.worker_id)
+
+    if args.once:
+        await worker.initialize()
+        try:
+            result = await worker.run_once()
+            print(f"Processed: {result}")
+        finally:
+            await worker.shutdown()
+    else:
+        metrics = await worker.run()
+        print(f"\nWorker metrics: {metrics}")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

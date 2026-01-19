@@ -1,0 +1,103 @@
+name: MX Swarm
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Action to perform'
+        required: true
+        default: 'run'
+        type: choice
+        options:
+          - run
+          - plan
+          - status
+          - judge
+          - pause
+          - resume
+      max_workers:
+        description: 'Maximum number of workers (for run action)'
+        required: false
+        default: '5'
+        type: string
+      force_replan:
+        description: 'Force replanning (for plan action)'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+jobs:
+  swarm-action:
+    name: MX Swarm - ${{ github.event.inputs.action }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 480  # 8 hours max
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install MX Swarm
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r mx-swarm/requirements.txt || true
+          pip install anthropic httpx
+
+      - name: Configure Git
+        run: |
+          git config user.name "MX Swarm"
+          git config user.email "mx-swarm@automated.local"
+
+      - name: Run MX Swarm
+        working-directory: mx-swarm
+        run: |
+          case "${{ github.event.inputs.action }}" in
+            run)
+              python -m cli.main run --workers ${{ github.event.inputs.max_workers }}
+              ;;
+            plan)
+              if [ "${{ github.event.inputs.force_replan }}" = "true" ]; then
+                python -m cli.main plan --force
+              else
+                python -m cli.main plan
+              fi
+              ;;
+            status)
+              python -m cli.main status
+              ;;
+            judge)
+              python -m cli.main judge
+              ;;
+            pause)
+              python -m cli.main pause
+              ;;
+            resume)
+              python -m cli.main resume
+              ;;
+          esac
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mx-swarm-artifacts
+          path: |
+            SPEC.json
+            JUDGE_REPORT.md
+            mx.config.json
+          retention-days: 30
+
+      - name: Commit changes
+        if: always()
+        run: |
+          git add -A
+          git diff --staged --quiet || git commit -m "MX Swarm: ${{ github.event.inputs.action }} action completed"
+          git push || echo "No changes to push"

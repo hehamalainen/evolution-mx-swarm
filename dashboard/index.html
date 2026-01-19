@@ -1,0 +1,1177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MX Swarm Dashboard</title>
+    <style>
+        :root {
+            --bg-primary: #0f1419;
+            --bg-secondary: #1a1f2e;
+            --bg-card: #232b3e;
+            --text-primary: #e8eaed;
+            --text-secondary: #9aa0a6;
+            --accent-blue: #4a9eff;
+            --accent-green: #34d399;
+            --accent-yellow: #fbbf24;
+            --accent-red: #f87171;
+            --accent-orange: #fb923c;
+            --accent-purple: #a78bfa;
+            --border-color: #2d3748;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+        }
+
+        .header {
+            background: var(--bg-secondary);
+            padding: 1rem 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .logo-icon {
+            width: 32px;
+            height: 32px;
+            background: linear-gradient(135deg, var(--accent-blue), var(--accent-green));
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 0.75rem;
+        }
+
+        .logo-text {
+            font-size: 1.25rem;
+            font-weight: 600;
+        }
+
+        .header-actions {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .btn {
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            border: none;
+            cursor: pointer;
+            font-size: 0.875rem;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+
+        .btn-primary {
+            background: var(--accent-blue);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #3a8aee;
+        }
+
+        .btn-danger {
+            background: var(--accent-red);
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: #e55b5b;
+        }
+
+        .btn-secondary {
+            background: var(--bg-card);
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+        }
+
+        .btn-secondary:hover {
+            background: var(--border-color);
+        }
+
+        .btn-success {
+            background: var(--accent-green);
+            color: white;
+        }
+
+        .btn-warning {
+            background: var(--accent-yellow);
+            color: #1a1f2e;
+        }
+
+        .btn-warning:hover {
+            background: #e0a821;
+        }
+
+        .main {
+            padding: 1.5rem 2rem;
+        }
+
+        /* Credibility Tiles Row */
+        .credibility-tiles {
+            display: grid;
+            grid-template-columns: repeat(6, 1fr);
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .cred-tile {
+            background: var(--bg-card);
+            border-radius: 12px;
+            padding: 1rem;
+            border: 1px solid var(--border-color);
+            text-align: center;
+        }
+
+        .cred-tile-header {
+            font-size: 0.7rem;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 0.5rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+        }
+
+        .cred-tile-value {
+            font-size: 1.75rem;
+            font-weight: 700;
+            margin-bottom: 0.25rem;
+        }
+
+        .cred-tile-sub {
+            font-size: 0.7rem;
+            color: var(--text-secondary);
+        }
+
+        .cred-tile-value.green { color: var(--accent-green); }
+        .cred-tile-value.yellow { color: var(--accent-yellow); }
+        .cred-tile-value.red { color: var(--accent-red); }
+        .cred-tile-value.blue { color: var(--accent-blue); }
+        .cred-tile-value.purple { color: var(--accent-purple); }
+
+        .gov-badge {
+            display: inline-block;
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+
+        .gov-normal { background: rgba(52, 211, 153, 0.2); color: var(--accent-green); }
+        .gov-throttled { background: rgba(251, 191, 36, 0.2); color: var(--accent-yellow); }
+        .gov-frozen { background: rgba(248, 113, 113, 0.2); color: var(--accent-red); }
+
+        /* Main grid */
+        .content-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1.5rem;
+        }
+
+        .card {
+            background: var(--bg-card);
+            border-radius: 12px;
+            padding: 1.25rem;
+            border: 1px solid var(--border-color);
+        }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+
+        .card-title {
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .card-badge {
+            background: var(--bg-secondary);
+            padding: 0.25rem 0.75rem;
+            border-radius: 20px;
+            font-size: 0.75rem;
+        }
+
+        .stat-large {
+            font-size: 2.5rem;
+            font-weight: 700;
+            margin-bottom: 0.25rem;
+        }
+
+        .stat-sub {
+            color: var(--text-secondary);
+            font-size: 0.875rem;
+        }
+
+        .progress-bar {
+            height: 8px;
+            background: var(--bg-secondary);
+            border-radius: 4px;
+            margin-top: 1rem;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--accent-blue), var(--accent-green));
+            border-radius: 4px;
+            transition: width 0.5s ease;
+        }
+
+        .status-indicator {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.25rem 0.75rem;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 500;
+        }
+
+        .status-running {
+            background: rgba(52, 211, 153, 0.2);
+            color: var(--accent-green);
+        }
+
+        .status-paused {
+            background: rgba(251, 191, 36, 0.2);
+            color: var(--accent-yellow);
+        }
+
+        .status-stopped {
+            background: rgba(248, 113, 113, 0.2);
+            color: var(--accent-red);
+        }
+
+        .dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: currentColor;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .full-width {
+            grid-column: 1 / -1;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th, td {
+            padding: 0.75rem;
+            text-align: left;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        th {
+            color: var(--text-secondary);
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            font-weight: 500;
+        }
+
+        .task-status {
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.7rem;
+            font-weight: 500;
+        }
+
+        .task-status.done, .task-status.completed {
+            background: rgba(52, 211, 153, 0.2);
+            color: var(--accent-green);
+        }
+
+        .task-status.review, .task-status.in_progress {
+            background: rgba(251, 191, 36, 0.2);
+            color: var(--accent-yellow);
+        }
+
+        .task-status.progress {
+            background: rgba(74, 158, 255, 0.2);
+            color: var(--accent-blue);
+        }
+
+        .task-status.pending {
+            background: rgba(154, 160, 166, 0.2);
+            color: var(--text-secondary);
+        }
+
+        .risk-badge {
+            padding: 0.2rem 0.4rem;
+            border-radius: 3px;
+            font-size: 0.65rem;
+            font-weight: 600;
+        }
+
+        .risk-0 { background: rgba(52, 211, 153, 0.2); color: var(--accent-green); }
+        .risk-1 { background: rgba(251, 191, 36, 0.2); color: var(--accent-yellow); }
+        .risk-2 { background: rgba(248, 113, 113, 0.2); color: var(--accent-red); }
+
+        .task-progress {
+            width: 60px;
+            height: 6px;
+            background: var(--bg-secondary);
+            border-radius: 3px;
+            overflow: hidden;
+        }
+
+        .task-progress-fill {
+            height: 100%;
+            background: var(--accent-blue);
+            border-radius: 3px;
+        }
+
+        .logs-container {
+            max-height: 250px;
+            overflow-y: auto;
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 0.75rem;
+        }
+
+        .log-entry {
+            padding: 0.4rem 0.5rem;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            gap: 0.75rem;
+            align-items: center;
+        }
+
+        .log-time {
+            color: var(--text-secondary);
+            min-width: 55px;
+            font-size: 0.7rem;
+        }
+
+        .log-type {
+            min-width: 85px;
+            font-size: 0.65rem;
+            padding: 0.15rem 0.4rem;
+            border-radius: 3px;
+            text-align: center;
+        }
+
+        .log-type.task { background: rgba(74, 158, 255, 0.2); color: var(--accent-blue); }
+        .log-type.pr { background: rgba(167, 139, 250, 0.2); color: var(--accent-purple); }
+        .log-type.ci { background: rgba(52, 211, 153, 0.2); color: var(--accent-green); }
+        .log-type.gov { background: rgba(251, 191, 36, 0.2); color: var(--accent-yellow); }
+        .log-type.judge { background: rgba(251, 146, 60, 0.2); color: var(--accent-orange); }
+        .log-type.sys { background: rgba(154, 160, 166, 0.2); color: var(--text-secondary); }
+
+        .log-level {
+            min-width: 16px;
+        }
+
+        .log-level.info { color: var(--accent-blue); }
+        .log-level.warn { color: var(--accent-yellow); }
+        .log-level.error { color: var(--accent-red); }
+
+        .log-message {
+            flex: 1;
+            color: var(--text-primary);
+        }
+
+        .controls-row {
+            display: flex;
+            gap: 0.5rem;
+            margin-top: 1rem;
+        }
+
+        .control-group {
+            background: var(--bg-secondary);
+            padding: 1rem;
+            border-radius: 8px;
+        }
+
+        .control-label {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            margin-bottom: 0.5rem;
+        }
+
+        .control-input {
+            width: 100%;
+            padding: 0.5rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            color: var(--text-primary);
+            font-size: 0.875rem;
+        }
+
+        .control-input:focus {
+            outline: none;
+            border-color: var(--accent-blue);
+        }
+
+        .slider-container {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .slider {
+            flex: 1;
+            -webkit-appearance: none;
+            height: 6px;
+            background: var(--bg-secondary);
+            border-radius: 3px;
+        }
+
+        .slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 18px;
+            height: 18px;
+            background: var(--accent-blue);
+            border-radius: 50%;
+            cursor: pointer;
+        }
+
+        .slider-value {
+            min-width: 40px;
+            text-align: right;
+            font-weight: 600;
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.7);
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+
+        .modal.active {
+            display: flex;
+        }
+
+        .modal-content {
+            background: var(--bg-card);
+            padding: 2rem;
+            border-radius: 12px;
+            max-width: 500px;
+            width: 90%;
+        }
+
+        .modal-title {
+            font-size: 1.25rem;
+            margin-bottom: 1rem;
+        }
+
+        .modal-actions {
+            display: flex;
+            gap: 1rem;
+            margin-top: 1.5rem;
+            justify-content: flex-end;
+        }
+
+        .metric-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 0.75rem;
+            margin-top: 1rem;
+        }
+
+        .metric-item {
+            text-align: center;
+        }
+
+        .metric-value {
+            font-size: 1.25rem;
+            font-weight: 600;
+        }
+
+        .metric-label {
+            font-size: 0.7rem;
+            color: var(--text-secondary);
+        }
+
+        .connected-dot {
+            width: 8px;
+            height: 8px;
+            background: var(--accent-green);
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 0.5rem;
+        }
+
+        .disconnected-dot {
+            width: 8px;
+            height: 8px;
+            background: var(--accent-red);
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 0.5rem;
+        }
+
+        /* DoD checklist */
+        .dod-checklist {
+            display: flex;
+            gap: 0.75rem;
+            margin-top: 0.5rem;
+        }
+
+        .dod-item {
+            display: flex;
+            align-items: center;
+            gap: 0.25rem;
+            font-size: 0.7rem;
+        }
+
+        .dod-icon {
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.6rem;
+        }
+
+        .dod-icon.passing { background: var(--accent-green); color: white; }
+        .dod-icon.pending { background: var(--text-secondary); color: white; }
+        .dod-icon.failing { background: var(--accent-red); color: white; }
+
+        /* Mini chart placeholder */
+        .mini-chart {
+            height: 40px;
+            display: flex;
+            align-items: flex-end;
+            gap: 2px;
+            margin-top: 0.5rem;
+        }
+
+        .mini-bar {
+            flex: 1;
+            background: var(--accent-blue);
+            border-radius: 2px 2px 0 0;
+            opacity: 0.7;
+        }
+
+        @media (max-width: 1400px) {
+            .credibility-tiles {
+                grid-template-columns: repeat(3, 1fr);
+            }
+        }
+
+        @media (max-width: 900px) {
+            .credibility-tiles {
+                grid-template-columns: repeat(2, 1fr);
+            }
+            .content-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <div class="logo">
+            <div class="logo-icon">MX</div>
+            <span class="logo-text">MX Swarm Dashboard</span>
+            <span id="connection-status" class="status-indicator status-stopped">
+                <span class="disconnected-dot"></span>
+                Connecting...
+            </span>
+        </div>
+        <div class="header-actions">
+            <button class="btn btn-secondary" onclick="openConfigModal()">Settings</button>
+            <button class="btn btn-warning" onclick="throttleSwarm()">Throttle</button>
+            <button class="btn btn-secondary" onclick="resetSwarm()">Reset</button>
+            <button class="btn btn-primary" onclick="igniteSwarm()">Ignite Swarm</button>
+            <button class="btn btn-danger" onclick="emergencyStop()">Stop</button>
+        </div>
+    </header>
+
+    <main class="main">
+        <!-- 6 Credibility Tiles -->
+        <div class="credibility-tiles">
+            <!-- Agents Online -->
+            <div class="cred-tile">
+                <div class="cred-tile-header">Agents Online</div>
+                <div class="cred-tile-value green" id="agents-active">0</div>
+                <div class="cred-tile-sub"><span id="agents-idle">0</span> idle / <span id="agents-max">0</span> max</div>
+            </div>
+
+            <!-- CI Health -->
+            <div class="cred-tile">
+                <div class="cred-tile-header">CI Health</div>
+                <div class="cred-tile-value" id="ci-health-value">100%</div>
+                <div class="cred-tile-sub"><span id="ci-passes">0</span> pass / <span id="ci-fails">0</span> fail</div>
+                <div class="mini-chart" id="ci-health-chart"></div>
+            </div>
+
+            <!-- PR Throughput -->
+            <div class="cred-tile">
+                <div class="cred-tile-header">PR Throughput</div>
+                <div class="cred-tile-value blue" id="prs-merged">0</div>
+                <div class="cred-tile-sub"><span id="prs-open">0</span> open / <span id="prs-hour">0</span>/hr</div>
+            </div>
+
+            <!-- Governor State -->
+            <div class="cred-tile">
+                <div class="cred-tile-header">Governor State</div>
+                <div id="governor-badge" class="gov-badge gov-normal">NORMAL</div>
+                <div class="cred-tile-sub" style="margin-top: 0.5rem;">
+                    PR: <span id="gov-pr-current">0</span>/<span id="gov-pr-cap">25</span> |
+                    /hr: <span id="gov-hour-used">0</span>/<span id="gov-hour-cap">15</span>
+                </div>
+            </div>
+
+            <!-- SPEC/DoD -->
+            <div class="cred-tile">
+                <div class="cred-tile-header">SPEC Progress</div>
+                <div class="cred-tile-value purple" id="spec-percent">0%</div>
+                <div class="dod-checklist">
+                    <div class="dod-item">
+                        <span class="dod-icon pending" id="dod-tests">-</span>
+                        <span>E2E</span>
+                    </div>
+                    <div class="dod-item">
+                        <span class="dod-icon pending" id="dod-security">-</span>
+                        <span>Sec</span>
+                    </div>
+                    <div class="dod-item">
+                        <span class="dod-icon pending" id="dod-staging">-</span>
+                        <span>Stage</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Burn Rate -->
+            <div class="cred-tile">
+                <div class="cred-tile-header">Burn Rate</div>
+                <div class="cred-tile-value" id="burn-rate">$0/hr</div>
+                <div class="cred-tile-sub">
+                    $<span id="spent-total">0</span> / $<span id="daily-cap">50</span>
+                    <span id="cap-eta" style="color: var(--accent-yellow);"></span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Content Grid -->
+        <div class="content-grid">
+            <!-- Swarm Control -->
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-title">Swarm Control</span>
+                    <span id="swarm-status" class="status-indicator status-stopped">
+                        <span class="dot"></span>
+                        Stopped
+                    </span>
+                </div>
+                <div class="stat-large"><span id="active-workers">0</span> / <span id="max-workers">0</span></div>
+                <div class="stat-sub">Active Workers</div>
+                <div class="progress-bar">
+                    <div id="worker-progress" class="progress-fill" style="width: 0%"></div>
+                </div>
+                <div class="slider-container" style="margin-top: 1rem;">
+                    <input type="range" class="slider" id="worker-slider" min="1" max="100" value="10" onchange="scaleWorkers(this.value)">
+                    <span class="slider-value" id="worker-slider-value">10</span>
+                </div>
+                <div class="controls-row">
+                    <button class="btn btn-secondary" onclick="pauseSwarm()">Pause</button>
+                    <button class="btn btn-success" onclick="resumeSwarm()">Resume</button>
+                </div>
+            </div>
+
+            <!-- Task Queue & Metrics -->
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-title">Task Queue</span>
+                    <span class="card-badge" id="queue-depth">0 pending</span>
+                </div>
+                <div class="metric-grid">
+                    <div class="metric-item">
+                        <div class="metric-value" id="tasks-completed">0</div>
+                        <div class="metric-label">Completed</div>
+                    </div>
+                    <div class="metric-item">
+                        <div class="metric-value" id="tasks-failed">0</div>
+                        <div class="metric-label">Failed</div>
+                    </div>
+                    <div class="metric-item">
+                        <div class="metric-value" id="tasks-tier0">0</div>
+                        <div class="metric-label">Low Risk</div>
+                    </div>
+                    <div class="metric-item">
+                        <div class="metric-value" id="tasks-tier2">0</div>
+                        <div class="metric-label">High Risk</div>
+                    </div>
+                </div>
+                <div class="control-group" style="margin-top: 1rem;">
+                    <div class="control-label">Daily Budget Cap ($)</div>
+                    <input type="number" class="control-input" id="budget-input" value="50" onchange="updateBudget(this.value)">
+                </div>
+            </div>
+
+            <!-- Active Task Contracts -->
+            <div class="card full-width">
+                <div class="card-header">
+                    <span class="card-title">Active Task Contracts</span>
+                    <span class="card-badge"><span id="task-count">0</span> Total</span>
+                </div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Spec-Ref</th>
+                            <th>Goal</th>
+                            <th>Worker</th>
+                            <th>Risk</th>
+                            <th>Status</th>
+                            <th>Progress</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tasks-table">
+                        <tr>
+                            <td colspan="7" style="text-align: center; color: var(--text-secondary);">No active tasks</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- System Logs -->
+            <div class="card full-width">
+                <div class="card-header">
+                    <span class="card-title">Event Stream</span>
+                    <div style="display: flex; gap: 0.5rem; align-items: center;">
+                        <span class="log-type task">TASK</span>
+                        <span class="log-type pr">PR</span>
+                        <span class="log-type ci">CI</span>
+                        <span class="log-type gov">GOV</span>
+                        <span class="log-type judge">JUDGE</span>
+                        <span class="log-type sys">SYS</span>
+                    </div>
+                </div>
+                <div class="logs-container" id="logs-container">
+                    <!-- Logs will be inserted here -->
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Config Modal -->
+    <div class="modal" id="config-modal">
+        <div class="modal-content">
+            <h2 class="modal-title">Swarm Configuration</h2>
+            <div class="control-group">
+                <div class="control-label">LLM Provider</div>
+                <select class="control-input" id="config-llm-provider">
+                    <option value="anthropic">Anthropic (Claude)</option>
+                    <option value="openai">OpenAI (GPT)</option>
+                    <option value="ollama">Ollama (Local)</option>
+                </select>
+            </div>
+            <div class="control-group" style="margin-top: 1rem;">
+                <div class="control-label">Model</div>
+                <input type="text" class="control-input" id="config-llm-model" value="claude-sonnet-4-20250514">
+            </div>
+            <div class="control-group" style="margin-top: 1rem;">
+                <div class="control-label">Task Timebox (minutes)</div>
+                <input type="number" class="control-input" id="config-timebox" value="60">
+            </div>
+            <div class="control-group" style="margin-top: 1rem;">
+                <div class="control-label">Max Retries</div>
+                <input type="number" class="control-input" id="config-retries" value="3">
+            </div>
+            <div class="control-group" style="margin-top: 1rem;">
+                <div class="control-label">Judge Interval (minutes)</div>
+                <input type="number" class="control-input" id="config-judge-interval" value="60">
+            </div>
+            <div class="control-group" style="margin-top: 1rem;">
+                <label style="display: flex; align-items: center; gap: 0.5rem;">
+                    <input type="checkbox" id="config-auto-merge">
+                    Auto-merge low-risk PRs
+                </label>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="closeConfigModal()">Cancel</button>
+                <button class="btn btn-primary" onclick="saveConfig()">Save</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Ignite Modal -->
+    <div class="modal" id="ignite-modal">
+        <div class="modal-content">
+            <h2 class="modal-title">Ignite Swarm</h2>
+            <div class="control-group">
+                <label style="display: flex; align-items: center; gap: 0.5rem;">
+                    <input type="checkbox" id="ignite-auto" checked>
+                    Auto Mode (Agent Boss decides team size)
+                </label>
+            </div>
+            <div class="control-group" style="margin-top: 1rem;">
+                <div class="control-label">Max Workers (manual override)</div>
+                <input type="number" class="control-input" id="ignite-workers" value="10" placeholder="Leave empty for auto">
+            </div>
+            <div class="control-group" style="margin-top: 1rem;">
+                <div class="control-label">Budget Cap $ (manual override)</div>
+                <input type="number" class="control-input" id="ignite-budget" value="50" placeholder="Leave empty for auto">
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="closeIgniteModal()">Cancel</button>
+                <button class="btn btn-primary" onclick="confirmIgnite()">Ignite</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let ws = null;
+        let reconnectAttempts = 0;
+
+        // WebSocket connection
+        function connectWebSocket() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
+
+            ws.onopen = () => {
+                console.log('WebSocket connected');
+                reconnectAttempts = 0;
+                document.getElementById('connection-status').innerHTML = '<span class="connected-dot"></span> Connected';
+                document.getElementById('connection-status').className = 'status-indicator status-running';
+            };
+
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                if (data.type === 'status') {
+                    updateStatus(data.data);
+                } else if (data.type === 'log') {
+                    addLog(data.data);
+                }
+            };
+
+            ws.onclose = () => {
+                console.log('WebSocket disconnected');
+                document.getElementById('connection-status').innerHTML = '<span class="disconnected-dot"></span> Disconnected';
+                document.getElementById('connection-status').className = 'status-indicator status-stopped';
+
+                // Reconnect with backoff
+                if (reconnectAttempts < 10) {
+                    setTimeout(() => {
+                        reconnectAttempts++;
+                        connectWebSocket();
+                    }, Math.min(1000 * Math.pow(2, reconnectAttempts), 30000));
+                }
+            };
+
+            ws.onerror = (error) => {
+                console.error('WebSocket error:', error);
+            };
+
+            // Keep alive ping
+            setInterval(() => {
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send('ping');
+                }
+            }, 25000);
+        }
+
+        // Update dashboard with status
+        function updateStatus(status) {
+            // Agents tile
+            document.getElementById('agents-active').textContent = status.agents?.active_60s || 0;
+            document.getElementById('agents-idle').textContent = status.agents?.idle || 0;
+            document.getElementById('agents-max').textContent = status.agents?.max || 0;
+
+            // CI Health tile
+            const ciHealth = status.ci_health?.percent || 100;
+            document.getElementById('ci-health-value').textContent = ciHealth.toFixed(1) + '%';
+            document.getElementById('ci-health-value').className = 'cred-tile-value ' + (ciHealth >= 90 ? 'green' : ciHealth >= 70 ? 'yellow' : 'red');
+            document.getElementById('ci-passes').textContent = status.ci_health?.passes || 0;
+            document.getElementById('ci-fails').textContent = status.ci_health?.fails || 0;
+            updateCIChart(status.charts?.ci_health_trend || []);
+
+            // PR Throughput tile
+            document.getElementById('prs-merged').textContent = status.pr_throughput?.merged_total || 0;
+            document.getElementById('prs-open').textContent = status.pr_throughput?.open || 0;
+            document.getElementById('prs-hour').textContent = status.pr_throughput?.per_hour_rate || 0;
+
+            // Governor tile
+            const govState = status.governor?.state || 'NORMAL';
+            const govBadge = document.getElementById('governor-badge');
+            govBadge.textContent = govState;
+            govBadge.className = 'gov-badge gov-' + govState.toLowerCase();
+            document.getElementById('gov-pr-current').textContent = status.governor?.open_pr_current || 0;
+            document.getElementById('gov-pr-cap').textContent = status.governor?.open_pr_cap || 25;
+            document.getElementById('gov-hour-used').textContent = status.governor?.pr_hour_used || 0;
+            document.getElementById('gov-hour-cap').textContent = status.governor?.pr_hour_cap || 15;
+
+            // SPEC/DoD tile
+            document.getElementById('spec-percent').textContent = (status.spec_dod?.spec_percent || 0) + '%';
+            updateDoDIcon('dod-tests', status.spec_dod?.dod_status?.e2e_tests);
+            updateDoDIcon('dod-security', status.spec_dod?.dod_status?.security_scan);
+            updateDoDIcon('dod-staging', status.spec_dod?.dod_status?.staging_deploy);
+
+            // Burn Rate tile
+            document.getElementById('burn-rate').textContent = '$' + (status.budget?.burn_rate_hour || 0).toFixed(2) + '/hr';
+            document.getElementById('burn-rate').className = 'cred-tile-value ' + (status.budget?.percent > 80 ? 'red' : status.budget?.percent > 50 ? 'yellow' : 'green');
+            document.getElementById('spent-total').textContent = (status.budget?.spent_today || 0).toFixed(2);
+            document.getElementById('daily-cap').textContent = (status.budget?.daily_cap || 50).toFixed(0);
+            const eta = status.budget?.forecast_cap_eta;
+            document.getElementById('cap-eta').textContent = eta ? (' ETA ' + eta) : '';
+
+            // Swarm control
+            document.getElementById('active-workers').textContent = status.swarm?.active_workers || 0;
+            document.getElementById('max-workers').textContent = status.swarm?.max_workers || 0;
+            document.getElementById('worker-slider').value = status.swarm?.max_workers || 10;
+            document.getElementById('worker-slider-value').textContent = status.swarm?.max_workers || 10;
+
+            const workerPercent = status.swarm?.max_workers > 0 ? (status.swarm.active_workers / status.swarm.max_workers) * 100 : 0;
+            document.getElementById('worker-progress').style.width = workerPercent + '%';
+
+            const swarmStatus = document.getElementById('swarm-status');
+            if (status.swarm?.paused) {
+                swarmStatus.innerHTML = '<span class="dot"></span> Paused';
+                swarmStatus.className = 'status-indicator status-paused';
+            } else if ((status.swarm?.active_workers || 0) > 0) {
+                swarmStatus.innerHTML = '<span class="dot"></span> Running';
+                swarmStatus.className = 'status-indicator status-running';
+            } else {
+                swarmStatus.innerHTML = '<span class="dot"></span> Stopped';
+                swarmStatus.className = 'status-indicator status-stopped';
+            }
+
+            // Queue & Metrics
+            document.getElementById('queue-depth').textContent = (status.queue?.depth >= 0 ? status.queue.depth : '?') + ' pending';
+            document.getElementById('tasks-completed').textContent = status.tasks?.completed || 0;
+            document.getElementById('tasks-failed').textContent = status.tasks?.failed || 0;
+            document.getElementById('tasks-tier0').textContent = status.tasks?.tier_0 || 0;
+            document.getElementById('tasks-tier2').textContent = status.tasks?.tier_2 || 0;
+            document.getElementById('budget-input').value = status.budget?.daily_cap || 50;
+
+            // Tasks table
+            const tasksTable = document.getElementById('tasks-table');
+            const tasks = status.task_contracts || [];
+            document.getElementById('task-count').textContent = tasks.length;
+
+            if (tasks.length === 0) {
+                tasksTable.innerHTML = '<tr><td colspan="7" style="text-align: center; color: var(--text-secondary);">No active tasks</td></tr>';
+            } else {
+                tasksTable.innerHTML = tasks.map(task => `
+                    <tr>
+                        <td>#${(task.id || '').substring(0, 6).toUpperCase()}</td>
+                        <td style="font-family: monospace; font-size: 0.7rem;">${task.spec_ref || '-'}</td>
+                        <td>${(task.goal || '').substring(0, 40)}</td>
+                        <td>${task.worker || '-'}</td>
+                        <td><span class="risk-badge risk-${task.risk_tier || 0}">${['LOW', 'MED', 'HIGH'][task.risk_tier || 0]}</span></td>
+                        <td><span class="task-status ${(task.status || '').toLowerCase()}">${task.status || 'PENDING'}</span></td>
+                        <td>
+                            <div class="task-progress">
+                                <div class="task-progress-fill" style="width: ${task.progress || 0}%"></div>
+                            </div>
+                        </td>
+                    </tr>
+                `).join('');
+            }
+
+            // Config
+            if (status.config) {
+                document.getElementById('config-llm-provider').value = status.config.llm_provider || 'anthropic';
+                document.getElementById('config-llm-model').value = status.config.llm_model || 'claude-sonnet-4-20250514';
+                document.getElementById('config-timebox').value = status.config.timebox_minutes || 60;
+                document.getElementById('config-retries').value = status.config.retry_max || 3;
+                document.getElementById('config-judge-interval').value = status.config.judge_interval || 60;
+                document.getElementById('config-auto-merge').checked = status.config.auto_merge || false;
+            }
+        }
+
+        function updateDoDIcon(id, status) {
+            const icon = document.getElementById(id);
+            if (status === 'passing') {
+                icon.className = 'dod-icon passing';
+                icon.textContent = '✓';
+            } else if (status === 'failing') {
+                icon.className = 'dod-icon failing';
+                icon.textContent = '✗';
+            } else {
+                icon.className = 'dod-icon pending';
+                icon.textContent = '-';
+            }
+        }
+
+        function updateCIChart(data) {
+            const chart = document.getElementById('ci-health-chart');
+            if (!data || data.length === 0) {
+                data = [100, 100, 100, 100, 100];
+            }
+            // Show last 10 data points
+            const last10 = data.slice(-10);
+            chart.innerHTML = last10.map(v => `<div class="mini-bar" style="height: ${Math.max(5, v * 0.4)}px;"></div>`).join('');
+        }
+
+        // Get log type category
+        function getLogType(eventType) {
+            if (!eventType) return 'sys';
+            if (eventType.startsWith('TASK')) return 'task';
+            if (eventType.startsWith('PR')) return 'pr';
+            if (eventType.startsWith('CI')) return 'ci';
+            if (eventType.startsWith('GOV')) return 'gov';
+            if (eventType.startsWith('JUDGE')) return 'judge';
+            return 'sys';
+        }
+
+        // Add log entry
+        function addLog(log) {
+            const container = document.getElementById('logs-container');
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+
+            const logType = getLogType(log.event_type);
+            const levelIcon = log.level === 'info' ? 'i' : log.level === 'warn' ? '!' : 'x';
+
+            entry.innerHTML = `
+                <span class="log-time">${log.timestamp}</span>
+                <span class="log-type ${logType}">${log.event_type || 'SYS'}</span>
+                <span class="log-level ${log.level}">${levelIcon}</span>
+                <span class="log-message">${log.message}</span>
+            `;
+            container.appendChild(entry);
+            container.scrollTop = container.scrollHeight;
+
+            // Keep only last 100 logs in DOM
+            while (container.children.length > 100) {
+                container.removeChild(container.firstChild);
+            }
+        }
+
+        // API calls
+        async function apiCall(endpoint, method = 'POST', body = null) {
+            const options = {
+                method,
+                headers: { 'Content-Type': 'application/json' },
+            };
+            if (body) options.body = JSON.stringify(body);
+
+            const response = await fetch(`/api${endpoint}`, options);
+            return response.json();
+        }
+
+        async function scaleWorkers(value) {
+            document.getElementById('worker-slider-value').textContent = value;
+            await apiCall('/control/scale', 'POST', { max_workers: parseInt(value) });
+        }
+
+        async function updateBudget(value) {
+            await apiCall('/control/budget', 'POST', { daily_usd_cap: parseFloat(value) });
+        }
+
+        async function pauseSwarm() {
+            await apiCall('/control/pause');
+        }
+
+        async function resumeSwarm() {
+            await apiCall('/control/resume');
+        }
+
+        async function throttleSwarm() {
+            if (confirm('Throttle the swarm? This will halve workers and pause PR creation.')) {
+                await apiCall('/control/throttle');
+            }
+        }
+
+        async function resetSwarm() {
+            if (confirm('Reset the swarm? This will trigger replanning and restart workers.')) {
+                await apiCall('/control/reset');
+            }
+        }
+
+        async function emergencyStop() {
+            if (confirm('EMERGENCY STOP all workers?')) {
+                await apiCall('/control/stop');
+            }
+        }
+
+        function igniteSwarm() {
+            document.getElementById('ignite-modal').classList.add('active');
+        }
+
+        function closeIgniteModal() {
+            document.getElementById('ignite-modal').classList.remove('active');
+        }
+
+        async function confirmIgnite() {
+            const autoMode = document.getElementById('ignite-auto').checked;
+            const workers = document.getElementById('ignite-workers').value;
+            const budget = document.getElementById('ignite-budget').value;
+
+            await apiCall('/control/ignite', 'POST', {
+                auto_mode: autoMode,
+                max_workers: workers ? parseInt(workers) : null,
+                budget_usd: budget ? parseFloat(budget) : null,
+            });
+
+            closeIgniteModal();
+        }
+
+        function openConfigModal() {
+            document.getElementById('config-modal').classList.add('active');
+        }
+
+        function closeConfigModal() {
+            document.getElementById('config-modal').classList.remove('active');
+        }
+
+        async function saveConfig() {
+            await apiCall('/config/update', 'POST', {
+                llm_provider: document.getElementById('config-llm-provider').value,
+                llm_model: document.getElementById('config-llm-model').value,
+                timebox_minutes: parseInt(document.getElementById('config-timebox').value),
+                retry_max: parseInt(document.getElementById('config-retries').value),
+                judge_interval_minutes: parseInt(document.getElementById('config-judge-interval').value),
+                auto_merge_low_risk: document.getElementById('config-auto-merge').checked,
+            });
+            closeConfigModal();
+        }
+
+        // Initialize
+        connectWebSocket();
+
+        // Fetch initial status
+        fetch('/api/status')
+            .then(r => r.json())
+            .then(updateStatus)
+            .catch(console.error);
+    </script>
+</body>
+</html>

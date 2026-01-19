@@ -1,0 +1,33 @@
+{
+  "version": "1.0.0",
+  "queue": {
+    "provider": "memory"
+  },
+  "secrets": {
+    "provider": "env"
+  },
+  "llm": {
+    "provider": "anthropic",
+    "model": "claude-sonnet-4-20250514",
+    "max_tokens": 4096,
+    "temperature": 0.7
+  },
+  "worker": {
+    "max_workers": 5,
+    "timebox_minutes": 30,
+    "retry_max": 2
+  },
+  "judge": {
+    "interval_minutes": 5,
+    "failure_rate_threshold": 0.3
+  },
+  "github": {
+    "repo_owner": "hehamalainen",
+    "repo_name": "Evolution-Coding",
+    "default_branch": "main"
+  },
+  "budget": {
+    "daily_usd_cap": 10.0
+  },
+  "paused": false
+}

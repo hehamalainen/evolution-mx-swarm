@@ -1,0 +1,32 @@
+# Core dependencies
+anthropic>=0.34.0
+httpx>=0.25.0
+
+# Dashboard
+fastapi>=0.109.0
+uvicorn>=0.27.0
+websockets>=12.0
+
+# Cloud providers (optional - install as needed)
+# GCP
+# google-cloud-pubsub>=2.18.0
+# google-cloud-secret-manager>=2.16.0
+
+# Azure
+# azure-servicebus>=7.11.0
+# azure-keyvault-secrets>=4.7.0
+# azure-identity>=1.14.0
+
+# OpenAI (optional alternative LLM)
+# openai>=1.0.0
+
+# Development
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+pytest-cov>=4.1.0
+ruff>=0.1.0
+mypy>=1.5.0
+
+# Security scanning
+bandit>=1.7.0
+safety>=2.3.0

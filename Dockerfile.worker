@@ -1,0 +1,36 @@
+# Worker service Dockerfile
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
+
+# Install git (needed for repo operations)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create non-root user
+RUN groupadd --gid 1000 mx && \
+    useradd --uid 1000 --gid mx --shell /bin/bash --create-home mx
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+RUN chown -R mx:mx /app
+
+USER mx
+
+# Configure git for worker
+RUN git config --global user.name "MX Swarm Worker" && \
+    git config --global user.email "mx-worker@automated.local"
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD python -c "import sys; sys.exit(0)"
+
+# Run worker
+CMD ["python", "-m", "worker.service"]

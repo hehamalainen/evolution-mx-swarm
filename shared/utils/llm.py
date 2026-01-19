@@ -1,0 +1,370 @@
+"""LLM client utility for MX Swarm.
+
+Provides a unified interface for LLM interactions with support for:
+- Anthropic Claude
+- OpenAI GPT
+- Local models (ollama)
+"""
+
+from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
+from typing import Optional, AsyncIterator
+import json
+import os
+
+
+@dataclass
+class Message:
+    """Chat message."""
+    role: str  # "system", "user", "assistant"
+    content: str
+
+
+@dataclass
+class LLMResponse:
+    """Response from LLM."""
+    content: str
+    model: str
+    usage: dict = field(default_factory=dict)  # tokens used
+    stop_reason: Optional[str] = None
+
+
+class LLMClient(ABC):
+    """Abstract base class for LLM clients."""
+
+    @abstractmethod
+    async def chat(
+        self,
+        messages: list[Message],
+        max_tokens: int = 4096,
+        temperature: float = 0.7,
+        system: Optional[str] = None,
+    ) -> LLMResponse:
+        """
+        Send chat completion request.
+
+        Args:
+            messages: Conversation history
+            max_tokens: Maximum tokens in response
+            temperature: Sampling temperature
+            system: System prompt
+
+        Returns:
+            LLMResponse with generated content
+        """
+        pass
+
+    @abstractmethod
+    async def stream(
+        self,
+        messages: list[Message],
+        max_tokens: int = 4096,
+        temperature: float = 0.7,
+        system: Optional[str] = None,
+    ) -> AsyncIterator[str]:
+        """Stream response tokens."""
+        pass
+
+
+class AnthropicClient(LLMClient):
+    """Anthropic Claude client."""
+
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        model: str = "claude-sonnet-4-20250514",
+    ):
+        self.api_key = api_key or os.environ.get("ANTHROPIC_API_KEY")
+        self.model = model
+        self._client = None
+
+    async def _get_client(self):
+        if self._client is None:
+            try:
+                import anthropic
+            except ImportError:
+                raise ImportError("anthropic package required. Install with: pip install anthropic")
+            self._client = anthropic.AsyncAnthropic(api_key=self.api_key)
+        return self._client
+
+    async def chat(
+        self,
+        messages: list[Message],
+        max_tokens: int = 4096,
+        temperature: float = 0.7,
+        system: Optional[str] = None,
+    ) -> LLMResponse:
+        client = await self._get_client()
+
+        # Convert messages format
+        api_messages = [{"role": m.role, "content": m.content} for m in messages]
+
+        kwargs = {
+            "model": self.model,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "messages": api_messages,
+        }
+        if system:
+            kwargs["system"] = system
+
+        response = await client.messages.create(**kwargs)
+
+        return LLMResponse(
+            content=response.content[0].text,
+            model=response.model,
+            usage={
+                "input_tokens": response.usage.input_tokens,
+                "output_tokens": response.usage.output_tokens,
+            },
+            stop_reason=response.stop_reason,
+        )
+
+    async def stream(
+        self,
+        messages: list[Message],
+        max_tokens: int = 4096,
+        temperature: float = 0.7,
+        system: Optional[str] = None,
+    ) -> AsyncIterator[str]:
+        client = await self._get_client()
+
+        api_messages = [{"role": m.role, "content": m.content} for m in messages]
+
+        kwargs = {
+            "model": self.model,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "messages": api_messages,
+        }
+        if system:
+            kwargs["system"] = system
+
+        async with client.messages.stream(**kwargs) as stream:
+            async for text in stream.text_stream:
+                yield text
+
+
+class OpenAIClient(LLMClient):
+    """OpenAI GPT client."""
+
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        model: str = "gpt-4-turbo-preview",
+        base_url: Optional[str] = None,
+    ):
+        self.api_key = api_key or os.environ.get("OPENAI_API_KEY")
+        self.model = model
+        self.base_url = base_url
+        self._client = None
+
+    async def _get_client(self):
+        if self._client is None:
+            try:
+                from openai import AsyncOpenAI
+            except ImportError:
+                raise ImportError("openai package required. Install with: pip install openai")
+            kwargs = {"api_key": self.api_key}
+            if self.base_url:
+                kwargs["base_url"] = self.base_url
+            self._client = AsyncOpenAI(**kwargs)
+        return self._client
+
+    async def chat(
+        self,
+        messages: list[Message],
+        max_tokens: int = 4096,
+        temperature: float = 0.7,
+        system: Optional[str] = None,
+    ) -> LLMResponse:
+        client = await self._get_client()
+
+        api_messages = []
+        if system:
+            api_messages.append({"role": "system", "content": system})
+        api_messages.extend([{"role": m.role, "content": m.content} for m in messages])
+
+        response = await client.chat.completions.create(
+            model=self.model,
+            messages=api_messages,
+            max_tokens=max_tokens,
+            temperature=temperature,
+        )
+
+        choice = response.choices[0]
+        return LLMResponse(
+            content=choice.message.content,
+            model=response.model,
+            usage={
+                "input_tokens": response.usage.prompt_tokens,
+                "output_tokens": response.usage.completion_tokens,
+            },
+            stop_reason=choice.finish_reason,
+        )
+
+    async def stream(
+        self,
+        messages: list[Message],
+        max_tokens: int = 4096,
+        temperature: float = 0.7,
+        system: Optional[str] = None,
+    ) -> AsyncIterator[str]:
+        client = await self._get_client()
+
+        api_messages = []
+        if system:
+            api_messages.append({"role": "system", "content": system})
+        api_messages.extend([{"role": m.role, "content": m.content} for m in messages])
+
+        stream = await client.chat.completions.create(
+            model=self.model,
+            messages=api_messages,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            stream=True,
+        )
+
+        async for chunk in stream:
+            if chunk.choices[0].delta.content:
+                yield chunk.choices[0].delta.content
+
+
+class OllamaClient(LLMClient):
+    """Ollama local model client."""
+
+    def __init__(
+        self,
+        model: str = "llama3",
+        base_url: str = "http://localhost:11434",
+    ):
+        self.model = model
+        self.base_url = base_url
+
+    async def chat(
+        self,
+        messages: list[Message],
+        max_tokens: int = 4096,
+        temperature: float = 0.7,
+        system: Optional[str] = None,
+    ) -> LLMResponse:
+        try:
+            import httpx
+        except ImportError:
+            raise ImportError("httpx package required. Install with: pip install httpx")
+
+        api_messages = []
+        if system:
+            api_messages.append({"role": "system", "content": system})
+        api_messages.extend([{"role": m.role, "content": m.content} for m in messages])
+
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{self.base_url}/api/chat",
+                json={
+                    "model": self.model,
+                    "messages": api_messages,
+                    "stream": False,
+                    "options": {
+                        "num_predict": max_tokens,
+                        "temperature": temperature,
+                    },
+                },
+                timeout=300,
+            )
+            data = response.json()
+
+        return LLMResponse(
+            content=data["message"]["content"],
+            model=self.model,
+            usage={
+                "input_tokens": data.get("prompt_eval_count", 0),
+                "output_tokens": data.get("eval_count", 0),
+            },
+            stop_reason="stop",
+        )
+
+    async def stream(
+        self,
+        messages: list[Message],
+        max_tokens: int = 4096,
+        temperature: float = 0.7,
+        system: Optional[str] = None,
+    ) -> AsyncIterator[str]:
+        try:
+            import httpx
+        except ImportError:
+            raise ImportError("httpx package required. Install with: pip install httpx")
+
+        api_messages = []
+        if system:
+            api_messages.append({"role": "system", "content": system})
+        api_messages.extend([{"role": m.role, "content": m.content} for m in messages])
+
+        async with httpx.AsyncClient() as client:
+            async with client.stream(
+                "POST",
+                f"{self.base_url}/api/chat",
+                json={
+                    "model": self.model,
+                    "messages": api_messages,
+                    "stream": True,
+                    "options": {
+                        "num_predict": max_tokens,
+                        "temperature": temperature,
+                    },
+                },
+                timeout=300,
+            ) as response:
+                async for line in response.aiter_lines():
+                    if line:
+                        data = json.loads(line)
+                        if "message" in data and "content" in data["message"]:
+                            yield data["message"]["content"]
+
+
+def create_llm_client(config: dict) -> LLMClient:
+    """
+    Factory function to create LLM client based on config.
+
+    Config example:
+    {
+        "provider": "anthropic",  # or "openai", "ollama"
+        "model": "claude-sonnet-4-20250514",
+        "api_key": "...",  # optional, will use env var
+        "base_url": "..."  # optional, for custom endpoints
+    }
+    """
+    provider = config.get("provider", "anthropic")
+    model = config.get("model")
+    api_key = config.get("api_key")
+    base_url = config.get("base_url")
+
+    if provider == "anthropic":
+        kwargs = {}
+        if api_key:
+            kwargs["api_key"] = api_key
+        if model:
+            kwargs["model"] = model
+        return AnthropicClient(**kwargs)
+
+    elif provider == "openai":
+        kwargs = {}
+        if api_key:
+            kwargs["api_key"] = api_key
+        if model:
+            kwargs["model"] = model
+        if base_url:
+            kwargs["base_url"] = base_url
+        return OpenAIClient(**kwargs)
+
+    elif provider == "ollama":
+        kwargs = {}
+        if model:
+            kwargs["model"] = model
+        if base_url:
+            kwargs["base_url"] = base_url
+        return OllamaClient(**kwargs)
+
+    else:
+        raise ValueError(f"Unknown LLM provider: {provider}")
