@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -165,11 +166,25 @@
             color: var(--text-secondary);
         }
 
-        .cred-tile-value.green { color: var(--accent-green); }
-        .cred-tile-value.yellow { color: var(--accent-yellow); }
-        .cred-tile-value.red { color: var(--accent-red); }
-        .cred-tile-value.blue { color: var(--accent-blue); }
-        .cred-tile-value.purple { color: var(--accent-purple); }
+        .cred-tile-value.green {
+            color: var(--accent-green);
+        }
+
+        .cred-tile-value.yellow {
+            color: var(--accent-yellow);
+        }
+
+        .cred-tile-value.red {
+            color: var(--accent-red);
+        }
+
+        .cred-tile-value.blue {
+            color: var(--accent-blue);
+        }
+
+        .cred-tile-value.purple {
+            color: var(--accent-purple);
+        }
 
         .gov-badge {
             display: inline-block;
@@ -179,9 +194,20 @@
             font-weight: 600;
         }
 
-        .gov-normal { background: rgba(52, 211, 153, 0.2); color: var(--accent-green); }
-        .gov-throttled { background: rgba(251, 191, 36, 0.2); color: var(--accent-yellow); }
-        .gov-frozen { background: rgba(248, 113, 113, 0.2); color: var(--accent-red); }
+        .gov-normal {
+            background: rgba(52, 211, 153, 0.2);
+            color: var(--accent-green);
+        }
+
+        .gov-throttled {
+            background: rgba(251, 191, 36, 0.2);
+            color: var(--accent-yellow);
+        }
+
+        .gov-frozen {
+            background: rgba(248, 113, 113, 0.2);
+            color: var(--accent-red);
+        }
 
         /* Main grid */
         .content-grid {
@@ -278,8 +304,15 @@
         }
 
         @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.5; }
+
+            0%,
+            100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.5;
+            }
         }
 
         .full-width {
@@ -291,7 +324,8 @@
             border-collapse: collapse;
         }
 
-        th, td {
+        th,
+        td {
             padding: 0.75rem;
             text-align: left;
             border-bottom: 1px solid var(--border-color);
@@ -311,12 +345,14 @@
             font-weight: 500;
         }
 
-        .task-status.done, .task-status.completed {
+        .task-status.done,
+        .task-status.completed {
             background: rgba(52, 211, 153, 0.2);
             color: var(--accent-green);
         }
 
-        .task-status.review, .task-status.in_progress {
+        .task-status.review,
+        .task-status.in_progress {
             background: rgba(251, 191, 36, 0.2);
             color: var(--accent-yellow);
         }
@@ -338,9 +374,20 @@
             font-weight: 600;
         }
 
-        .risk-0 { background: rgba(52, 211, 153, 0.2); color: var(--accent-green); }
-        .risk-1 { background: rgba(251, 191, 36, 0.2); color: var(--accent-yellow); }
-        .risk-2 { background: rgba(248, 113, 113, 0.2); color: var(--accent-red); }
+        .risk-0 {
+            background: rgba(52, 211, 153, 0.2);
+            color: var(--accent-green);
+        }
+
+        .risk-1 {
+            background: rgba(251, 191, 36, 0.2);
+            color: var(--accent-yellow);
+        }
+
+        .risk-2 {
+            background: rgba(248, 113, 113, 0.2);
+            color: var(--accent-red);
+        }
 
         .task-progress {
             width: 60px;
@@ -385,20 +432,51 @@
             text-align: center;
         }
 
-        .log-type.task { background: rgba(74, 158, 255, 0.2); color: var(--accent-blue); }
-        .log-type.pr { background: rgba(167, 139, 250, 0.2); color: var(--accent-purple); }
-        .log-type.ci { background: rgba(52, 211, 153, 0.2); color: var(--accent-green); }
-        .log-type.gov { background: rgba(251, 191, 36, 0.2); color: var(--accent-yellow); }
-        .log-type.judge { background: rgba(251, 146, 60, 0.2); color: var(--accent-orange); }
-        .log-type.sys { background: rgba(154, 160, 166, 0.2); color: var(--text-secondary); }
+        .log-type.task {
+            background: rgba(74, 158, 255, 0.2);
+            color: var(--accent-blue);
+        }
+
+        .log-type.pr {
+            background: rgba(167, 139, 250, 0.2);
+            color: var(--accent-purple);
+        }
+
+        .log-type.ci {
+            background: rgba(52, 211, 153, 0.2);
+            color: var(--accent-green);
+        }
+
+        .log-type.gov {
+            background: rgba(251, 191, 36, 0.2);
+            color: var(--accent-yellow);
+        }
+
+        .log-type.judge {
+            background: rgba(251, 146, 60, 0.2);
+            color: var(--accent-orange);
+        }
+
+        .log-type.sys {
+            background: rgba(154, 160, 166, 0.2);
+            color: var(--text-secondary);
+        }
 
         .log-level {
             min-width: 16px;
         }
 
-        .log-level.info { color: var(--accent-blue); }
-        .log-level.warn { color: var(--accent-yellow); }
-        .log-level.error { color: var(--accent-red); }
+        .log-level.info {
+            color: var(--accent-blue);
+        }
+
+        .log-level.warn {
+            color: var(--accent-yellow);
+        }
+
+        .log-level.error {
+            color: var(--accent-red);
+        }
 
         .log-message {
             flex: 1;
@@ -474,7 +552,7 @@
             left: 0;
             width: 100%;
             height: 100%;
-            background: rgba(0,0,0,0.7);
+            background: rgba(0, 0, 0, 0.7);
             align-items: center;
             justify-content: center;
             z-index: 1000;
@@ -543,6 +621,73 @@
             margin-right: 0.5rem;
         }
 
+        /* PRD Drop Zone */
+        .prd-drop-zone {
+            border: 2px dashed var(--border-color);
+            border-radius: 12px;
+            padding: 2rem;
+            text-align: center;
+            margin-bottom: 1.5rem;
+            transition: all 0.3s;
+            cursor: pointer;
+            background: var(--bg-secondary);
+        }
+
+        .prd-drop-zone:hover {
+            border-color: var(--accent-blue);
+            background: rgba(74, 158, 255, 0.05);
+        }
+
+        .prd-drop-zone.drag-over {
+            border-color: var(--accent-green);
+            background: rgba(52, 211, 153, 0.1);
+            transform: scale(1.02);
+        }
+
+        .prd-drop-zone.has-prd {
+            border-color: var(--accent-green);
+            border-style: solid;
+            background: rgba(52, 211, 153, 0.05);
+        }
+
+        .prd-drop-icon {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+            opacity: 0.7;
+        }
+
+        .prd-drop-title {
+            font-size: 1.25rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+        }
+
+        .prd-drop-subtitle {
+            color: var(--text-secondary);
+            font-size: 0.875rem;
+        }
+
+        .prd-preview {
+            margin-top: 1rem;
+            padding: 1rem;
+            background: var(--bg-card);
+            border-radius: 8px;
+            text-align: left;
+            max-height: 150px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 0.75rem;
+            white-space: pre-wrap;
+            color: var(--text-secondary);
+        }
+
+        .prd-actions {
+            display: flex;
+            gap: 0.5rem;
+            justify-content: center;
+            margin-top: 1rem;
+        }
+
         /* DoD checklist */
         .dod-checklist {
             display: flex;
@@ -567,9 +712,20 @@
             font-size: 0.6rem;
         }
 
-        .dod-icon.passing { background: var(--accent-green); color: white; }
-        .dod-icon.pending { background: var(--text-secondary); color: white; }
-        .dod-icon.failing { background: var(--accent-red); color: white; }
+        .dod-icon.passing {
+            background: var(--accent-green);
+            color: white;
+        }
+
+        .dod-icon.pending {
+            background: var(--text-secondary);
+            color: white;
+        }
+
+        .dod-icon.failing {
+            background: var(--accent-red);
+            color: white;
+        }
 
         /* Mini chart placeholder */
         .mini-chart {
@@ -597,12 +753,14 @@
             .credibility-tiles {
                 grid-template-columns: repeat(2, 1fr);
             }
+
             .content-grid {
                 grid-template-columns: 1fr;
             }
         }
     </style>
 </head>
+
 <body>
     <header class="header">
         <div class="logo">
@@ -623,13 +781,69 @@
     </header>
 
     <main class="main">
+        <!-- PRD Drop Zone -->
+        <div class="prd-drop-zone" id="prd-drop-zone" onclick="document.getElementById('prd-file-input').click()">
+            <input type="file" id="prd-file-input" accept=".md,.txt" style="display: none"
+                onchange="handleFileSelect(event)">
+            <div id="prd-drop-content">
+                <div class="prd-drop-icon">📄</div>
+                <div class="prd-drop-title">Drop PRD Here to Start</div>
+                <div class="prd-drop-subtitle">Drag & drop a PRD.md file, or click to browse</div>
+            </div>
+            <div id="prd-loaded-content" style="display: none;">
+                <div style="display: flex; gap: 2rem; align-items: flex-start; text-align: left;">
+                    <!-- Left: PRD Preview -->
+                    <div style="flex: 1;">
+                        <div class="prd-drop-title" id="prd-filename" style="margin-bottom: 0.5rem;">📄 PRD Loaded</div>
+                        <div class="prd-preview" id="prd-preview"></div>
+                    </div>
+                    <!-- Right: Analysis Results -->
+                    <div id="prd-analysis" style="flex: 1; display: none;">
+                        <div class="prd-drop-title" style="margin-bottom: 0.5rem;">🤖 Agent Boss Analysis</div>
+                        <div style="background: var(--bg-card); padding: 1rem; border-radius: 8px;">
+                            <div
+                                style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; font-size: 0.85rem;">
+                                <div><span style="color: var(--text-secondary);">Complexity:</span> <strong
+                                        id="analysis-complexity">-</strong></div>
+                                <div><span style="color: var(--text-secondary);">Risk:</span> <strong
+                                        id="analysis-risk">-</strong></div>
+                                <div><span style="color: var(--text-secondary);">Workers:</span> <strong
+                                        id="analysis-workers">-</strong></div>
+                                <div><span style="color: var(--text-secondary);">Tasks:</span> <strong
+                                        id="analysis-tasks">-</strong></div>
+                                <div><span style="color: var(--text-secondary);">Budget:</span> <strong
+                                        id="analysis-budget">-</strong></div>
+                                <div><span style="color: var(--text-secondary);">Duration:</span> <strong
+                                        id="analysis-duration">-</strong></div>
+                            </div>
+                            <div style="margin-top: 0.75rem;">
+                                <span style="color: var(--text-secondary); font-size: 0.75rem;">Categories:</span>
+                                <div id="analysis-categories"
+                                    style="display: flex; flex-wrap: wrap; gap: 0.25rem; margin-top: 0.25rem;"></div>
+                            </div>
+                            <div style="margin-top: 0.75rem;">
+                                <span style="color: var(--text-secondary); font-size: 0.75rem;">Team Composition:</span>
+                                <div id="analysis-team" style="margin-top: 0.25rem; font-size: 0.8rem;"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="prd-actions">
+                    <button class="btn btn-secondary" onclick="clearPRD(event)">Clear</button>
+                    <button class="btn btn-primary" onclick="launchSwarm(event)" id="launch-btn" disabled>🚀 Launch
+                        Swarm</button>
+                </div>
+            </div>
+        </div>
+
         <!-- 6 Credibility Tiles -->
         <div class="credibility-tiles">
             <!-- Agents Online -->
             <div class="cred-tile">
                 <div class="cred-tile-header">Agents Online</div>
                 <div class="cred-tile-value green" id="agents-active">0</div>
-                <div class="cred-tile-sub"><span id="agents-idle">0</span> idle / <span id="agents-max">0</span> max</div>
+                <div class="cred-tile-sub"><span id="agents-idle">0</span> idle / <span id="agents-max">0</span> max
+                </div>
             </div>
 
             <!-- CI Health -->
@@ -688,6 +902,104 @@
             </div>
         </div>
 
+        <!-- Ops Report & Decisions Row -->
+        <div class="content-grid" style="margin-bottom: 1.5rem;">
+            <!-- Ops Reports -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title">📋 Ops Reports</div>
+                    <div style="display: flex; gap: 0.5rem;">
+                        <button class="btn btn-secondary" onclick="loadReports('hourly')"
+                            style="font-size: 0.7rem; padding: 0.2rem 0.5rem;">Hourly</button>
+                        <button class="btn btn-secondary" onclick="loadReports('daily')"
+                            style="font-size: 0.7rem; padding: 0.2rem 0.5rem;">Daily</button>
+                    </div>
+                </div>
+                <div id="report-viewer"
+                    style="height: 200px; overflow-y: auto; background: var(--bg-secondary); padding: 1rem; border-radius: 8px; font-size: 0.8rem; white-space: pre-wrap; font-family: monospace;">
+                    Select a report type to view...
+                </div>
+            </div>
+
+            <!-- Decisions Needed -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title">🗳️ Decisions Needed</div>
+                    <span class="card-badge" id="decision-count">1 Pending</span>
+                </div>
+                <div id="decisions-list" style="display: flex; flex-direction: column; gap: 0.75rem;">
+                    <!-- Mock Decision -->
+                    <div class="decision-item"
+                        style="background: var(--bg-secondary); padding: 1rem; border-radius: 8px; border-left: 3px solid var(--accent-yellow);">
+                        <div style="font-weight: 600; margin-bottom: 0.25rem;">💰 Budget Cap Approaching</div>
+                        <div style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.75rem;">
+                            Burn rate is high. Forecast to hit daily cap in 2 hours. Approve $50 increase?
+                        </div>
+                        <div style="display: flex; gap: 0.5rem;">
+                            <button class="btn btn-success" onclick="approveDecision('budget_increase')"
+                                style="font-size: 0.75rem; padding: 0.25rem 0.75rem;">Approve Increase</button>
+                            <button class="btn btn-secondary"
+                                style="font-size: 0.75rem; padding: 0.25rem 0.75rem;">Dismiss</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Telemetry Row: Worker Scaling, Governor Adjustments, Escalations -->
+        <div class="content-grid" style="margin-bottom: 1.5rem; grid-template-columns: 1fr 1fr 1fr;">
+            <!-- Worker Scaling Card -->
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-title">👷 Worker Scaling</span>
+                    <span class="card-badge" id="worker-status-badge">NORMAL</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 1.5rem; margin-bottom: 1rem;">
+                    <div style="text-align: center;">
+                        <div style="font-size: 2.5rem; font-weight: 700; color: var(--accent-blue);"
+                            id="workers-active-lg">0</div>
+                        <div style="font-size: 0.75rem; color: var(--text-secondary);">Active</div>
+                    </div>
+                    <div style="font-size: 2rem; color: var(--text-secondary);">/</div>
+                    <div style="text-align: center;">
+                        <div style="font-size: 2.5rem; font-weight: 700; color: var(--text-secondary);"
+                            id="workers-cap-lg">0</div>
+                        <div style="font-size: 0.75rem; color: var(--text-secondary);">Cap</div>
+                    </div>
+                </div>
+                <div class="progress-bar">
+                    <div id="worker-scale-progress" class="progress-fill" style="width: 0%"></div>
+                </div>
+                <div style="margin-top: 0.75rem; font-size: 0.75rem; color: var(--text-secondary);">
+                    Target: <span id="workers-target">0</span> | Pending Scale: <span id="workers-pending">0</span>
+                </div>
+            </div>
+
+            <!-- Governor Adjustments Feed -->
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-title">⚙️ Governor Adjustments</span>
+                    <span class="card-badge" id="gov-adjustments-count">0</span>
+                </div>
+                <div id="gov-adjustments-feed" style="max-height: 180px; overflow-y: auto; font-size: 0.8rem;">
+                    <div style="color: var(--text-secondary); padding: 1rem; text-align: center;">No adjustments yet
+                    </div>
+                </div>
+            </div>
+
+            <!-- Escalations Panel -->
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-title">🚨 Escalations</span>
+                    <span class="card-badge" id="escalations-count">0 Active</span>
+                </div>
+                <div id="escalations-list" style="max-height: 180px; overflow-y: auto;">
+                    <div style="color: var(--text-secondary); padding: 1rem; text-align: center; font-size: 0.85rem;">No
+                        active escalations</div>
+                </div>
+            </div>
+        </div>
+
         <!-- Main Content Grid -->
         <div class="content-grid">
             <!-- Swarm Control -->
@@ -705,7 +1017,8 @@
                     <div id="worker-progress" class="progress-fill" style="width: 0%"></div>
                 </div>
                 <div class="slider-container" style="margin-top: 1rem;">
-                    <input type="range" class="slider" id="worker-slider" min="1" max="100" value="10" onchange="scaleWorkers(this.value)">
+                    <input type="range" class="slider" id="worker-slider" min="1" max="100" value="10"
+                        onchange="scaleWorkers(this.value)">
                     <span class="slider-value" id="worker-slider-value">10</span>
                 </div>
                 <div class="controls-row">
@@ -740,7 +1053,8 @@
                 </div>
                 <div class="control-group" style="margin-top: 1rem;">
                     <div class="control-label">Daily Budget Cap ($)</div>
-                    <input type="number" class="control-input" id="budget-input" value="50" onchange="updateBudget(this.value)">
+                    <input type="number" class="control-input" id="budget-input" value="50"
+                        onchange="updateBudget(this.value)">
                 </div>
             </div>
 
@@ -764,7 +1078,8 @@
                     </thead>
                     <tbody id="tasks-table">
                         <tr>
-                            <td colspan="7" style="text-align: center; color: var(--text-secondary);">No active tasks</td>
+                            <td colspan="7" style="text-align: center; color: var(--text-secondary);">No active tasks
+                            </td>
                         </tr>
                     </tbody>
                 </table>
@@ -843,11 +1158,18 @@
             </div>
             <div class="control-group" style="margin-top: 1rem;">
                 <div class="control-label">Max Workers (manual override)</div>
-                <input type="number" class="control-input" id="ignite-workers" value="10" placeholder="Leave empty for auto">
+                <input type="number" class="control-input" id="ignite-workers" value="10"
+                    placeholder="Leave empty for auto">
             </div>
             <div class="control-group" style="margin-top: 1rem;">
                 <div class="control-label">Budget Cap $ (manual override)</div>
-                <input type="number" class="control-input" id="ignite-budget" value="50" placeholder="Leave empty for auto">
+                <input type="number" class="control-input" id="ignite-budget" value="50"
+                    placeholder="Leave empty for auto">
+            </div>
+            <div class="control-group" style="margin-top: 1rem;">
+                <div class="control-label">PRD Content (Drop or Paste)</div>
+                <textarea class="control-input" id="ignite-prd" rows="10"
+                    style="font-family: monospace; resize: vertical;" placeholder="# PRD: My Project..."></textarea>
             </div>
             <div class="modal-actions">
                 <button class="btn btn-secondary" onclick="closeIgniteModal()">Cancel</button>
@@ -1134,11 +1456,13 @@
             const autoMode = document.getElementById('ignite-auto').checked;
             const workers = document.getElementById('ignite-workers').value;
             const budget = document.getElementById('ignite-budget').value;
+            const prd = document.getElementById('ignite-prd').value;
 
             await apiCall('/control/ignite', 'POST', {
                 auto_mode: autoMode,
                 max_workers: workers ? parseInt(workers) : null,
                 budget_usd: budget ? parseFloat(budget) : null,
+                prd_content: prd || null,
             });
 
             closeIgniteModal();
@@ -1164,6 +1488,193 @@
             closeConfigModal();
         }
 
+        // PRD Drop Zone functionality
+        let currentPRD = null;
+        const dropZone = document.getElementById('prd-drop-zone');
+
+        // Drag and drop handlers
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            dropZone.classList.add('drag-over');
+        });
+
+        dropZone.addEventListener('dragleave', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            dropZone.classList.remove('drag-over');
+        });
+
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            dropZone.classList.remove('drag-over');
+
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                handleFile(files[0]);
+            }
+        });
+
+        function handleFileSelect(event) {
+            event.stopPropagation();
+            const file = event.target.files[0];
+            if (file) {
+                handleFile(file);
+            }
+        }
+
+        function handleFile(file) {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                currentPRD = e.target.result;
+                showPRDPreview(file.name, currentPRD);
+                analyzePRD(currentPRD);
+            };
+            reader.readAsText(file);
+        }
+
+        function showPRDPreview(filename, content) {
+            document.getElementById('prd-drop-content').style.display = 'none';
+            document.getElementById('prd-loaded-content').style.display = 'block';
+            document.getElementById('prd-filename').textContent = '📄 ' + filename;
+            // Show first 500 chars as preview
+            document.getElementById('prd-preview').textContent = content.substring(0, 500) + (content.length > 500 ? '...' : '');
+            dropZone.classList.add('has-prd');
+            // Disable launch until analysis completes
+            document.getElementById('launch-btn').disabled = true;
+            document.getElementById('launch-btn').textContent = '⏳ Analyzing...';
+        }
+
+        async function analyzePRD(content) {
+            try {
+                const result = await apiCall('/prd/analyze', 'POST', { prd_content: content });
+
+                if (result.status === 'analyzed') {
+                    showAnalysisResults(result);
+                    document.getElementById('launch-btn').disabled = false;
+                    document.getElementById('launch-btn').textContent = '🚀 Launch Swarm';
+                } else {
+                    throw new Error('Analysis failed');
+                }
+            } catch (err) {
+                console.error('PRD analysis error:', err);
+                document.getElementById('prd-analysis').style.display = 'none';
+                document.getElementById('launch-btn').disabled = false;
+                document.getElementById('launch-btn').textContent = '🚀 Launch Swarm (no analysis)';
+            }
+        }
+
+        function showAnalysisResults(analysis) {
+            document.getElementById('prd-analysis').style.display = 'block';
+
+            // Complexity with color
+            const complexityEl = document.getElementById('analysis-complexity');
+            complexityEl.textContent = analysis.complexity;
+            complexityEl.style.color = analysis.complexity === 'Low' ? 'var(--accent-green)' :
+                analysis.complexity === 'Medium' ? 'var(--accent-yellow)' : 'var(--accent-red)';
+
+            // Risk with color
+            const riskEl = document.getElementById('analysis-risk');
+            riskEl.textContent = analysis.risk_level;
+            riskEl.style.color = analysis.risk_level === 'Low' ? 'var(--accent-green)' :
+                analysis.risk_level === 'Medium' ? 'var(--accent-yellow)' : 'var(--accent-red)';
+
+            // Recommendations
+            document.getElementById('analysis-workers').textContent = analysis.recommendations.suggested_workers;
+            document.getElementById('analysis-tasks').textContent = '~' + analysis.recommendations.estimated_tasks;
+            document.getElementById('analysis-budget').textContent = '$' + analysis.recommendations.estimated_budget_usd;
+            document.getElementById('analysis-duration').textContent = analysis.recommendations.estimated_duration;
+
+            // Categories as badges
+            const catContainer = document.getElementById('analysis-categories');
+            catContainer.innerHTML = analysis.categories.map(cat =>
+                `<span style="background: var(--accent-blue); color: white; padding: 0.15rem 0.5rem; border-radius: 4px; font-size: 0.7rem;">${cat}</span>`
+            ).join('');
+
+            // Team composition
+            const teamContainer = document.getElementById('analysis-team');
+            teamContainer.innerHTML = analysis.team_composition.map(member =>
+                `<div>• ${member.role}: <strong>${member.count}</strong></div>`
+            ).join('');
+        }
+
+        function clearPRD(event) {
+            event.stopPropagation();
+            currentPRD = null;
+            document.getElementById('prd-drop-content').style.display = 'block';
+            document.getElementById('prd-loaded-content').style.display = 'none';
+            document.getElementById('prd-analysis').style.display = 'none';
+            document.getElementById('prd-file-input').value = '';
+            dropZone.classList.remove('has-prd');
+        }
+
+        async function launchSwarm(event) {
+            event.stopPropagation();
+            if (!currentPRD) {
+                alert('Please load a PRD first');
+                return;
+            }
+
+            // Show confirmation
+            if (!confirm('Launch the swarm with this PRD?')) {
+                return;
+            }
+
+            try {
+                const result = await apiCall('/control/ignite', 'POST', {
+                    auto_mode: true,
+                    prd_content: currentPRD,
+                });
+
+                if (result.status === 'ok' || result.status === 'ignited') {
+                    addLog({
+                        timestamp: new Date().toLocaleTimeString(),
+                        event_type: 'SYS_IGNITE',
+                        level: 'info',
+                        message: 'Swarm ignited with uploaded PRD'
+                    });
+                } else {
+                    alert('Failed to launch: ' + (result.message || 'Unknown error'));
+                }
+            } catch (err) {
+                alert('Error launching swarm: ' + err.message);
+            }
+        }
+
+        async function loadReports(type) {
+            try {
+                const response = await fetch(`/api/reports/${type}`);
+                const data = await response.json();
+                const viewer = document.getElementById('report-viewer');
+
+                if (data.reports && data.reports.length > 0) {
+                    // Show latest report
+                    viewer.textContent = data.reports[0].content;
+                } else {
+                    viewer.textContent = "No reports found.";
+                }
+            } catch (error) {
+                console.error('Error loading reports:', error);
+            }
+        }
+
+        async function approveDecision(id) {
+            try {
+                await fetch(`/api/decisions/approve?decision_id=${id}`, { method: 'POST' });
+                // Remove the decision item (mock)
+                const btn = event.target;
+                const item = btn.closest('.decision-item');
+                item.style.opacity = '0.5';
+                btn.textContent = 'Approved';
+                btn.disabled = true;
+
+                document.getElementById('decision-count').textContent = '0 Pending';
+            } catch (error) {
+                console.error('Error approving decision:', error);
+            }
+        }
+
         // Initialize
         connectWebSocket();
 
@@ -1172,6 +1683,101 @@
             .then(r => r.json())
             .then(updateStatus)
             .catch(console.error);
+
+        // Fetch telemetry and update Worker Scaling card
+        async function fetchTelemetry() {
+            try {
+                const response = await fetch('/api/telemetry/snapshot');
+                const data = await response.json();
+
+                document.getElementById('workers-active-lg').textContent = data.workers_active || 0;
+                document.getElementById('workers-cap-lg').textContent = data.workers_active || 0; // Will be updated with real cap
+                document.getElementById('workers-target').textContent = data.workers_active || 0;
+                document.getElementById('workers-pending').textContent = 0;
+
+                const progress = data.workers_active ? Math.min((data.workers_active / 100) * 100, 100) : 0;
+                document.getElementById('worker-scale-progress').style.width = progress + '%';
+            } catch (error) {
+                console.error('Error fetching telemetry:', error);
+            }
+        }
+
+        // Fetch Governor adjustments and update feed
+        async function fetchGovernorAdjustments() {
+            try {
+                const response = await fetch('/api/governor/adjustments');
+                const data = await response.json();
+
+                const feed = document.getElementById('gov-adjustments-feed');
+                const countBadge = document.getElementById('gov-adjustments-count');
+
+                if (data.recent_adjustments && data.recent_adjustments.length > 0) {
+                    countBadge.textContent = data.recent_adjustments.length;
+                    feed.innerHTML = data.recent_adjustments.slice(-10).reverse().map(adj => `
+                        <div style="padding: 0.5rem; border-bottom: 1px solid var(--border-color);">
+                            <div style="font-weight: 500; color: var(--accent-yellow);">${adj.type || 'Adjustment'}</div>
+                            <div style="font-size: 0.75rem; color: var(--text-secondary);">${adj.reason || 'No reason'}</div>
+                        </div>
+                    `).join('');
+                } else {
+                    countBadge.textContent = '0';
+                    feed.innerHTML = '<div style="color: var(--text-secondary); padding: 1rem; text-align: center;">No adjustments yet</div>';
+                }
+            } catch (error) {
+                console.error('Error fetching governor adjustments:', error);
+            }
+        }
+
+        // Fetch Escalations and update panel
+        async function fetchEscalations() {
+            try {
+                const response = await fetch('/api/escalations');
+                const data = await response.json();
+
+                const list = document.getElementById('escalations-list');
+                const countBadge = document.getElementById('escalations-count');
+
+                if (data.escalations && data.escalations.length > 0) {
+                    countBadge.textContent = data.escalations.length + ' Active';
+                    list.innerHTML = data.escalations.map(esc => `
+                        <div style="padding: 0.75rem; border-bottom: 1px solid var(--border-color); border-left: 3px solid ${esc.severity === 'CRITICAL' ? 'var(--accent-red)' : esc.severity === 'HIGH' ? 'var(--accent-orange)' : 'var(--accent-yellow)'};">
+                            <div style="font-weight: 600; margin-bottom: 0.25rem;">${esc.title || 'Escalation'}</div>
+                            <div style="font-size: 0.75rem; color: var(--text-secondary);">${esc.message || ''}</div>
+                            <div style="margin-top: 0.5rem;">
+                                <button class="btn btn-secondary" style="font-size: 0.7rem; padding: 0.2rem 0.5rem;" onclick="acknowledgeEscalation('${esc.id}')">Acknowledge</button>
+                            </div>
+                        </div>
+                    `).join('');
+                } else {
+                    countBadge.textContent = '0 Active';
+                    list.innerHTML = '<div style="color: var(--text-secondary); padding: 1rem; text-align: center; font-size: 0.85rem;">No active escalations</div>';
+                }
+            } catch (error) {
+                console.error('Error fetching escalations:', error);
+            }
+        }
+
+        async function acknowledgeEscalation(id) {
+            try {
+                await fetch(`/api/escalations/${id}/acknowledge`, { method: 'POST' });
+                fetchEscalations(); // Refresh
+            } catch (error) {
+                console.error('Error acknowledging escalation:', error);
+            }
+        }
+
+        // Periodic refresh of telemetry data
+        setInterval(() => {
+            fetchTelemetry();
+            fetchGovernorAdjustments();
+            fetchEscalations();
+        }, 5000);
+
+        // Initial fetch
+        fetchTelemetry();
+        fetchGovernorAdjustments();
+        fetchEscalations();
     </script>
 </body>
+
 </html>

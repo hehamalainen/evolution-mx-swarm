@@ -16,10 +16,9 @@ from datetime import datetime
 from enum import Enum
 from typing import Optional
 
-from ..shared.schemas import Spec, TaskType
-from ..shared.utils import MXConfig, LLMClient, Message, create_llm_client
-from ..planner import Planner
-from ..judge import Judge
+from shared.schemas import Spec, TaskType
+from shared.utils import MXConfig, LLMClient, Message, create_llm_client
+from planner import Planner
 
 
 class ParallelizationStrategy(str, Enum):
@@ -492,6 +491,7 @@ Consider:
 
         # Run planner to generate tasks
         print("\nAgent Boss: Initiating Planner...")
+        from judge import Judge
         planner = Planner(config, repo_path=self.repo_path)
         plan_result = await planner.run()
 

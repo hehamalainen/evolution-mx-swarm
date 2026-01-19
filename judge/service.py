@@ -16,18 +16,24 @@ from datetime import datetime, timedelta
 from enum import Enum
 from typing import Optional
 
-from ..shared.schemas import (
+from shared.schemas import (
     Spec,
     RequirementStatus,
 )
-from ..shared.adapters import QueueAdapter, create_queue_adapter
-from ..shared.utils import (
+from shared.adapters import QueueAdapter, create_queue_adapter
+from shared.utils import (
     MXConfig,
     LLMClient,
     Message,
     create_llm_client,
     GitHubAPI,
 )
+from shared.utils.metrics import get_metrics_collector, TaskMetrics
+from boss import (
+    EscalationEngine, EscalationType, EscalationSeverity,
+    Governor, GovernorState, TelemetrySnapshot, Adjustment, AdjustmentType, TriggerType
+)
+from shared.schemas.teamplan import TeamPlan
 
 
 class JudgeDecision(str, Enum):
@@ -35,6 +41,41 @@ class JudgeDecision(str, Enum):
     RESET = "reset"  # Full reset - restart workers, recompile plan
     STOP = "stop"  # DoD met, stop swarm
     ESCALATE = "escalate"  # Ask human for help
+
+
+class GovernorState(str, Enum):
+    NORMAL = "NORMAL"
+    THROTTLED = "THROTTLED"
+    FROZEN = "FROZEN"
+
+
+@dataclass
+class GovernorReport:
+    """Report from a governor check."""
+    timestamp: str
+    state: GovernorState
+    actions: list[str]
+    metrics: dict
+
+    def to_markdown(self) -> str:
+        return f"""
+## Governor Report - {self.timestamp}
+
+**State:** {self.state.value}
+
+### Actions
+{chr(10).join(f'- {a}' for a in self.actions) if self.actions else '- No actions taken'}
+
+### Metrics
+| Metric | Value |
+|--------|-------|
+| CI Health | {self.metrics.get('ci_health', 0):.1%} |
+| Open PRs | {self.metrics.get('open_prs', 0)} |
+| PR Rate (1h) | {self.metrics.get('pr_rate_1h', 0)} |
+| Retries (1h) | {self.metrics.get('retries_1h', 0)} |
+
+---
+"""
 
 
 @dataclass
@@ -81,6 +122,8 @@ class JudgeState:
     no_progress_since: Optional[str] = None
     consecutive_failures: int = 0
     total_evaluations: int = 0
+    governor_state: GovernorState = GovernorState.NORMAL
+    last_governor_check: Optional[str] = None
 
 
 class Judge:
@@ -104,6 +147,21 @@ class Judge:
         self.state = JudgeState()
         self._github: Optional[GitHubAPI] = None
         self._running = False
+        self.metrics_collector = get_metrics_collector()
+        self.escalation_engine = EscalationEngine(repo_path=repo_path)
+        
+        # Initialize Governor with a default TeamPlan if none exists
+        teamplan_path = os.path.join(repo_path, "TEAMPLAN.json")
+        if os.path.exists(teamplan_path):
+            self.teamplan = TeamPlan.load(teamplan_path)
+        else:
+            self.teamplan = TeamPlan.default()
+            
+        self.governor = Governor(
+            teamplan=self.teamplan,
+            telemetry_provider=self._get_telemetry_snapshot,
+            on_adjustment=self._on_governor_adjustment
+        )
 
     @property
     def github(self) -> GitHubAPI:
@@ -358,7 +416,16 @@ class Judge:
             decision = JudgeDecision.ESCALATE
             reason = f"High failure rate ({metrics['failure_rate']:.1%}) or repeated failures"
             self.state.consecutive_failures += 1
-            actions_taken.append("Escalating to human")
+            
+            # Trigger escalation
+            self.escalation_engine._create_escalation(
+                EscalationType.RETRY_RATE,
+                EscalationSeverity.HIGH,
+                "Judge Escalation: High Failure Rate",
+                reason,
+                "Review recent task failures and consider manual intervention or replanning."
+            )
+            actions_taken.append("Escalating to human via EscalationEngine")
 
         # Check if should reset
         elif await self._should_reset(metrics):
@@ -428,6 +495,48 @@ class Judge:
             await asyncio.sleep(interval)
 
         print("[Judge] Loop stopped")
+
+    def _get_telemetry_snapshot(self) -> TelemetrySnapshot:
+        """Provide telemetry snapshot for the Governor."""
+        # This would ideally be async, but Governor expects a synchronous provider for now
+        # We can use the metrics collector and cached PR metrics
+        metrics = self.metrics_collector.compute_metrics(window_hours=1)
+        
+        # We'll use a simplified snapshot for now
+        return TelemetrySnapshot(
+            ci_health_percent=self.state.last_progress, # Placeholder
+            tasks_completed_1h=metrics.total_tasks,
+            tasks_nacked_1h=metrics.retry_cascades,
+            queue_depth=0, # Need real queue depth
+            prs_open_total=0 # Need real PR count
+        )
+
+    def _on_governor_adjustment(self, adjustment: Adjustment):
+        """Handle governor adjustments."""
+        print(f"[Judge] Governor Adjustment: {adjustment.type.value} - {adjustment.reason}")
+        # Here we could trigger specific judge actions if needed
+
+    async def run_governor_check(self) -> GovernorReport:
+        """Run a governor health check using the boss.Governor."""
+        # Update telemetry and evaluate
+        await self.governor._evaluate()
+        
+        # Get state summary for report
+        gov_state = self.governor.get_state_summary()
+        
+        report = GovernorReport(
+            timestamp=datetime.utcnow().isoformat(),
+            state=GovernorState(gov_state["mode"]),
+            actions=[adj["reason"] for adj in gov_state["recent_adjustments"]],
+            metrics=gov_state["current_caps"]
+        )
+        
+        # Append to report file
+        report_path = os.path.join(self.repo_path, "GOVERNOR_REPORT.md")
+        with open(report_path, "a") as f:
+            f.write(report.to_markdown())
+            
+        return report
 
     async def _execute_reset(self) -> None:
         """Execute reset protocol."""

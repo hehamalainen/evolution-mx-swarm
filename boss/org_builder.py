@@ -19,13 +19,13 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 from enum import Enum
 
-from ..shared.schemas.teamplan import (
+from shared.schemas.teamplan import (
     TeamPlan, Topology, StreamConfig, PodConfig,
     CapsConfig, RiskMergePolicy, MergePolicy,
     TaskPolicy, RetryPolicy, BudgetPolicy,
     ReorgPolicy, ResetTriggers, ObservabilityConfig
 )
-from ..shared.utils.llm import LLMClient
+from shared.utils.llm import LLMClient
 
 
 class WorkCategory(str, Enum):

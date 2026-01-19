@@ -21,14 +21,14 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional
 
-from ..shared.schemas import (
+from shared.schemas import (
     TaskContract,
     TaskType,
     MergePolicy,
     RiskLevel,
 )
-from ..shared.adapters import QueueAdapter, QueueMessage, create_queue_adapter
-from ..shared.utils import (
+from shared.adapters import QueueAdapter, QueueMessage, create_queue_adapter
+from shared.utils import (
     MXConfig,
     LLMClient,
     Message,

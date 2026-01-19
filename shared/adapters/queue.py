@@ -17,7 +17,7 @@ from collections import deque
 import threading
 import time
 
-from ..schemas import TaskContract
+from shared.schemas import TaskContract
 
 
 @dataclass

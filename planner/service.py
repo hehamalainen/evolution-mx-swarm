@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
 
-from ..shared.schemas import (
+from shared.schemas import (
     TaskContract,
     TaskType,
     TaskContext,
@@ -29,8 +29,8 @@ from ..shared.schemas import (
     RequirementType,
     RequirementStatus,
 )
-from ..shared.adapters import QueueAdapter, create_queue_adapter
-from ..shared.utils import MXConfig, LLMClient, Message, create_llm_client
+from shared.adapters import QueueAdapter, create_queue_adapter
+from shared.utils import MXConfig, LLMClient, Message, create_llm_client
 
 
 SYSTEM_PROMPT = """You are an expert software architect and project planner. Your role is to analyze PRDs (Product Requirements Documents) and break them down into machine-readable specifications and actionable tasks.

@@ -1,33 +1,71 @@
 {
   "version": "1.0.0",
   "queue": {
-    "provider": "memory"
+    "provider": "memory",
+    "gcp": {
+      "project_id": null,
+      "topic_id": "mx-tasks",
+      "subscription_id": "mx-worker-sub"
+    },
+    "azure": {
+      "connection_string": null,
+      "namespace": null,
+      "queue_name": "mx-tasks"
+    }
   },
   "secrets": {
-    "provider": "env"
+    "provider": "env",
+    "env": {
+      "prefix": "MX_",
+      "env_file": ".env"
+    },
+    "gcp": {
+      "project_id": null
+    },
+    "azure": {
+      "vault_url": null
+    }
   },
   "llm": {
     "provider": "anthropic",
     "model": "claude-sonnet-4-20250514",
+    "api_key": null,
+    "base_url": null,
     "max_tokens": 4096,
     "temperature": 0.7
   },
   "worker": {
-    "max_workers": 5,
+    "max_workers": 10,
     "timebox_minutes": 30,
-    "retry_max": 2
+    "retry_max": 2,
+    "poll_interval_seconds": 5,
+    "visibility_timeout_seconds": 300
   },
   "judge": {
     "interval_minutes": 5,
-    "failure_rate_threshold": 0.3
+    "failure_rate_threshold": 0.3,
+    "no_progress_timeout_minutes": 60,
+    "auto_reset_enabled": true
+  },
+  "governor": {
+    "check_interval_minutes": 15,
+    "ci_health_threshold": 0.85,
+    "max_open_prs": 25,
+    "max_prs_per_hour": 15,
+    "max_retries_per_hour": 10,
+    "stall_timeout_minutes": 90
   },
   "github": {
     "repo_owner": "hehamalainen",
     "repo_name": "Evolution-Coding",
-    "default_branch": "main"
+    "default_branch": "main",
+    "token": null,
+    "auto_merge_low_risk": false
   },
   "budget": {
-    "daily_usd_cap": 10.0
+    "daily_usd_cap": 50.0,
+    "max_llm_calls_per_task": 50,
+    "max_tokens_per_task": 100000
   },
   "paused": false
 }

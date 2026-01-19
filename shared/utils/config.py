@@ -126,6 +126,27 @@ class JudgeConfig:
 
 
 @dataclass
+class GovernorConfig:
+    """Governor configuration."""
+    check_interval_minutes: int = 15
+    ci_health_threshold: float = 0.85
+    max_open_prs: int = 25
+    max_prs_per_hour: int = 15
+    max_retries_per_hour: int = 10
+    stall_timeout_minutes: int = 90
+
+    def to_dict(self) -> dict:
+        return {
+            "check_interval_minutes": self.check_interval_minutes,
+            "ci_health_threshold": self.ci_health_threshold,
+            "max_open_prs": self.max_open_prs,
+            "max_prs_per_hour": self.max_prs_per_hour,
+            "max_retries_per_hour": self.max_retries_per_hour,
+            "stall_timeout_minutes": self.stall_timeout_minutes,
+        }
+
+
+@dataclass
 class GitHubConfig:
     """GitHub configuration."""
     repo_owner: str = ""
@@ -168,6 +189,7 @@ class MXConfig:
     llm: LLMConfig = field(default_factory=LLMConfig)
     worker: WorkerConfig = field(default_factory=WorkerConfig)
     judge: JudgeConfig = field(default_factory=JudgeConfig)
+    governor: GovernorConfig = field(default_factory=GovernorConfig)
     github: GitHubConfig = field(default_factory=GitHubConfig)
     budget: BudgetConfig = field(default_factory=BudgetConfig)
 
@@ -182,6 +204,7 @@ class MXConfig:
             "llm": self.llm.to_dict(),
             "worker": self.worker.to_dict(),
             "judge": self.judge.to_dict(),
+            "governor": self.governor.to_dict(),
             "github": self.github.to_dict(),
             "budget": self.budget.to_dict(),
             "paused": self.paused,
@@ -246,6 +269,17 @@ class MXConfig:
                 failure_rate_threshold=j.get("failure_rate_threshold", 0.3),
                 no_progress_timeout_minutes=j.get("no_progress_timeout_minutes", 60),
                 auto_reset_enabled=j.get("auto_reset_enabled", True),
+            )
+
+        if "governor" in data:
+            gov = data["governor"]
+            config.governor = GovernorConfig(
+                check_interval_minutes=gov.get("check_interval_minutes", 15),
+                ci_health_threshold=gov.get("ci_health_threshold", 0.85),
+                max_open_prs=gov.get("max_open_prs", 25),
+                max_prs_per_hour=gov.get("max_prs_per_hour", 15),
+                max_retries_per_hour=gov.get("max_retries_per_hour", 10),
+                stall_timeout_minutes=gov.get("stall_timeout_minutes", 90),
             )
 
         if "github" in data:

@@ -8,6 +8,9 @@ from .agent_boss import (
     RiskTolerance,
     ROLE_TEMPLATES,
 )
+from .reporter import Reporter, OpsReport
+from .escalation import EscalationEngine, Escalation, EscalationType, EscalationSeverity
+from .governor import Governor, GovernorState, TelemetrySnapshot, Adjustment, AdjustmentType, TriggerType
 
 __all__ = [
     "AgentBoss",
@@ -16,4 +19,16 @@ __all__ = [
     "ParallelizationStrategy",
     "RiskTolerance",
     "ROLE_TEMPLATES",
+    "Reporter",
+    "OpsReport",
+    "EscalationEngine",
+    "Escalation",
+    "EscalationType",
+    "EscalationSeverity",
+    "Governor",
+    "GovernorState",
+    "TelemetrySnapshot",
+    "Adjustment",
+    "AdjustmentType",
+    "TriggerType",
 ]

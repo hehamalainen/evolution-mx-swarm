@@ -10,6 +10,7 @@ Commands:
     mx init         Initialize a new MX project
     mx plan         Run planner only
     mx judge        Run judge evaluation
+    mx dashboard    Start the monitoring dashboard
 """
 
 import argparse
@@ -500,6 +501,26 @@ async def cmd_ignite(args):
     print("  Or open dashboard with 'mx dashboard' for visual control")
 
 
+async def cmd_dashboard(args):
+    """Start the monitoring dashboard."""
+    import uvicorn
+    from dashboard.api import app
+
+    print_banner()
+    print(f"Starting MX Swarm Dashboard on http://{args.host}:{args.port}")
+    print("Press Ctrl+C to stop.")
+
+    # Run uvicorn
+    config = uvicorn.Config(
+        app,
+        host=args.host,
+        port=args.port,
+        log_level="info",
+    )
+    server = uvicorn.Server(config)
+    await server.serve()
+
+
 def main():
     """Main CLI entry point."""
     parser = argparse.ArgumentParser(
@@ -590,6 +611,20 @@ def main():
         help="Override daily budget cap (otherwise from TEAMPLAN)",
     )
 
+    # dashboard
+    dashboard_parser = subparsers.add_parser("dashboard", help="Start the monitoring dashboard")
+    dashboard_parser.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="Host to bind to",
+    )
+    dashboard_parser.add_argument(
+        "--port",
+        type=int,
+        default=8000,
+        help="Port to bind to",
+    )
+
     args = parser.parse_args()
 
     if not args.command:
@@ -608,6 +643,7 @@ def main():
         "judge": cmd_judge,
         "budget": cmd_budget,
         "ignite": cmd_ignite,
+        "dashboard": cmd_dashboard,
     }
 
     # Run command

@@ -20,7 +20,7 @@ from enum import Enum
 from typing import Dict, List, Optional, Callable
 import logging
 
-from ..shared.schemas.teamplan import (
+from shared.schemas.teamplan import (
     TeamPlan, GovernorMode, RiskTier,
     ResetTriggers, ReorgPolicy, CapsConfig
 )
