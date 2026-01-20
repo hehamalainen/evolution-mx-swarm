@@ -89,6 +89,26 @@ Unified Governor and EscalationEngine across all components:
 - Enhanced events to include workers, CI health, costs, PR counts
 - Added PR_MERGE and GOV_CHECK event notifications
 
+#### 5. P0 Fixes from GPT 5.2 Feedback
+
+**Fix 1: State Consistency**
+- Added `WorkerState` dataclass with 3-tier model
+- Fields: `teamplan_recommended` → `runtime_target` → `runtime_cap` → `online_workers`
+- API returns `worker_state` in `/api/status` for consistent UI
+
+**Fix 2: Task-PR Linkage**
+- Simulation sends traceability fields: `task_id`, `spec_ref`, `worker_id`, `risk_tier`
+- Dashboard registers tasks in `state.active_tasks` on PR_OPEN
+- "Active Task Contracts" table populates from simulation events
+
+**Fix 3: Governor Explainability**
+- Enhanced `Adjustment` dataclass with `threshold`, `current_value`
+- Added `before_settings`, `after_settings`, `cooldown_until`, `next_eval_at`
+- Dashboard shows threshold + cooldown in Governor Adjustments feed
+
+**Bug Fix:**
+- Added missing `dataclass` import in `dashboard/api.py`
+
 ---
 
 ## Session Work Summary (2026-01-19)
