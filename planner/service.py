@@ -228,7 +228,21 @@ Only include requirements that have dependencies. Output ONLY valid JSON:"""
 
         try:
             data = json.loads(content)
-            deps = data.get("dependencies", {})
+
+            # Handle different response formats from LLM
+            if isinstance(data, dict):
+                deps = data.get("dependencies", {})
+            elif isinstance(data, list):
+                # LLM returned a list - try to extract dependencies
+                deps = {}
+                for item in data:
+                    if isinstance(item, dict):
+                        if "id" in item and "depends_on" in item:
+                            deps[item["id"]] = item["depends_on"]
+                        elif "dependencies" in item:
+                            deps.update(item.get("dependencies", {}))
+            else:
+                deps = {}
 
             # Apply dependencies
             req_map = {r.id: r for r in requirements}
