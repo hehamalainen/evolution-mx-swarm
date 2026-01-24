@@ -113,9 +113,27 @@ class InMemoryQueue(QueueAdapter):
     In-memory queue for local development and testing.
 
     Thread-safe implementation with visibility timeout support.
+    Uses singleton pattern per queue name to ensure all components share the same queue.
     """
 
+    # Singleton instances by queue name
+    _instances: dict[str, "InMemoryQueue"] = {}
+    _instance_lock = threading.Lock()
+
+    def __new__(cls, name: str = "mx-tasks"):
+        """Return existing instance for queue name, or create new one."""
+        with cls._instance_lock:
+            if name not in cls._instances:
+                instance = super().__new__(cls)
+                instance._initialized = False
+                cls._instances[name] = instance
+            return cls._instances[name]
+
     def __init__(self, name: str = "mx-tasks"):
+        # Only initialize once per instance
+        if getattr(self, "_initialized", False):
+            return
+        self._initialized = True
         self.name = name
         self._queue: deque = deque()
         self._inflight: dict[str, tuple[QueueMessage, float]] = {}
