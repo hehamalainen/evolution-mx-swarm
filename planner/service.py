@@ -117,6 +117,7 @@ class Planner:
 
     async def _extract_requirements(self, prd: str) -> list[Requirement]:
         """Use LLM to extract requirements from PRD."""
+        print(f"  > Extracting requirements from PRD using {self.config.llm.model}...")
         prompt = f"""Analyze this PRD and extract all requirements as a JSON array.
 
 PRD:
@@ -190,6 +191,7 @@ Output ONLY valid JSON array, no markdown, no explanation:
         requirements: list[Requirement],
     ) -> list[Requirement]:
         """Use LLM to identify dependencies between requirements."""
+        print(f"  > Identifying dependencies for {len(requirements)} requirements...")
         req_summary = "\n".join(
             f"- {r.id}: {r.title}"
             for r in requirements
@@ -412,7 +414,8 @@ Output ONLY valid JSON:"""
 
         # Generate tasks for each requirement
         all_tasks = []
-        for req in requirements:
+        for i, req in enumerate(requirements, 1):
+            print(f"  > Generating tasks for requirement {i}/{len(requirements)}: {req.title}...")
             tasks = await self._create_task_for_requirement(req, agents_md)
             all_tasks.extend(tasks)
 

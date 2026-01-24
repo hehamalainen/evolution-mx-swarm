@@ -36,7 +36,9 @@ from shared.utils.metrics import get_metrics_collector, CoordinationMetrics
 from boss import (
     EscalationEngine, Escalation, EscalationType, EscalationSeverity,
     Governor, GovernorState, TelemetrySnapshot, Adjustment, AdjustmentType, TriggerType,
-    Reporter
+    Reporter, ReportPeriod,
+    DecisionQueue, Decision, DecisionType, DecisionPriority,
+    OrgBuilder, OrgConstraints
 )
 
 
@@ -160,9 +162,13 @@ class SwarmState:
         # WebSocket clients
         self.websocket_clients: list[WebSocket] = []
 
-        # Escalation & Reporting
+        # Escalation, Reporting & Decisions
         self.escalation_engine = EscalationEngine(repo_path=".")
         self.reporter = Reporter(repo_path=".")
+        self.decision_queue = DecisionQueue(repo_path=".")
+        
+        # Subprocess management
+        self.swarm_process = None
         
         # Initialize Governor
         teamplan_path = "TEAMPLAN.json"
@@ -501,6 +507,7 @@ async def get_swarm_status() -> dict:
                     "status": req.status.value.upper(),
                     "progress": 100 if req.status.value == "completed" else 50,
                     "spec_ref": req.id,
+                    "prd_ref": req.id, # Traceability Fix (5.1)
                     "risk_tier": risk.value,
                 })
 
@@ -541,6 +548,9 @@ async def get_swarm_status() -> dict:
             "rejected": state.prs_rejected,
             "per_hour_rate": state.prs_this_hour,
         },
+
+        # TeamPlan (Org Builder 5.6)
+        "teamplan": get_teamplan_summary(),
 
         # Governor State tile
         "governor": {
@@ -625,6 +635,12 @@ async def get_swarm_status() -> dict:
 
         # Coordination metrics
         "coordination": get_coordination_metrics(),
+
+        # Pending decisions
+        "decisions": {
+            "pending": [d.to_dict() for d in state.decision_queue.get_pending_decisions()[:5]],
+            "count": len(state.decision_queue.get_pending_decisions()),
+        },
     }
 
 
@@ -676,7 +692,7 @@ def get_teamplan_summary() -> Optional[dict]:
 # ============================================================================
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(_app: FastAPI):
     state.add_log(EventType.SYS_START, "MX Swarm Dashboard started")
     yield
     state.add_log(EventType.SYS_STOP, "MX Swarm Dashboard stopped")
@@ -792,8 +808,6 @@ async def control_throttle():
 @app.post("/api/control/reset")
 async def control_reset():
     """Reset the swarm - replan + restart workers."""
-    config = load_config()
-
     # Clear state
     state.workers.clear()
     state.active_tasks.clear()
@@ -810,8 +824,37 @@ async def analyze_prd(req: PRDAnalyzeRequest):
     if not req.prd_content or len(req.prd_content.strip()) < 10:
         raise HTTPException(status_code=400, detail="PRD content is too short")
 
+    # Perform keyword-based analysis
     analysis = analyze_prd_content(req.prd_content)
-    state.add_log(EventType.SYS_CONFIG, f"PRD analyzed: {analysis['complexity']} complexity, {len(analysis['categories'])} categories detected")
+    
+    # Generate TEAMPLAN using OrgBuilder
+    try:
+        builder = OrgBuilder()
+        constraints = OrgConstraints(
+            max_workers=analysis['recommendations']['suggested_workers'],
+            max_budget_per_day=analysis['recommendations']['estimated_budget_usd']
+        )
+        teamplan = builder.build_teamplan(
+            prd_content=req.prd_content,
+            constraints=constraints
+        )
+        
+        # Save TEAMPLAN.json to disk
+        teamplan.save("TEAMPLAN.json")
+        
+        # Add teamplan summary to response
+        analysis['teamplan'] = get_teamplan_summary()
+        
+        state.add_log(EventType.SYS_CONFIG, 
+            f"PRD analyzed: {analysis['complexity']} complexity, TEAMPLAN generated with {teamplan.total_target_workers()} workers")
+    except Exception as e:
+        # Log error with traceback for debugging
+        import traceback
+        error_details = traceback.format_exc()
+        state.add_log(EventType.SYS_CONFIG, 
+            f"PRD analyzed: {analysis['complexity']} complexity (TEAMPLAN generation failed: {str(e)})", "error")
+        print(f"TEAMPLAN generation error:\n{error_details}", file=sys.stderr)
+    
     return analysis
 
 
@@ -840,8 +883,93 @@ async def control_ignite(req: IgniteRequest):
 
     if req.auto_mode:
         state.add_log(EventType.SYS_START, "Agent Boss analyzing PRD and assembling team...")
+        
+        # Launch 'mx ignite --auto-mode' in background
+        cmd = [sys.executable, "-m", "mx-swarm.cli.main", "ignite", "--analyze-only"]
+        # We start with analyze-only to generate the plan, the dashboard should then trigger run?
+        # Actually, for the demo "Launch Swarm" usually implies "GO".
+        # Let's run the full 'mx ignite' which does analysis AND tells user to run 'mx run'.
+        # Wait, the CLI 'ignite' doesn't actually run the loop. It just preps.
+        # So we should run 'mx run' directly if we want immediate action, OR run 'ignite' then 'run'.
+        
+        # Let's simplify: Run 'mx run' directly. The CLI 'run' command handles missing plans by failing?
+        # But ignite sets up the plan.
+        
+        # Better approach: Run 'mx ignite' to generate the plan, then 'mx run'.
+        # For now, let's just launch 'mx run' and assume the user wants to start processing.
+        # But if PRD changed, we interpret that as needing a plan.
+        
+        # Let's spawn a helper to do: ignite -> run
+        async def launch_sequence():
+            # 1. Ignite (Analyze)
+            state.add_log(EventType.SYS_CONFIG, "Running Agent Boss analysis...")
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    sys.executable, "-m", "cli.main", "ignite", "--analyze-only",
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE
+                )
+                stdout, stderr = await proc.communicate()
+            except Exception as e:
+                state.add_log(EventType.SYS_STOP, f"Ignite subprocess failed to start: {e}", "error")
+                return
+
+            if proc.returncode != 0:
+                state.add_log(EventType.SYS_STOP, f"Ignite failed: {stderr.decode()}", "error")
+                return
+                
+            state.add_log(EventType.SYS_CONFIG, "Plan generated. Starting swarm...")
+            
+            # 2. Run with output streaming
+            try:
+                # Use asyncio subprocess for non-blocking I/O
+                state.swarm_process = await asyncio.create_subprocess_exec(
+                    sys.executable, "-u", "-m", "cli.main", "run",
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE
+                )
+                
+                state.add_log(EventType.SYS_START, f"Swarm Process Started (PID: {state.swarm_process.pid})")
+                
+                async def stream_output(stream, log_type):
+                    while True:
+                        line = await stream.readline()
+                        if not line:
+                            break
+                        decoded = line.decode().strip()
+                        if decoded:
+                            state.add_log(log_type, decoded)
+
+                # Run stdout and stderr readers concurrently
+                await asyncio.gather(
+                    stream_output(state.swarm_process.stdout, EventType.SYS_CONFIG),
+                    stream_output(state.swarm_process.stderr, EventType.SYS_CONFIG)
+                )
+
+                await state.swarm_process.wait()
+                
+            except Exception as e:
+                state.add_log(EventType.SYS_STOP, f"Run subprocess failed: {e}", "error")
+            finally:
+                if state.swarm_process:
+                    code = state.swarm_process.returncode
+                    state.add_log(EventType.SYS_STOP, f"Swarm process exited code {code}", "warn" if code != 0 else "info")
+                    state.swarm_process = None
+
+        asyncio.create_task(launch_sequence())
+
     else:
-        state.add_log(EventType.SYS_START, f"Swarm ignited: {config.worker.max_workers} workers, ${config.budget.daily_usd_cap} budget")
+        # Manual mode: Just run
+        try:
+            state.swarm_process = subprocess.Popen(
+                [sys.executable, "-m", "cli.main", "run"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+            state.add_log(EventType.SYS_START, f"Swarm ignited: {config.worker.max_workers} workers (PID: {state.swarm_process.pid})")
+        except Exception as e:
+            state.add_log(EventType.SYS_STOP, f"Run subprocess failed to start: {e}", "error")
 
     await state.broadcast_status()
     return {"status": "ignited", "auto_mode": req.auto_mode}
@@ -857,6 +985,14 @@ async def control_stop():
     worker_count = len(state.workers)
     state.workers.clear()
     state.governor_state = GovernorState.FROZEN
+
+    if state.swarm_process:
+        state.swarm_process.terminate()
+        try:
+            state.swarm_process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            state.swarm_process.kill()
+        state.swarm_process = None
 
     state.add_log(EventType.SYS_STOP, f"EMERGENCY STOP - {worker_count} workers halted", "error")
     return {"status": "stopped"}
@@ -883,7 +1019,7 @@ async def simulation_event(event: dict):
         # Update workers and worker_state
         if "workers_active" in m:
             # Register simulated workers with proper structure
-            from datetime import datetime
+
             now = datetime.utcnow().isoformat()
             for i in range(m["workers_active"]):
                 worker_id = f"sim-worker-{i}"
@@ -1044,20 +1180,36 @@ async def generate_teamplan():
     }
 
 
+@app.get("/api/reports/heartbeat")
+async def get_heartbeat_reports():
+    """Get list of 15-minute heartbeat reports."""
+    reports_dir = os.path.join(os.getcwd(), "reports", "heartbeat")
+    if not os.path.exists(reports_dir):
+        return {"reports": []}
+
+    reports = []
+    for f in sorted(os.listdir(reports_dir), reverse=True):
+        if f.endswith(".md"):
+            with open(os.path.join(reports_dir, f)) as file:
+                content = file.read()
+                reports.append({"filename": f, "timestamp": f.replace(".md", ""), "content": content})
+    return {"reports": reports[:20]}  # Last 20 heartbeats (5 hours)
+
+
 @app.get("/api/reports/hourly")
 async def get_hourly_reports():
     """Get list of hourly reports."""
     reports_dir = os.path.join(os.getcwd(), "reports", "hourly")
     if not os.path.exists(reports_dir):
         return {"reports": []}
-    
+
     reports = []
     for f in sorted(os.listdir(reports_dir), reverse=True):
         if f.endswith(".md"):
             with open(os.path.join(reports_dir, f)) as file:
                 content = file.read()
-                reports.append({"filename": f, "content": content})
-    return {"reports": reports[:24]} # Last 24 hours
+                reports.append({"filename": f, "timestamp": f.replace(".md", ""), "content": content})
+    return {"reports": reports[:24]}  # Last 24 hours
 
 
 @app.get("/api/reports/daily")
@@ -1066,21 +1218,89 @@ async def get_daily_reports():
     reports_dir = os.path.join(os.getcwd(), "reports", "daily")
     if not os.path.exists(reports_dir):
         return {"reports": []}
-    
+
     reports = []
     for f in sorted(os.listdir(reports_dir), reverse=True):
         if f.endswith(".md"):
             with open(os.path.join(reports_dir, f)) as file:
                 content = file.read()
-                reports.append({"filename": f, "content": content})
-    return {"reports": reports[:7]} # Last 7 days
+                reports.append({"filename": f, "timestamp": f.replace(".md", ""), "content": content})
+    return {"reports": reports[:7]}  # Last 7 days
 
 
 @app.post("/api/decisions/approve")
-async def approve_decision(decision_id: str = "budget_increase"):
-    """Approve a pending decision."""
+async def approve_decision_legacy(decision_id: str = "budget_increase"):
+    """Legacy endpoint - Approve a pending decision."""
     state.add_log(EventType.SYS_CONFIG, f"Decision APPROVED: {decision_id}")
     return {"status": "approved"}
+
+
+# ============================================================================
+# Decision Queue Endpoints
+# ============================================================================
+
+class DecisionActionRequest(BaseModel):
+    action_id: str
+
+
+@app.get("/api/decisions")
+async def get_decisions():
+    """Get all pending decisions."""
+    decisions = state.decision_queue.get_pending_decisions()
+    return {
+        "decisions": [d.to_dict() for d in decisions],
+        "count": len(decisions)
+    }
+
+
+@app.get("/api/decisions/{decision_id}")
+async def get_decision(decision_id: str):
+    """Get a specific decision."""
+    decision = state.decision_queue.get_decision(decision_id)
+    if not decision:
+        raise HTTPException(404, "Decision not found")
+    return decision.to_dict()
+
+
+@app.post("/api/decisions/{decision_id}/resolve")
+async def resolve_decision(decision_id: str, req: DecisionActionRequest):
+    """Resolve a decision by executing an action."""
+    success = state.decision_queue.resolve_decision(decision_id, req.action_id, "human")
+    if not success:
+        raise HTTPException(400, "Failed to resolve decision")
+
+    state.add_log(EventType.SYS_CONFIG, f"Decision {decision_id} resolved: {req.action_id}")
+    await state.broadcast_status()
+    return {"status": "resolved", "action": req.action_id}
+
+
+@app.post("/api/decisions/create/budget")
+async def create_budget_decision():
+    """Create a budget increase decision based on current metrics."""
+    config = load_config()
+    decision = state.decision_queue.create_budget_decision(
+        current_spend=state.total_cost,
+        daily_cap=config.budget.daily_usd_cap,
+        burn_rate=state.current_hour_cost
+    )
+    state.add_log(EventType.SYS_CONFIG, f"Budget decision created: {decision.id}")
+    return decision.to_dict()
+
+
+@app.post("/api/decisions/create/deployment")
+async def create_deployment_decision(version: str = "v1.0.0", summary: str = "Ready for deployment"):
+    """Create a deployment approval decision."""
+    decision = state.decision_queue.create_deployment_decision(version, summary)
+    state.add_log(EventType.SYS_CONFIG, f"Deployment decision created: {decision.id}")
+    return decision.to_dict()
+
+
+@app.post("/api/decisions/create/replan")
+async def create_replan_decision(reason: str = "Stall detected", blocked: int = 0):
+    """Create a replan decision."""
+    decision = state.decision_queue.create_replan_decision(reason, blocked)
+    state.add_log(EventType.SYS_CONFIG, f"Replan decision created: {decision.id}")
+    return decision.to_dict()
 
 
 # ============================================================================
@@ -1137,6 +1357,32 @@ async def resolve_escalation(escalation_id: str):
     return {"status": "resolved" if success else "not_found"}
 
 
+@app.post("/api/reports/generate/heartbeat")
+async def generate_heartbeat_report():
+    """Manually generate a 15-minute heartbeat report."""
+    metrics = {
+        "ci_health": state.ci_passes / max(1, state.ci_passes + state.ci_fails),
+        "governor_state": state.governor_state.value,
+        "active_workers": len([w for w in state.workers.values() if w.get("status") == "active"]),
+        "prs_merged": state.prs_merged,
+        "prs_open": state.prs_opened - state.prs_merged - state.prs_rejected,
+        "tasks_completed": state.tasks_completed,
+        "cost_usd": state.total_cost,
+        "ci_passes": state.ci_passes,
+        "ci_fails": state.ci_fails,
+    }
+
+    # Get governor actions from recent adjustments
+    governor_actions = []
+    if state.governor:
+        recent = state.governor.adjustments[-5:] if state.governor.adjustments else []
+        governor_actions = [f"{adj.type.value}: {adj.reason}" for adj in recent]
+
+    report = state.reporter.generate_heartbeat_report(metrics, governor_actions)
+    state.add_log(EventType.JUDGE_EVAL, f"Heartbeat report generated: {report.timestamp}")
+    return {"status": "generated", "filename": f"{report.timestamp}.md"}
+
+
 @app.post("/api/reports/generate/hourly")
 async def generate_hourly_report():
     """Manually generate an hourly ops report."""
@@ -1147,6 +1393,8 @@ async def generate_hourly_report():
         "prs_merged": state.prs_merged,
         "prs_open": state.prs_opened - state.prs_merged - state.prs_rejected,
         "burn_rate": state.current_hour_cost,
+        "tasks_completed": state.tasks_completed,
+        "cost_usd": state.total_cost,
     }
     report = state.reporter.generate_hourly_report(metrics, [])
     state.add_log(EventType.JUDGE_EVAL, f"Hourly report generated: {report.timestamp}")

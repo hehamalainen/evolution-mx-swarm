@@ -36,6 +36,8 @@ python -m mx-swarm.cli.main init --owner YOUR_GITHUB_USER --repo YOUR_REPO
 
 ### Configuration
 
+**Option A: Cloud API (Anthropic/OpenAI)**
+
 Set environment variables:
 
 ```bash
@@ -48,6 +50,36 @@ Or create a `.env` file:
 ```env
 ANTHROPIC_API_KEY=your-api-key
 GITHUB_TOKEN=your-github-token
+```
+
+**Option B: Local Models (Ollama) - Recommended for Development**
+
+```bash
+# Install Ollama
+curl -fsSL https://ollama.com/install.sh | sh
+
+# Pull a model (16GB+ RAM recommended)
+ollama pull mistral:7b
+
+# Start Ollama server
+ollama serve
+
+# Run setup script (auto-detects RAM and recommends model)
+bash setup_local_model_final.sh
+
+# Test local model integration
+python3 test_local_model_final.py
+```
+
+Configure `mx.config.json` for local models:
+```json
+{
+  "llm": {
+    "provider": "ollama",
+    "model": "mistral:7b",
+    "base_url": "http://localhost:11434"
+  }
+}
 ```
 
 ### Running the Swarm
@@ -63,6 +95,9 @@ python -m mx-swarm.cli.main run --workers 5
 python -m mx-swarm.cli.main plan      # Generate tasks from PRD
 python -m mx-swarm.cli.main status    # Check progress
 python -m mx-swarm.cli.main judge     # Run evaluation
+
+# Run local demo with Ollama (no API keys needed)
+python3 mx_swarm_local_demo_final.py --agents 3 --tasks 5
 ```
 
 ## Architecture
@@ -199,8 +234,9 @@ Trigger via workflow dispatch:
     }
   },
   "llm": {
-    "provider": "anthropic",
-    "model": "claude-sonnet-4-20250514"
+    "provider": "ollama",  // or "anthropic", "openai"
+    "model": "mistral:7b",
+    "base_url": "http://localhost:11434"
   },
   "worker": {
     "max_workers": 10,

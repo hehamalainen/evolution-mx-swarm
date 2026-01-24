@@ -151,8 +151,7 @@ async def cmd_run(args):
         sys.exit(1)
 
     if not os.environ.get("GITHUB_TOKEN") and not config.github.token:
-        print("Error: GITHUB_TOKEN not set")
-        sys.exit(1)
+        print("Warning: GITHUB_TOKEN not set - Enabling Local Mode (Mock GitHub)")
 
     if not os.environ.get("ANTHROPIC_API_KEY"):
         print("Warning: ANTHROPIC_API_KEY not set - using default LLM config")

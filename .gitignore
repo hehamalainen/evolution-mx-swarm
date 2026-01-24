@@ -18,3 +18,24 @@ venv/
 .DS_Store
 Thumbs.db
 
+# Environment and secrets
+.env
+.env.local
+*.key
+credentials.json
+
+# Logs
+*.log
+logs/
+
+# Test cache
+.pytest_cache/
+
+# Reports (generated at runtime)
+reports/heartbeat/
+reports/hourly/
+reports/daily/
+
+# Runtime artifacts
+decisions/
+

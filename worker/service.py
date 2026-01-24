@@ -150,12 +150,15 @@ class Worker:
         if self._github is None:
             token = self.config.github.token or os.environ.get("GITHUB_TOKEN")
             if not token:
-                raise RuntimeError("GITHUB_TOKEN not configured")
-            self._github = GitHubAPI(
-                token=token,
-                owner=self.config.github.repo_owner,
-                repo=self.config.github.repo_name,
-            )
+                # Use Mock API in Local Mode
+                print(f"[{self.worker_id}] No GITHUB_TOKEN found - using Mock GitHub API (Local Mode)")
+                self._github = MockGitHubAPI()
+            else:
+                self._github = GitHubAPI(
+                    token=token,
+                    owner=self.config.github.repo_owner,
+                    repo=self.config.github.repo_name,
+                )
         return self._github
 
     async def initialize(self) -> None:
@@ -169,6 +172,11 @@ class Worker:
 
     def _get_repo_url(self) -> str:
         """Get repository URL."""
+        # If running in Local Mode (no token), use local filesystem as 'remote'
+        token = self.config.github.token or os.environ.get("GITHUB_TOKEN")
+        if not token:
+            return os.getcwd()
+            
         owner = self.config.github.repo_owner
         repo = self.config.github.repo_name
         return f"https://github.com/{owner}/{repo}.git"
@@ -406,6 +414,7 @@ After the implementation, provide a brief summary of what you did and any notes.
 """
 
         try:
+            # self.github handles both Real and Mock implementations
             pr = await self.github.create_pull_request(
                 title=title,
                 body=body,
@@ -422,7 +431,7 @@ After the implementation, provide a brief summary of what you did and any notes.
     async def process_task(self, message: QueueMessage) -> bool:
         """
         Process a single task from queue.
-
+        
         Returns:
             True if task completed successfully
         """
@@ -432,9 +441,12 @@ After the implementation, provide a brief summary of what you did and any notes.
         task.assigned_worker = self.worker_id
 
         print(f"[{self.worker_id}] Processing task {task.id}: {task.goal}")
-
-        # Clone repo
+        
+        # Determine if we are in Local Mode (no token)
         token = self.config.github.token or os.environ.get("GITHUB_TOKEN")
+        is_local_mode = not token
+        
+        # Initialize Repo
         repo = GitRepo(
             repo_url=self._get_repo_url(),
             token=token,
@@ -442,11 +454,16 @@ After the implementation, provide a brief summary of what you did and any notes.
 
         try:
             # Clone and checkout branch
+            # In Local Mode, this clones from the local filesystem
             result = await repo.clone(
                 branch=self.config.github.default_branch,
                 depth=1,
             )
             if not result.success:
+                if is_local_mode:
+                    # In local mode, if clone fails (e.g. shallow clone on non-bare), try just copy?
+                    # But 'git clone . target' usually works.
+                    print(f"[{self.worker_id}] Local clone failed: {result.stderr}")
                 raise RuntimeError(f"Clone failed: {result.stderr}")
 
             # Create task branch
@@ -490,12 +507,15 @@ After the implementation, provide a brief summary of what you did and any notes.
                 author="MX Swarm <mx-swarm@automated.local>",
             )
 
-            # Push branch
+            # Push branch (Push to local filesystem in Local Mode)
             push_result = await repo.push(branch_name)
             if not push_result.success:
                 raise RuntimeError(f"Push failed: {push_result.stderr}")
+            
+            if is_local_mode:
+                print(f"[{self.worker_id}] Local Mode: Pushed branch {branch_name} to {repo._get_repo_url()}")
 
-            # Create PR
+            # Create PR (Mocked in Local Mode if initialized correctly)
             draft = not all_passed  # Draft if checks failed
             pr = await self._create_pr(repo, task, evidence, draft=draft)
 
@@ -602,6 +622,31 @@ After the implementation, provide a brief summary of what you did and any notes.
             await self.shutdown()
 
         return self.metrics
+
+
+class MockGitHubAPI:
+    """Mock GitHub API for Local Mode."""
+    
+    def __init__(self, *args, **kwargs):
+        pass
+        
+    async def create_pull_request(self, title, body, head, base, draft=False) -> dict:
+        print(f"[MockGitHub] Creating PR: {title}")
+        return {
+            "number": 999,
+            "html_url": "http://localhost/mock/pr/999",
+            "title": title,
+            "state": "open"
+        }
+        
+    async def get_pull_request(self, number) -> dict:
+        return {"id": number, "state": "open"}
+        
+    async def list_pull_requests(self, state="open", head=None) -> list:
+        return []
+        
+    async def all_checks_passed(self, ref) -> bool:
+        return True
 
 
 async def main():

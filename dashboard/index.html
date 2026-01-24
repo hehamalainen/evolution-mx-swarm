@@ -5,6 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>MX Swarm Dashboard</title>
+    <!-- Mermaid disabled - using text-based org chart instead -->
     <style>
         :root {
             --bg-primary: #0f1419;
@@ -825,6 +826,14 @@
                                 <span style="color: var(--text-secondary); font-size: 0.75rem;">Team Composition:</span>
                                 <div id="analysis-team" style="margin-top: 0.25rem; font-size: 0.8rem;"></div>
                             </div>
+                            <div
+                                style="margin-top: 1rem; border-top: 1px solid var(--border-color); padding-top: 1rem;">
+                                <span style="color: var(--text-secondary); font-size: 0.75rem;">Org Chart:</span>
+                                <div id="org-chart-container"
+                                    style="margin-top: 0.5rem; background: var(--bg-primary); border-radius: 4px; padding: 0.5rem; overflow: auto; max-height: 300px;">
+                                    <div id="org-chart"></div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -909,15 +918,24 @@
                 <div class="card-header">
                     <div class="card-title">📋 Ops Reports</div>
                     <div style="display: flex; gap: 0.5rem;">
+                        <button class="btn btn-secondary" onclick="loadReports('heartbeat')"
+                            style="font-size: 0.7rem; padding: 0.2rem 0.5rem;">15m</button>
                         <button class="btn btn-secondary" onclick="loadReports('hourly')"
                             style="font-size: 0.7rem; padding: 0.2rem 0.5rem;">Hourly</button>
                         <button class="btn btn-secondary" onclick="loadReports('daily')"
                             style="font-size: 0.7rem; padding: 0.2rem 0.5rem;">Daily</button>
+                        <button class="btn btn-primary" onclick="generateReport()"
+                            style="font-size: 0.7rem; padding: 0.2rem 0.5rem;">Generate</button>
+                        <button class="btn btn-secondary" onclick="exportReport()"
+                            style="font-size: 0.7rem; padding: 0.2rem 0.5rem;">Export</button>
                     </div>
                 </div>
                 <div id="report-viewer"
                     style="height: 200px; overflow-y: auto; background: var(--bg-secondary); padding: 1rem; border-radius: 8px; font-size: 0.8rem; white-space: pre-wrap; font-family: monospace;">
                     Select a report type to view...
+                </div>
+                <div id="report-list" style="margin-top: 0.5rem; display: flex; gap: 0.25rem; flex-wrap: wrap;">
+                    <!-- Report history buttons will be inserted here -->
                 </div>
             </div>
 
@@ -925,29 +943,25 @@
             <div class="card">
                 <div class="card-header">
                     <div class="card-title">🗳️ Decisions Needed</div>
-                    <span class="card-badge" id="decision-count">1 Pending</span>
+                    <span class="card-badge" id="decision-count">0 Pending</span>
                 </div>
-                <div id="decisions-list" style="display: flex; flex-direction: column; gap: 0.75rem;">
-                    <!-- Mock Decision -->
-                    <div class="decision-item"
-                        style="background: var(--bg-secondary); padding: 1rem; border-radius: 8px; border-left: 3px solid var(--accent-yellow);">
-                        <div style="font-weight: 600; margin-bottom: 0.25rem;">💰 Budget Cap Approaching</div>
-                        <div style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.75rem;">
-                            Burn rate is high. Forecast to hit daily cap in 2 hours. Approve $50 increase?
-                        </div>
-                        <div style="display: flex; gap: 0.5rem;">
-                            <button class="btn btn-success" onclick="approveDecision('budget_increase')"
-                                style="font-size: 0.75rem; padding: 0.25rem 0.75rem;">Approve Increase</button>
-                            <button class="btn btn-secondary"
-                                style="font-size: 0.75rem; padding: 0.25rem 0.75rem;">Dismiss</button>
-                        </div>
+                <div id="decisions-list"
+                    style="display: flex; flex-direction: column; gap: 0.75rem; max-height: 250px; overflow-y: auto;">
+                    <div style="color: var(--text-secondary); padding: 1rem; text-align: center; font-size: 0.85rem;">
+                        No pending decisions
                     </div>
+                </div>
+                <div style="margin-top: 0.75rem; display: flex; gap: 0.5rem;">
+                    <button class="btn btn-secondary" onclick="createBudgetDecision()" style="font-size: 0.7rem;">+
+                        Budget</button>
+                    <button class="btn btn-secondary" onclick="createDeployDecision()" style="font-size: 0.7rem;">+
+                        Deploy</button>
                 </div>
             </div>
         </div>
 
-        <!-- Telemetry Row: Worker Scaling, Governor Adjustments, Escalations -->
-        <div class="content-grid" style="margin-bottom: 1.5rem; grid-template-columns: 1fr 1fr 1fr;">
+        <!-- Telemetry Row: Worker Scaling, Governor Adjustments, Escalations, Org Builder -->
+        <div class="content-grid" style="margin-bottom: 1.5rem; grid-template-columns: 1fr 1fr 1fr 1fr;">
             <!-- Worker Scaling Card -->
             <div class="card">
                 <div class="card-header">
@@ -996,6 +1010,19 @@
                 <div id="escalations-list" style="max-height: 180px; overflow-y: auto;">
                     <div style="color: var(--text-secondary); padding: 1rem; text-align: center; font-size: 0.85rem;">No
                         active escalations</div>
+                </div>
+            </div>
+
+            <!-- Org Builder (5.6) -->
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-title">🏢 Org Builder</span>
+                    <span class="card-badge" id="org-builder-version">TEAMPLAN</span>
+                </div>
+                <div id="org-builder-content" style="max-height: 200px; overflow-y: auto;">
+                    <div style="color: var(--text-secondary); padding: 1rem; text-align: center; font-size: 0.85rem;">
+                        No TEAMPLAN loaded. Run simulation or load a PRD.
+                    </div>
                 </div>
             </div>
         </div>
@@ -1068,6 +1095,7 @@
                     <thead>
                         <tr>
                             <th>ID</th>
+                            <th>PRD-Ref</th>
                             <th>Spec-Ref</th>
                             <th>Goal</th>
                             <th>Worker</th>
@@ -1292,8 +1320,14 @@
             document.getElementById('worker-scale-progress').style.width = scalePercent + '%';
             // Update Boss recommended display if Agent Boss Analysis is visible (teamplan)
             if (ws.teamplan_recommended) {
-                const bossWorkers = document.getElementById('boss-recommended-workers');
+                const bossWorkers = document.getElementById('analysis-workers');
                 if (bossWorkers) bossWorkers.textContent = ws.teamplan_recommended;
+            }
+
+            // Render Org Chart (5.6) and Org Builder Card
+            if (status.teamplan) {
+                renderOrgChart(status.teamplan);
+                updateOrgBuilderCard(status.teamplan);
             }
 
             const swarmStatus = document.getElementById('swarm-status');
@@ -1322,11 +1356,12 @@
             document.getElementById('task-count').textContent = tasks.length;
 
             if (tasks.length === 0) {
-                tasksTable.innerHTML = '<tr><td colspan="7" style="text-align: center; color: var(--text-secondary);">No active tasks</td></tr>';
+                tasksTable.innerHTML = '<tr><td colspan="8" style="text-align: center; color: var(--text-secondary);">No active tasks</td></tr>';
             } else {
                 tasksTable.innerHTML = tasks.map(task => `
                     <tr>
                         <td>#${(task.id || '').substring(0, 6).toUpperCase()}</td>
+                        <td style="font-family: monospace; font-size: 0.7rem;">${task.prd_ref || '-'}</td>
                         <td style="font-family: monospace; font-size: 0.7rem;">${task.spec_ref || '-'}</td>
                         <td>${(task.goal || '').substring(0, 40)}</td>
                         <td>${task.worker || '-'}</td>
@@ -1611,6 +1646,119 @@
             teamContainer.innerHTML = analysis.team_composition.map(member =>
                 `<div>• ${member.role}: <strong>${member.count}</strong></div>`
             ).join('');
+
+            // Render Org Chart for analysis
+            if (analysis.teamplan) {
+                renderOrgChart(analysis.teamplan);
+            }
+        }
+
+        function renderOrgChart(teamplan) {
+            try {
+                const container = document.getElementById('org-chart');
+                if (!container) return;
+                if (!teamplan || !teamplan.streams || teamplan.streams.length === 0) {
+                    container.innerHTML = '<div style="color: #666; padding: 1rem; text-align: center;">No team structure defined</div>';
+                    return;
+                }
+
+                // Use fallback text-based display instead of mermaid (more reliable)
+                renderOrgChartFallback(container, teamplan);
+            } catch (err) {
+                console.error('Org chart render error:', err);
+                const container = document.getElementById('org-chart');
+                if (container) {
+                    container.innerHTML = '<div style="color: #666; padding: 1rem;">Error rendering org chart</div>';
+                }
+            }
+        }
+
+        function renderOrgChartFallback(container, teamplan) {
+            // Fallback text-based org chart with dark theme colors
+            if (!teamplan || !teamplan.streams) {
+                container.innerHTML = '<div style="color: var(--text-secondary); padding: 1rem;">No team data</div>';
+                return;
+            }
+            let html = '<div style="font-family: monospace; padding: 0.75rem; background: var(--bg-secondary); border-radius: 6px;">';
+            html += '<div style="font-weight: bold; margin-bottom: 0.75rem; color: var(--accent-blue); font-size: 1rem;">🤖 Agent Boss</div>';
+            html += '<div style="margin-left: 0.5rem; border-left: 2px solid var(--border-color); padding-left: 0.75rem;">';
+            teamplan.streams.forEach((s, i) => {
+                const isLast = i === teamplan.streams.length - 1;
+                const connector = isLast ? '└─' : '├─';
+                const roleColor = s.role === 'Coder' ? 'var(--accent-green)' :
+                                  s.role === 'Tester' ? 'var(--accent-yellow)' : 'var(--accent-blue)';
+                html += `<div style="margin: 0.5rem 0; color: var(--text-primary);">
+                    <span style="color: var(--text-secondary);">${connector}</span>
+                    <span style="font-weight: 600;">${s.name || 'Stream'}</span>
+                    <span style="color: ${roleColor}; margin-left: 0.5rem;">(${s.role || 'Worker'})</span>
+                    <span style="color: var(--text-secondary); margin-left: 0.5rem;">${s.target_workers || 0}/${s.max_workers || 0} workers</span>
+                </div>`;
+            });
+            html += '</div>';
+            html += `<div style="margin-top: 0.75rem; padding-top: 0.5rem; border-top: 1px solid var(--border-color); color: var(--text-secondary); font-size: 0.85rem;">
+                Total: <span style="color: var(--text-primary); font-weight: 600;">${teamplan.total_target_workers || 0}</span> / ${teamplan.total_max_workers || 0} workers
+            </div>`;
+            html += '</div>';
+            container.innerHTML = html;
+        }
+
+        // Update the standalone org builder card
+        function updateOrgBuilderCard(teamplan) {
+            const container = document.getElementById('org-builder-content');
+            if (!container) return;
+
+            if (!teamplan || !teamplan.streams || teamplan.streams.length === 0) {
+                container.innerHTML = '<div style="color: var(--text-secondary); text-align: center; padding: 1rem;">No TEAMPLAN loaded. Run simulation or load a PRD.</div>';
+                return;
+            }
+
+            let html = '<div style="display: flex; flex-direction: column; gap: 0.5rem;">';
+
+            // Version and topology
+            html += `<div style="font-size: 0.75rem; color: var(--text-secondary);">v${teamplan.version || '1.0'} | ${teamplan.topology || 'SWARM'}</div>`;
+
+            // Streams
+            teamplan.streams.forEach(stream => {
+                const utilization = stream.max_workers > 0 ? (stream.target_workers / stream.max_workers * 100) : 0;
+                const barColor = utilization > 80 ? 'var(--accent-yellow)' : 'var(--accent-green)';
+
+                html += `
+                    <div style="background: var(--bg-secondary); padding: 0.5rem; border-radius: 4px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <span style="font-weight: 600;">${stream.name}</span>
+                            <span style="font-size: 0.75rem; color: var(--text-secondary);">${stream.role}</span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; font-size: 0.8rem; margin-top: 0.25rem;">
+                            <span>${stream.target_workers}/${stream.max_workers} workers</span>
+                            <span style="color: var(--text-secondary);">P${stream.priority || 1}</span>
+                        </div>
+                        <div style="height: 4px; background: var(--bg-primary); border-radius: 2px; margin-top: 0.25rem;">
+                            <div style="height: 100%; width: ${utilization}%; background: ${barColor}; border-radius: 2px;"></div>
+                        </div>
+                    </div>
+                `;
+            });
+
+            // Totals
+            html += `
+                <div style="display: flex; justify-content: space-between; padding-top: 0.5rem; border-top: 1px solid var(--border-color); font-size: 0.85rem;">
+                    <span>Total Headcount</span>
+                    <span style="font-weight: 600;">${teamplan.total_target_workers || 0} / ${teamplan.total_max_workers || 0}</span>
+                </div>
+            `;
+
+            // Caps
+            if (teamplan.caps) {
+                html += `
+                    <div style="font-size: 0.75rem; color: var(--text-secondary); display: flex; gap: 1rem;">
+                        <span>PR/hr: ${teamplan.caps.pr_cap_per_hour || 15}</span>
+                        <span>Open PRs: ${teamplan.caps.open_pr_cap || 25}</span>
+                    </div>
+                `;
+            }
+
+            html += '</div>';
+            container.innerHTML = html;
         }
 
         function clearPRD(event) {
@@ -1656,36 +1804,158 @@
             }
         }
 
+        // Current report type for export
+        let currentReportType = 'hourly';
+        let currentReportContent = '';
+
         async function loadReports(type) {
+            currentReportType = type;
             try {
                 const response = await fetch(`/api/reports/${type}`);
                 const data = await response.json();
                 const viewer = document.getElementById('report-viewer');
+                const reportList = document.getElementById('report-list');
 
                 if (data.reports && data.reports.length > 0) {
                     // Show latest report
-                    viewer.textContent = data.reports[0].content;
+                    currentReportContent = data.reports[0].content;
+                    viewer.textContent = currentReportContent;
+
+                    // Show report history buttons
+                    reportList.innerHTML = data.reports.slice(0, 10).map((r, i) =>
+                        `<button class="btn btn-secondary" onclick="showReport('${type}', ${i})"
+                         style="font-size: 0.6rem; padding: 0.1rem 0.3rem;">${r.timestamp}</button>`
+                    ).join('');
                 } else {
-                    viewer.textContent = "No reports found.";
+                    viewer.textContent = "No reports found. Click 'Generate' to create one.";
+                    reportList.innerHTML = '';
                 }
             } catch (error) {
                 console.error('Error loading reports:', error);
+                document.getElementById('report-viewer').textContent = "Error loading reports.";
             }
         }
 
-        async function approveDecision(id) {
+        async function showReport(type, index) {
             try {
-                await fetch(`/api/decisions/approve?decision_id=${id}`, { method: 'POST' });
-                // Remove the decision item (mock)
-                const btn = event.target;
-                const item = btn.closest('.decision-item');
-                item.style.opacity = '0.5';
-                btn.textContent = 'Approved';
-                btn.disabled = true;
-
-                document.getElementById('decision-count').textContent = '0 Pending';
+                const response = await fetch(`/api/reports/${type}`);
+                const data = await response.json();
+                if (data.reports && data.reports[index]) {
+                    currentReportContent = data.reports[index].content;
+                    document.getElementById('report-viewer').textContent = currentReportContent;
+                }
             } catch (error) {
-                console.error('Error approving decision:', error);
+                console.error('Error showing report:', error);
+            }
+        }
+
+        async function generateReport() {
+            try {
+                const endpoint = currentReportType === 'daily'
+                    ? '/api/reports/generate/daily'
+                    : '/api/reports/generate/hourly';
+                await fetch(endpoint, { method: 'POST' });
+                addLog({ timestamp: new Date().toLocaleTimeString(), event_type: 'JUDGE_EVAL', level: 'info', message: `${currentReportType} report generated` });
+                loadReports(currentReportType);
+            } catch (error) {
+                console.error('Error generating report:', error);
+            }
+        }
+
+        function exportReport() {
+            if (!currentReportContent) {
+                alert('No report loaded to export');
+                return;
+            }
+            const blob = new Blob([currentReportContent], { type: 'text/markdown' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${currentReportType}-report-${new Date().toISOString().split('T')[0]}.md`;
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+
+        // Decision Queue functions
+        function updateDecisionsList(decisions) {
+            const list = document.getElementById('decisions-list');
+            const countBadge = document.getElementById('decision-count');
+
+            if (!decisions || decisions.length === 0) {
+                countBadge.textContent = '0 Pending';
+                list.innerHTML = '<div style="color: var(--text-secondary); padding: 1rem; text-align: center; font-size: 0.85rem;">No pending decisions</div>';
+                return;
+            }
+
+            countBadge.textContent = `${decisions.length} Pending`;
+            list.innerHTML = decisions.map(d => {
+                const priorityColor = d.priority === 'critical' ? 'var(--accent-red)' :
+                    d.priority === 'high' ? 'var(--accent-orange)' : 'var(--accent-yellow)';
+                const actionsHtml = (d.actions || []).map(a => {
+                    const style = a.style === 'success' ? 'btn-success' :
+                        a.style === 'danger' ? 'btn-danger' :
+                            a.style === 'warning' ? 'btn-warning' : 'btn-secondary';
+                    const isRecommended = d.recommended_action === a.id ? ' (Recommended)' : '';
+                    return `<button class="btn ${style}" onclick="resolveDecision('${d.id}', '${a.id}')"
+                            style="font-size: 0.7rem; padding: 0.2rem 0.5rem;">${a.label}${isRecommended}</button>`;
+                }).join('');
+
+                return `
+                    <div class="decision-item" style="background: var(--bg-secondary); padding: 1rem; border-radius: 8px; border-left: 3px solid ${priorityColor};">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <div style="font-weight: 600; margin-bottom: 0.25rem;">${d.title}</div>
+                            <span style="font-size: 0.65rem; color: ${priorityColor}; text-transform: uppercase;">${d.priority}</span>
+                        </div>
+                        <div style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.75rem;">${d.description}</div>
+                        <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">${actionsHtml}</div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        async function resolveDecision(decisionId, actionId) {
+            try {
+                const response = await fetch(`/api/decisions/${decisionId}/resolve`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action_id: actionId })
+                });
+                if (response.ok) {
+                    addLog({ timestamp: new Date().toLocaleTimeString(), event_type: 'SYS_CONFIG', level: 'info', message: `Decision ${decisionId} resolved: ${actionId}` });
+                    fetchDecisions();
+                } else {
+                    alert('Failed to resolve decision');
+                }
+            } catch (error) {
+                console.error('Error resolving decision:', error);
+            }
+        }
+
+        async function fetchDecisions() {
+            try {
+                const response = await fetch('/api/decisions');
+                const data = await response.json();
+                updateDecisionsList(data.decisions);
+            } catch (error) {
+                console.error('Error fetching decisions:', error);
+            }
+        }
+
+        async function createBudgetDecision() {
+            try {
+                await fetch('/api/decisions/create/budget', { method: 'POST' });
+                fetchDecisions();
+            } catch (error) {
+                console.error('Error creating budget decision:', error);
+            }
+        }
+
+        async function createDeployDecision() {
+            try {
+                await fetch('/api/decisions/create/deployment', { method: 'POST' });
+                fetchDecisions();
+            } catch (error) {
+                console.error('Error creating deploy decision:', error);
             }
         }
 
@@ -1792,12 +2062,14 @@
             fetchTelemetry();
             fetchGovernorAdjustments();
             fetchEscalations();
+            fetchDecisions();
         }, 5000);
 
         // Initial fetch
         fetchTelemetry();
         fetchGovernorAdjustments();
         fetchEscalations();
+        fetchDecisions();
     </script>
 </body>
 

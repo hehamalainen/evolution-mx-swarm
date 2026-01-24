@@ -1,0 +1,195 @@
+{
+  "version": "1.0.0",
+  "prd_hash": "34142c481a1cf1d9",
+  "generated_at": "2026-01-24T13:08:17.369872",
+  "requirements": [
+    {
+      "id": "REQ-4BAEC2",
+      "type": "functional",
+      "title": "Scenario-based gameplay",
+      "description": "Custom scenarios focusing on planning and managing AI projects",
+      "acceptance_criteria": [
+        "Game offers a variety of customizable scenarios for AI project management"
+      ],
+      "dependencies": [],
+      "status": "in_progress",
+      "prd_section": "4. Core Features",
+      "priority": 10,
+      "estimated_complexity": 8,
+      "assigned_tasks": [
+        "6df78363",
+        "6a04131a"
+      ],
+      "completion_evidence": []
+    },
+    {
+      "id": "REQ-264211",
+      "type": "functional",
+      "title": "Adjustable difficulty levels",
+      "description": "Cater to different experience levels in AI",
+      "acceptance_criteria": [
+        "Users can select and adjust the difficulty level of scenarios"
+      ],
+      "dependencies": [],
+      "status": "in_progress",
+      "prd_section": "4. Core Features",
+      "priority": 9,
+      "estimated_complexity": 6,
+      "assigned_tasks": [
+        "5e496411",
+        "d04f73fb"
+      ],
+      "completion_evidence": []
+    },
+    {
+      "id": "REQ-A357F7",
+      "type": "functional",
+      "title": "Feedback system",
+      "description": "Show the impact of decisions and provide learning points",
+      "acceptance_criteria": [
+        "Users receive feedback on their decisions, including explanations for success or failure"
+      ],
+      "dependencies": [],
+      "status": "in_progress",
+      "prd_section": "4. Core Features",
+      "priority": 8,
+      "estimated_complexity": 7,
+      "assigned_tasks": [
+        "3cf7c39f"
+      ],
+      "completion_evidence": []
+    },
+    {
+      "id": "REQ-949F3D",
+      "type": "functional",
+      "title": "Progress tracking",
+      "description": "Track users' progress through levels and scenario completions",
+      "acceptance_criteria": [
+        "Users can view their progress in the game, including completed scenarios and levels"
+      ],
+      "dependencies": [],
+      "status": "in_progress",
+      "prd_section": "4. Core Features",
+      "priority": 7,
+      "estimated_complexity": 6,
+      "assigned_tasks": [
+        "0f429357",
+        "e4fc21db"
+      ],
+      "completion_evidence": []
+    },
+    {
+      "id": "REQ-D824B1",
+      "type": "functional",
+      "title": "Dynamic consequences",
+      "description": "Choices lead to varying success levels based on timeline estimates, resource allocation, and deliverable definitions",
+      "acceptance_criteria": [
+        "Users' decisions in the game have real-world implications, such as project delays or cost overruns"
+      ],
+      "dependencies": [],
+      "status": "in_progress",
+      "prd_section": "4. Core Features",
+      "priority": 6,
+      "estimated_complexity": 8,
+      "assigned_tasks": [
+        "fe1e48c7",
+        "9b05d97d"
+      ],
+      "completion_evidence": []
+    },
+    {
+      "id": "REQ-B92CDC",
+      "type": "functional",
+      "title": "AI glossary or tooltips",
+      "description": "Help users unfamiliar with terms (e.g., 'machine learning', 'model training')",
+      "acceptance_criteria": [
+        "Game provides definitions and explanations for AI-related terminology"
+      ],
+      "dependencies": [],
+      "status": "in_progress",
+      "prd_section": "4. Core Features",
+      "priority": 5,
+      "estimated_complexity": 4,
+      "assigned_tasks": [
+        "7dd58a43"
+      ],
+      "completion_evidence": []
+    },
+    {
+      "id": "REQ-358ED6",
+      "type": "functional",
+      "title": "Scoreboards",
+      "description": "Allow users to compete asynchronously with peers in leaderboards",
+      "acceptance_criteria": [
+        "Users can view a leaderboard showing their rank and scores compared to other players"
+      ],
+      "dependencies": [],
+      "status": "in_progress",
+      "prd_section": "4. Core Features",
+      "priority": 4,
+      "estimated_complexity": 5,
+      "assigned_tasks": [
+        "5dd2465f",
+        "db781433"
+      ],
+      "completion_evidence": []
+    },
+    {
+      "id": "REQ-8E46C3",
+      "type": "non_functional",
+      "title": "Subscription-based platform",
+      "description": "Offer the game as a subscription for educational purposes",
+      "acceptance_criteria": [
+        "Users can subscribe to access the game, with options for monthly or annual subscriptions"
+      ],
+      "dependencies": [],
+      "status": "in_progress",
+      "prd_section": "1. Executive Summary",
+      "priority": 3,
+      "estimated_complexity": 2,
+      "assigned_tasks": [
+        "a5da9f5f",
+        "082cdacc"
+      ],
+      "completion_evidence": []
+    },
+    {
+      "id": "REQ-6F4E22",
+      "type": "non_functional",
+      "title": "Custom, evolving scenarios",
+      "description": "Provide users with new and updated scenarios to practice AI project management",
+      "acceptance_criteria": [
+        "Scenarios are regularly updated and rotated to keep the game fresh and relevant"
+      ],
+      "dependencies": [],
+      "status": "in_progress",
+      "prd_section": "1. Executive Summary",
+      "priority": 2,
+      "estimated_complexity": 3,
+      "assigned_tasks": [
+        "1f8d62cc",
+        "abf43a58"
+      ],
+      "completion_evidence": []
+    },
+    {
+      "id": "REQ-FF7F5C",
+      "type": "constraint",
+      "title": "Real-world business scenarios focus",
+      "description": "Focus on specific, real-world business scenarios for educational relevance",
+      "acceptance_criteria": [
+        "All scenarios are based on real-world business situations"
+      ],
+      "dependencies": [],
+      "status": "in_progress",
+      "prd_section": "1. Executive Summary",
+      "priority": 1,
+      "estimated_complexity": 1,
+      "assigned_tasks": [
+        "afc8c306"
+      ],
+      "completion_evidence": []
+    }
+  ],
+  "metadata": {}
+}

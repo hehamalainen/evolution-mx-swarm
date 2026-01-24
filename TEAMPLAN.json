@@ -1,0 +1,141 @@
+{
+  "version": "0.1",
+  "topology": "streams",
+  "streams": [
+    {
+      "name": "feature",
+      "role": "feature_engineer",
+      "target_workers": 5,
+      "max_workers": 7,
+      "tools": [
+        "git",
+        "tests",
+        "ci",
+        "read",
+        "write"
+      ],
+      "priority": 2
+    },
+    {
+      "name": "qa",
+      "role": "qa_engineer",
+      "target_workers": 2,
+      "max_workers": 2,
+      "tools": [
+        "git",
+        "tests",
+        "ci",
+        "read"
+      ],
+      "priority": 3
+    },
+    {
+      "name": "ops",
+      "role": "ops_engineer",
+      "target_workers": 1,
+      "max_workers": 1,
+      "tools": [
+        "git",
+        "ci",
+        "deploy",
+        "observability"
+      ],
+      "priority": 2
+    },
+    {
+      "name": "security",
+      "role": "security_engineer",
+      "target_workers": 1,
+      "max_workers": 1,
+      "tools": [
+        "git",
+        "ci",
+        "scan",
+        "read"
+      ],
+      "priority": 4
+    },
+    {
+      "name": "docs",
+      "role": "docs_engineer",
+      "target_workers": 1,
+      "max_workers": 1,
+      "tools": [
+        "git",
+        "read",
+        "write"
+      ],
+      "priority": 1
+    }
+  ],
+  "pods": [],
+  "caps": {
+    "pr_cap_per_hour": 15,
+    "open_pr_cap": 25,
+    "max_parallel_ci": 10,
+    "max_active_tasks": 10
+  },
+  "risk_merge_policy": {
+    "tier0": "auto_on_green",
+    "tier1": "auto_on_green_feature_flag",
+    "tier2": "manual_review_required"
+  },
+  "task_policy": {
+    "requires_spec_ref": true,
+    "max_files_touched": 12,
+    "max_modules_touched": 3,
+    "max_task_minutes": 60,
+    "require_tests": true,
+    "require_evidence": true
+  },
+  "retry_policy": {
+    "max_retries": 3,
+    "backoff_seconds": [
+      60,
+      300,
+      900
+    ],
+    "dlq_enabled": true
+  },
+  "budget_policy": {
+    "usd_per_day": 50.0,
+    "usd_per_hour_soft": 6.25,
+    "hard_stop": true,
+    "burn_alert_thresholds": [
+      50,
+      75,
+      90
+    ]
+  },
+  "reorg_policy": {
+    "interval_minutes": 45,
+    "hysteresis_minutes": 30,
+    "max_worker_delta_per_interval": 20,
+    "prefer_caps_before_reorg": true,
+    "allow_stream_merge": false,
+    "allow_stream_split": false
+  },
+  "reset_triggers": {
+    "ci_health_lt": 85,
+    "nack_rate_gt": 25,
+    "stall_minutes_gt": 60,
+    "conflict_rate_gt": 30,
+    "retry_cascade_count": 5
+  },
+  "observability": {
+    "emit_task_events": true,
+    "emit_pr_events": true,
+    "emit_ci_events": true,
+    "emit_governor_events": true,
+    "emit_budget_events": true,
+    "emit_coordination_metrics": true,
+    "metrics_interval_seconds": 30
+  },
+  "prd_hash": "34142c481a1cf1d9",
+  "spec_hash": null,
+  "created_at": "2026-01-24T13:25:37.200298",
+  "created_by": "org_builder",
+  "complexity_score": 0.7481666666666666,
+  "coupling_score": 0.0,
+  "risk_score": 0.3333333333333333
+}

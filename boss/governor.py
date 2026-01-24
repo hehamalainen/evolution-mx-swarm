@@ -104,7 +104,13 @@ class TelemetrySnapshot:
 
 @dataclass
 class GovernorState:
-    """Current state of the governor."""
+    """Current state of the governor.
+
+    Anti-thrash mechanism:
+    - 20% max change per interval for caps/workers
+    - Hysteresis windows to prevent rapid toggling
+    - Cooldown periods after adjustments
+    """
     mode: GovernorMode = GovernorMode.NORMAL
     frozen_tiers: List[int] = field(default_factory=list)  # Risk tiers frozen for new PRs
 
@@ -113,16 +119,26 @@ class GovernorState:
     current_open_pr_cap: int = 25
     current_max_workers: int = 100
 
+    # Baseline caps (for 20% change calculation)
+    baseline_pr_cap_hour: int = 15
+    baseline_open_pr_cap: int = 25
+    baseline_max_workers: int = 100
+
     # Trigger history (for hysteresis)
     trigger_history: Dict[TriggerType, List[datetime]] = field(default_factory=dict)
 
     # Last adjustments (for rate limiting)
     last_adjustment_time: Optional[datetime] = None
     last_reorg_time: Optional[datetime] = None
+    cooldown_until: Optional[datetime] = None
 
     # Consecutive issues (for cascade detection)
     consecutive_ci_fails: int = 0
     consecutive_retries: int = 0
+
+    # Total adjustments in current interval (for 20% limit)
+    adjustments_this_interval: int = 0
+    interval_start: Optional[datetime] = None
 
 
 @dataclass
@@ -159,9 +175,20 @@ class Governor:
     The governor runs periodically and:
     1. Collects telemetry
     2. Checks trigger conditions
-    3. Makes adjustments within limits
+    3. Makes adjustments within limits (20% max change per interval)
     4. Records decisions for observability
+
+    Anti-Thrash Mechanism:
+    - 20% max change per interval: No single adjustment can change a cap by more than 20%
+    - Hysteresis windows: Triggers must persist for N minutes before action
+    - Cooldown periods: After an adjustment, wait before making another
+    - Interval reset: The 20% limit resets each interval (default 15 minutes)
     """
+
+    # Anti-thrash constants
+    MAX_CHANGE_PERCENT = 0.20  # 20% max change per interval
+    COOLDOWN_MINUTES = 5       # Cooldown after each adjustment
+    INTERVAL_MINUTES = 15      # Interval for 20% limit reset
 
     def __init__(
         self,
@@ -173,11 +200,16 @@ class Governor:
         self.get_telemetry = telemetry_provider
         self.on_adjustment = on_adjustment
 
-        # Initialize state from teamplan
+        # Initialize state from teamplan with baselines
         self.state = GovernorState(
             current_pr_cap_hour=teamplan.caps.pr_cap_per_hour,
             current_open_pr_cap=teamplan.caps.open_pr_cap,
-            current_max_workers=teamplan.total_max_workers()
+            current_max_workers=teamplan.total_max_workers(),
+            # Baselines for 20% change calculation
+            baseline_pr_cap_hour=teamplan.caps.pr_cap_per_hour,
+            baseline_open_pr_cap=teamplan.caps.open_pr_cap,
+            baseline_max_workers=teamplan.total_max_workers(),
+            interval_start=datetime.utcnow()
         )
 
         # Adjustment history
@@ -186,6 +218,74 @@ class Governor:
         # Running flag
         self._running = False
         self._task: Optional[asyncio.Task] = None
+
+    # =========================================================================
+    # Anti-Thrash Methods
+    # =========================================================================
+
+    def _is_in_cooldown(self) -> bool:
+        """Check if we're in a cooldown period after a recent adjustment."""
+        if self.state.cooldown_until is None:
+            return False
+        return datetime.utcnow() < self.state.cooldown_until
+
+    def _check_interval_reset(self):
+        """Reset the 20% limit on new interval."""
+        now = datetime.utcnow()
+        if self.state.interval_start is None:
+            self.state.interval_start = now
+            self.state.adjustments_this_interval = 0
+            return
+
+        # Check if interval has passed
+        interval_elapsed = (now - self.state.interval_start).total_seconds() / 60
+        if interval_elapsed >= self.INTERVAL_MINUTES:
+            # Reset baselines to current values for next interval
+            self.state.baseline_pr_cap_hour = self.state.current_pr_cap_hour
+            self.state.baseline_open_pr_cap = self.state.current_open_pr_cap
+            self.state.baseline_max_workers = self.state.current_max_workers
+            self.state.interval_start = now
+            self.state.adjustments_this_interval = 0
+            logger.debug("Interval reset - new baselines set")
+
+    def _clamp_to_max_change(self, current: int, target: int, baseline: int) -> int:
+        """
+        Clamp a change to the 20% max change limit.
+
+        Args:
+            current: Current value
+            target: Desired target value
+            baseline: Baseline value for 20% calculation
+
+        Returns:
+            Clamped value that respects the 20% limit
+        """
+        max_delta = max(1, int(baseline * self.MAX_CHANGE_PERCENT))
+
+        if target > current:
+            # Increasing - cap at +20%
+            return min(target, current + max_delta)
+        else:
+            # Decreasing - cap at -20%
+            return max(target, current - max_delta)
+
+    def _set_cooldown(self):
+        """Set cooldown period after an adjustment."""
+        self.state.cooldown_until = datetime.utcnow() + timedelta(minutes=self.COOLDOWN_MINUTES)
+        self.state.adjustments_this_interval += 1
+
+    def _can_adjust(self) -> bool:
+        """Check if an adjustment can be made (not in cooldown, interval ok)."""
+        if self._is_in_cooldown():
+            logger.debug("Skipping adjustment - in cooldown period")
+            return False
+
+        self._check_interval_reset()
+        return True
+
+    # =========================================================================
+    # Main Loop
+    # =========================================================================
 
     async def start(self):
         """Start the governor loop."""
@@ -323,32 +423,66 @@ class Governor:
         trigger: TriggerType,
         telemetry: TelemetrySnapshot
     ) -> bool:
-        """Try to resolve trigger by adjusting caps. Returns True if sufficient."""
+        """Try to resolve trigger by adjusting caps. Returns True if sufficient.
+
+        Respects the 20% max change per interval anti-thrash limit.
+        """
+        # Check if we can make an adjustment
+        if not self._can_adjust():
+            return False
 
         if trigger == TriggerType.CI_HEALTH_LOW:
             # Reduce PR rate to let CI catch up
-            new_cap = max(5, self.state.current_pr_cap_hour - 3)
+            # Target: reduce by 3, but clamp to 20% max change
+            target_cap = max(5, self.state.current_pr_cap_hour - 3)
+            new_cap = self._clamp_to_max_change(
+                self.state.current_pr_cap_hour,
+                target_cap,
+                self.state.baseline_pr_cap_hour
+            )
+            new_cap = max(5, new_cap)  # Ensure minimum
+
             if new_cap != self.state.current_pr_cap_hour:
+                old_cap = self.state.current_pr_cap_hour
                 self._make_adjustment(
                     AdjustmentType.ADJUST_PR_CAP,
                     f"CI health low ({telemetry.ci_health_percent:.1f}%)",
-                    {"old_cap": self.state.current_pr_cap_hour, "new_cap": new_cap},
-                    trigger
+                    {"old_cap": old_cap, "new_cap": new_cap},
+                    trigger,
+                    threshold=f"CI < {self.teamplan.reset_triggers.ci_health_lt}%",
+                    current_value=f"{telemetry.ci_health_percent:.1f}%",
+                    before_settings={"pr_cap_hour": old_cap},
+                    after_settings={"pr_cap_hour": new_cap}
                 )
                 self.state.current_pr_cap_hour = new_cap
+                self._set_cooldown()
                 return True
 
         elif trigger == TriggerType.CONFLICT_RATE_HIGH:
             # Reduce open PR cap to reduce parallel changes
-            new_cap = max(5, self.state.current_open_pr_cap - 5)
+            # Target: reduce by 5, but clamp to 20% max change
+            target_cap = max(5, self.state.current_open_pr_cap - 5)
+            new_cap = self._clamp_to_max_change(
+                self.state.current_open_pr_cap,
+                target_cap,
+                self.state.baseline_open_pr_cap
+            )
+            new_cap = max(5, new_cap)  # Ensure minimum
+
             if new_cap != self.state.current_open_pr_cap:
+                old_cap = self.state.current_open_pr_cap
                 self._make_adjustment(
                     AdjustmentType.ADJUST_PR_CAP,
                     f"Conflict rate high ({telemetry.conflict_rate():.1f}%)",
-                    {"old_cap": self.state.current_open_pr_cap, "new_cap": new_cap},
-                    trigger
+                    {"old_cap": old_cap, "new_cap": new_cap},
+                    trigger,
+                    threshold=f"Conflicts > {self.teamplan.reset_triggers.conflict_rate_gt}%",
+                    current_value=f"{telemetry.conflict_rate():.1f}%",
+                    before_settings={"open_pr_cap": old_cap},
+                    after_settings={"open_pr_cap": new_cap}
                 )
                 self.state.current_open_pr_cap = new_cap
+                self._set_cooldown()
                 return True
 
         elif trigger == TriggerType.NACK_RATE_HIGH:
@@ -358,9 +492,14 @@ class Governor:
                     AdjustmentType.FREEZE_TIER,
                     f"Nack rate high ({telemetry.nack_rate():.1f}%)",
                     {"tier": 2},
-                    trigger
+                    trigger,
+                    threshold=f"Nacks > {self.teamplan.reset_triggers.nack_rate_gt}%",
+                    current_value=f"{telemetry.nack_rate():.1f}%",
+                    before_settings={"frozen_tiers": list(self.state.frozen_tiers)},
+                    after_settings={"frozen_tiers": self.state.frozen_tiers + [2]}
                 )
                 self.state.frozen_tiers.append(2)
+                self._set_cooldown()
                 return True
 
         return False
@@ -370,9 +509,14 @@ class Governor:
         trigger: TriggerType,
         telemetry: TelemetrySnapshot
     ):
-        """Make a structural adjustment (mode change, worker scaling)."""
+        """Make a structural adjustment (mode change, worker scaling).
 
-        # Check if we can make adjustment (rate limit)
+        Respects the 20% max change per interval anti-thrash limit for worker scaling.
+        """
+        # Check if we can make adjustment (cooldown + rate limit)
+        if not self._can_adjust():
+            return
+
         now = datetime.utcnow()
         if self.state.last_adjustment_time:
             min_interval = timedelta(minutes=10)  # At least 10 min between major changes
@@ -382,15 +526,29 @@ class Governor:
         if trigger == TriggerType.CI_HEALTH_LOW:
             # Throttle mode: reduce activity
             if self.state.mode == GovernorMode.NORMAL:
+                old_workers = self.state.current_max_workers
+                # Target: halve workers, but clamp to 20% max change
+                target_workers = max(10, old_workers // 2)
+                new_workers = self._clamp_to_max_change(
+                    old_workers,
+                    target_workers,
+                    self.state.baseline_max_workers
+                )
+                new_workers = max(10, new_workers)  # Ensure minimum
+
                 self._make_adjustment(
                     AdjustmentType.THROTTLE,
                     f"CI health critical ({telemetry.ci_health_percent:.1f}%)",
                     {"old_mode": self.state.mode.value, "new_mode": GovernorMode.THROTTLED.value},
-                    trigger
+                    trigger,
+                    threshold=f"CI < {self.teamplan.reset_triggers.ci_health_lt}%",
+                    current_value=f"{telemetry.ci_health_percent:.1f}%",
+                    before_settings={"mode": self.state.mode.value, "max_workers": old_workers},
+                    after_settings={"mode": GovernorMode.THROTTLED.value, "max_workers": new_workers}
                 )
                 self.state.mode = GovernorMode.THROTTLED
-                # Halve workers
-                self.state.current_max_workers = max(10, self.state.current_max_workers // 2)
+                self.state.current_max_workers = new_workers
+                self._set_cooldown()
 
         elif trigger == TriggerType.STALL_DETECTED:
             # Trigger replan
@@ -398,8 +556,11 @@ class Governor:
                 AdjustmentType.TRIGGER_REPLAN,
                 "Stall detected - no progress",
                 {"workers_active": telemetry.workers_active, "completed_1h": telemetry.tasks_completed_1h},
-                trigger
+                trigger,
+                threshold=f"Stall > {self.teamplan.reset_triggers.stall_minutes_gt} min",
+                current_value="No completions while workers active"
             )
+            self._set_cooldown()
 
         elif trigger == TriggerType.BUDGET_ALERT:
             # Freeze mode: stop new work
@@ -408,9 +569,14 @@ class Governor:
                     AdjustmentType.THROTTLE,
                     f"Budget critical (${telemetry.spend_today_usd:.2f})",
                     {"old_mode": self.state.mode.value, "new_mode": GovernorMode.FROZEN.value},
-                    trigger
+                    trigger,
+                    threshold=f"Budget > 90% of ${self.teamplan.budget_policy.usd_per_day}",
+                    current_value=f"${telemetry.spend_today_usd:.2f}",
+                    before_settings={"mode": self.state.mode.value},
+                    after_settings={"mode": GovernorMode.FROZEN.value}
                 )
                 self.state.mode = GovernorMode.FROZEN
+                self._set_cooldown()
 
         self.state.last_adjustment_time = now
 
@@ -508,6 +674,19 @@ class Governor:
 
     def get_state_summary(self) -> Dict:
         """Get current governor state for dashboard."""
+        now = datetime.utcnow()
+
+        # Calculate time until cooldown ends
+        cooldown_remaining = None
+        if self.state.cooldown_until and self.state.cooldown_until > now:
+            cooldown_remaining = int((self.state.cooldown_until - now).total_seconds())
+
+        # Calculate time until interval reset
+        interval_remaining = None
+        if self.state.interval_start:
+            interval_elapsed = (now - self.state.interval_start).total_seconds() / 60
+            interval_remaining = int((self.INTERVAL_MINUTES - interval_elapsed) * 60)
+
         return {
             "mode": self.state.mode.value,
             "frozen_tiers": self.state.frozen_tiers,
@@ -520,6 +699,19 @@ class Governor:
                 "pr_cap_hour": self.teamplan.caps.pr_cap_per_hour,
                 "open_pr_cap": self.teamplan.caps.open_pr_cap,
                 "max_workers": self.teamplan.total_max_workers()
+            },
+            # Anti-thrash state
+            "anti_thrash": {
+                "in_cooldown": self._is_in_cooldown(),
+                "cooldown_remaining_seconds": cooldown_remaining,
+                "interval_remaining_seconds": interval_remaining,
+                "adjustments_this_interval": self.state.adjustments_this_interval,
+                "max_change_percent": int(self.MAX_CHANGE_PERCENT * 100),
+                "baseline_caps": {
+                    "pr_cap_hour": self.state.baseline_pr_cap_hour,
+                    "open_pr_cap": self.state.baseline_open_pr_cap,
+                    "max_workers": self.state.baseline_max_workers
+                }
             },
             # Enhanced adjustment serialization (GPT 5.2 Fix 3)
             "recent_adjustments": [
