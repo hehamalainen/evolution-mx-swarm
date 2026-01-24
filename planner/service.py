@@ -118,32 +118,24 @@ class Planner:
     async def _extract_requirements(self, prd: str) -> list[Requirement]:
         """Use LLM to extract requirements from PRD."""
         print(f"  > Extracting requirements from PRD using {self.config.llm.model}...")
-        prompt = f"""Analyze this PRD and extract all requirements as a JSON array.
+
+        # Truncate PRD if too long for local models
+        prd_truncated = prd[:4000] if len(prd) > 4000 else prd
+
+        prompt = f"""Extract requirements from this PRD as JSON.
 
 PRD:
-{prd}
+{prd_truncated}
 
-For each requirement, provide:
-- type: "functional", "non_functional", "constraint", or "acceptance"
-- title: Short title (max 50 chars)
-- description: Detailed description
-- acceptance_criteria: Array of testable criteria
-- priority: 1-10 (10 is highest)
-- estimated_complexity: 1-10 (10 is most complex)
-- prd_section: Section name where this was found
+Output a JSON array with 3-7 requirements. Each requirement needs:
+- type: "functional" or "non_functional"
+- title: Short name
+- description: What it does
+- acceptance_criteria: ["one test"]
+- priority: 5
 
-Output ONLY valid JSON array, no markdown, no explanation:
-[
-  {{
-    "type": "functional",
-    "title": "...",
-    "description": "...",
-    "acceptance_criteria": ["..."],
-    "priority": 5,
-    "estimated_complexity": 5,
-    "prd_section": "..."
-  }}
-]"""
+RESPOND WITH ONLY JSON, NO OTHER TEXT:
+[{{"type":"functional","title":"Example","description":"Test","acceptance_criteria":["Works"],"priority":5}}]"""
 
         response = await self.llm.chat(
             messages=[Message(role="user", content=prompt)],
@@ -173,16 +165,28 @@ Output ONLY valid JSON array, no markdown, no explanation:
 
         requirements = []
         for item in data:
-            req = Requirement.create(
-                req_type=RequirementType(item["type"]),
-                title=item["title"],
-                description=item["description"],
-                acceptance_criteria=item.get("acceptance_criteria", []),
-                prd_section=item.get("prd_section"),
-                priority=item.get("priority", 5),
-                complexity=item.get("estimated_complexity", 5),
-            )
-            requirements.append(req)
+            try:
+                # Normalize type field
+                req_type = item.get("type", "functional")
+                if req_type not in ["functional", "non_functional", "constraint", "acceptance"]:
+                    req_type = "functional"
+
+                req = Requirement.create(
+                    req_type=RequirementType(req_type),
+                    title=item.get("title", "Untitled")[:50],
+                    description=item.get("description", ""),
+                    acceptance_criteria=item.get("acceptance_criteria", ["Implemented"]),
+                    prd_section=item.get("prd_section", "General"),
+                    priority=min(10, max(1, int(item.get("priority", 5)))),
+                    complexity=min(10, max(1, int(item.get("estimated_complexity", item.get("complexity", 5))))),
+                )
+                requirements.append(req)
+            except Exception as e:
+                print(f"  > Warning: Skipped invalid requirement: {e}")
+                continue
+
+        if not requirements:
+            raise ValueError("No valid requirements extracted from PRD")
 
         return requirements
 
@@ -191,27 +195,24 @@ Output ONLY valid JSON array, no markdown, no explanation:
         requirements: list[Requirement],
     ) -> list[Requirement]:
         """Use LLM to identify dependencies between requirements."""
+        # Skip dependency analysis for small requirement sets - not worth the LLM call
+        if len(requirements) <= 3:
+            print(f"  > Skipping dependency analysis for {len(requirements)} requirements (too few)")
+            return requirements
+
         print(f"  > Identifying dependencies for {len(requirements)} requirements...")
         req_summary = "\n".join(
             f"- {r.id}: {r.title}"
             for r in requirements
         )
 
-        prompt = f"""Analyze these requirements and identify dependencies.
-
-Requirements:
+        prompt = f"""Which requirements depend on others? Requirements:
 {req_summary}
 
-For each requirement that depends on others, output JSON:
-{{
-  "dependencies": {{
-    "REQ-ID": ["DEP-ID1", "DEP-ID2"],
-    ...
-  }}
-}}
+Output JSON with dependencies (or empty if none):
+{{"dependencies": {{"REQ-001": ["REQ-002"]}}}}
 
-A requirement depends on another if it cannot be implemented until the other is done.
-Only include requirements that have dependencies. Output ONLY valid JSON:"""
+RESPOND WITH ONLY JSON:"""
 
         response = await self.llm.chat(
             messages=[Message(role="user", content=prompt)],

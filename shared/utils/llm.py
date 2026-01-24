@@ -270,7 +270,7 @@ class OllamaClient(LLMClient):
                         "temperature": temperature,
                     },
                 },
-                timeout=300,
+                timeout=600,  # 10 min for local models
             )
             data = response.json()
 
@@ -314,7 +314,7 @@ class OllamaClient(LLMClient):
                         "temperature": temperature,
                     },
                 },
-                timeout=300,
+                timeout=600,  # 10 min for local models
             ) as response:
                 async for line in response.aiter_lines():
                     if line:
