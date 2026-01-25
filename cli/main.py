@@ -22,6 +22,13 @@ import sys
 from datetime import datetime
 from typing import Optional
 
+# Load .env file for GITHUB_TOKEN and other secrets
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # dotenv not installed, rely on environment variables
+
 # Add parent to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 

@@ -18,6 +18,13 @@ import sys
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from typing import Optional
+
+# Load .env file for GITHUB_TOKEN and other secrets
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # dotenv not installed, rely on environment variables
 from collections import deque
 from enum import Enum
 
