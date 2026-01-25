@@ -1,13 +1,15 @@
 # MX Swarm Agent Continuation Guide
 
-**Last Updated**: 2026-01-24
-**Session**: Claude Code + Antigravity collaboration
+**Last Updated**: 2026-01-25
+**Session**: Claude Code + Antigravity collaboration + User (Heikki)
 
 ---
 
 ## Project Overview
 
 MX Swarm is an autonomous agent orchestration system that takes PRDs (Product Requirements Documents) and executes them using AI worker swarms. The system operates with minimal human intervention after "ignition" - the initial planning and team composition phase.
+
+It has now evolved to support a **Local Mode**, allowing it to run entirely offline with local LLMs (Ollama) and local filesystem persistence (no GitHub token required).
 
 ### Architecture
 
@@ -44,391 +46,69 @@ MX Swarm is an autonomous agent orchestration system that takes PRDs (Product Re
 
 ---
 
-## Session Work Summary (2026-01-24)
+## Session Work Summary (2026-01-25)
 
 ### What Was Done
 
-#### 1. Local Model Integration (Ollama)
-Completed full integration with local LLM models via Ollama:
+#### 1. Local Mode & "Offline" Sovereignty
+We successfully implemented a fully "sovereign" mode where the swarm creates code without external dependencies.
+- **Mock GitHub API**: `worker/service.py` detects missing `GITHUB_TOKEN` and swaps in a `MockGitHubAPI`.
+- **Local Persistence**: Instead of pushing to `origin`, workers branch and push to the local filesystem.
+- **Result**: You can checkout agent-created branches (`feature/task-X`) directly.
 
-**Configuration (`mx.config.json`):**
-```json
-{
-  "llm": {
-    "provider": "ollama",
-    "model": "mistral:7b",
-    "base_url": "http://localhost:11434",
-    "max_tokens": 4096,
-    "temperature": 0.7
-  }
-}
-```
+#### 2. Real-time Dashboard Streaming
+- **Log Streaming**: `dashboard/api.py` now captures `stdout/stderr` from the swarm subprocess (`mx run`) and streams it line-by-line to the web UI.
+- **Visual Feedback**: The dashboard accurately reflects "Ignition," "Planning," and "Execution" phases.
 
-**New Files Created:**
-- `setup_local_model_final.sh` - Automated Ollama setup with RAM-based model recommendations
-- `test_local_model_final.py` - Comprehensive test suite (7 tests)
-- `mx_swarm_local_demo_final.py` - Multi-agent demo with hard gates
-
-**Test Results (All Passing):**
-```
-✅ Connection: Ollama is responsive
-✅ List Models: Found mistral:7b
-✅ Simple Chat: Response OK
-✅ Code Generation: Valid Python function
-✅ MX Task Simulation: 4/4 criteria met
-✅ Provider Stats: Request tracking working
-✅ Benchmark: ~15s avg per request
-```
-
-**Swarm Demo Validated:**
-- 2-5 agents running concurrently
-- Governor gates working (CI health, PR caps)
-- Task queue + worker loop functional
-- Event stream with colored output
-
-#### 2. LLM Client Architecture
-Unified provider abstraction in `shared/utils/llm.py`:
-```
-LLMClient (abstract)
-├── AnthropicClient (Claude API)
-├── OpenAIClient (GPT + compatible)
-└── OllamaClient (Local models)
-```
-
-Factory pattern: `create_llm_client(config.llm.to_dict())`
-
----
-
-## Session Work Summary (2026-01-20)
-
-### What Was Done
-
-#### 1. Dashboard Telemetry Enhancements
-Added granular telemetry components to the dashboard:
-- **Worker Scaling Card**: Real-time display of active workers vs. cap with progress bar
-- **Governor Adjustments Feed**: Live feed of governor actions (throttle, adjust_pr_cap, etc.)
-- **Escalations Panel**: Active escalations with severity badges and acknowledge buttons
-
-New API endpoints added:
-```python
-GET /api/telemetry/snapshot     # Current TelemetrySnapshot from Governor
-GET /api/governor/adjustments   # Recent governor adjustments with mode/caps
-GET /api/escalations            # Active escalations (already existed)
-```
-
-#### 2. Simulation + Dashboard Integration
-Enhanced the simulation harness to work with the live dashboard:
-- Simulation sends events to `/api/simulation/event` endpoint
-- Dashboard updates in real-time showing:
-  - PRs opened/merged in Event Stream
-  - Workers count updating
-  - CI health pass/fail ratio
-  - Governor state changes (NORMAL → THROTTLED)
-  - Burn rate accumulating
-  - Governor adjustments feed populating
-
-Fixed bugs:
-- Added `GOV_CHECK` to `EventType` enum
-- Fixed `KeyError: 'last_seen'` when registering simulated workers
-- Added `Reporter` import that was missing after refactor
-
-#### 3. Swarm Operating Model Consolidation
-Unified Governor and EscalationEngine across all components:
-- `judge/service.py` now uses `boss.Governor` for state management
-- `dashboard/api.py` syncs with centralized Governor
-- `simulation/harness.py` provides telemetry to Governor
-- Fixed circular import between `boss` and `judge` modules
-
-#### 4. Simulation Improvements
-- Changed tick speed from 0.1s to 2s for observable demos
-- Enhanced events to include workers, CI health, costs, PR counts
-- Added PR_MERGE and GOV_CHECK event notifications
-
-#### 5. P0 Fixes from GPT 5.2 Feedback
-
-**Fix 1: State Consistency**
-- Added `WorkerState` dataclass with 3-tier model
-- Fields: `teamplan_recommended` → `runtime_target` → `runtime_cap` → `online_workers`
-- API returns `worker_state` in `/api/status` for consistent UI
-
-**Fix 2: Task-PR Linkage**
-- Simulation sends traceability fields: `task_id`, `spec_ref`, `worker_id`, `risk_tier`
-- Dashboard registers tasks in `state.active_tasks` on PR_OPEN
-- "Active Task Contracts" table populates from simulation events
-
-**Fix 3: Governor Explainability**
-- Enhanced `Adjustment` dataclass with `threshold`, `current_value`
-- Added `before_settings`, `after_settings`, `cooldown_until`, `next_eval_at`
-- Dashboard shows threshold + cooldown in Governor Adjustments feed
-
-**Bug Fix:**
-- Added missing `dataclass` import in `dashboard/api.py`
-
----
-
-## Session Work Summary (2026-01-19)
-
-### What Was Done
-
-#### 1. Environment Setup
-- Created Python virtual environment with Python 3.14.2
-- Installed all dependencies from `requirements.txt`
-- Created `.env.example` template for API keys
-
-#### 2. Import Fixes (Critical)
-Fixed `ImportError: attempted relative import beyond top-level package` by converting all relative imports to absolute imports in these files:
-- `planner/service.py` - changed `from ..shared` to `from shared`
-- `worker/service.py` - changed `from ..shared` to `from shared`
-- `judge/service.py` - changed `from ..shared` to `from shared`
-- `boss/agent_boss.py` - changed `from ..shared` to `from shared`
-- `boss/org_builder.py` - changed `from ..shared` to `from shared`
-- `boss/governor.py` - changed `from ..shared` to `from shared`
-- `shared/adapters/queue.py` - changed `from ..shared` to `from shared`
-
-#### 3. New Files Created
-
-**`boss/escalation.py`** - Escalation Engine
-```python
-# Event-driven human alerts with triggers:
-# - CI health < 85% for 30 min
-# - Retry rate > 25% for 30 min
-# - No merges for 60+ min (stall)
-# - Budget burn > 80% of cap
-# - Security gate failures
-
-class EscalationEngine:
-    def check_triggers(self, metrics: Dict) -> List[Escalation]
-    def acknowledge(self, escalation_id: str) -> bool
-    def resolve(self, escalation_id: str) -> bool
-```
-
-**`boss/reporter.py`** - Ops Report Generator (by Antigravity)
-```python
-# Generates hourly and daily ops reports
-# Stores as Markdown in reports/hourly/ and reports/daily/
-
-class Reporter:
-    def generate_hourly_report(self, metrics: Dict) -> OpsReport
-    def generate_daily_report(self, metrics: Dict) -> OpsReport
-```
-
-**`simulation/harness.py`** - 20-Agent Simulation (by Antigravity)
-```python
-# Test harness with mocked GitHub, CI, and LLM
-# Validates governor stability, PR flood control
-
-class SimulationRunner:
-    def run_simulation(self, duration_minutes: int)
-```
-
-**`dashboard/__init__.py`** - Module init (was missing)
-
-**`simulation/__init__.py`** - Module init
-
-**`.env.example`** - Environment template
-
-#### 4. Dashboard Enhancements
-
-**PRD Drop Zone** - Added to `dashboard/index.html`
-- Drag-and-drop PRD file upload
-- Keyword-based analysis (works WITHOUT API keys)
-- Shows: complexity, risk level, recommended workers, categories, team composition
-
-**New API Endpoints** - Added to `dashboard/api.py`
-```python
-# PRD Analysis
-POST /api/prd/analyze           # Analyze PRD content
-
-# Escalations
-GET  /api/escalations           # List active escalations
-POST /api/escalations/check     # Check triggers with metrics
-POST /api/escalations/{id}/acknowledge
-POST /api/escalations/{id}/resolve
-
-# Reports
-GET  /api/reports/hourly        # List hourly reports
-GET  /api/reports/daily         # List daily reports
-POST /api/reports/generate/hourly
-POST /api/reports/generate/daily
-```
-
-#### 5. Updated Exports
-
-**`boss/__init__.py`** - Added exports:
-- `Reporter`, `OpsReport`
-- `EscalationEngine`, `Escalation`, `EscalationType`, `EscalationSeverity`
-
----
-
-## Three Operating Loops (from GPT_INSTRUCTIONS.md)
-
-### Loop A - Worker Loop (Continuous)
-- Workers pull `TaskContracts` from queue
-- Implement code changes, open PRs
-- Retry with bounded policy (max retries + backoff + DLQ)
-- Never exit - idle/sleep when no tasks ("Ralph Wiggum" loop)
-
-### Loop B - Judge/Governor Loop (Every 5-15 min)
-- Monitors CI health, PR backlog, retry rates, budget burn
-- Actions: throttle workers, freeze PRs, shift allocation, replan, escalate
-
-### Loop C - Executive Summary Loop (Hourly + Daily)
-- Generates ops reports as timestamped Markdown
-- Shows in dashboard
-- Format: what shipped, blockers, quality, budget, decisions needed
-
----
-
-## File Structure
-
-```
-evolution-mx-swarm/
-├── boss/
-│   ├── __init__.py          # Exports all boss modules
-│   ├── agent_boss.py        # Strategic orchestration
-│   ├── escalation.py        # NEW: Event-driven alerts
-│   ├── governor.py          # Threshold enforcement
-│   ├── org_builder.py       # Team composition
-│   └── reporter.py          # NEW: Ops report generator
-├── cli/
-│   └── main.py              # CLI entry point
-├── dashboard/
-│   ├── __init__.py          # NEW: Module init
-│   ├── api.py               # FastAPI backend
-│   └── index.html           # Web UI with PRD drop zone
-├── judge/
-│   └── service.py           # CI/PR monitoring
-├── planner/
-│   └── service.py           # PRD decomposition
-├── shared/
-│   ├── adapters/
-│   │   └── queue.py         # Redis queue adapter
-│   ├── schemas/
-│   │   └── task_contract.py # TaskContract schema
-│   └── utils/
-│       └── config.py        # Configuration
-├── simulation/
-│   ├── __init__.py          # NEW: Module init
-│   └── harness.py           # NEW: 20-agent simulation
-├── worker/
-│   └── service.py           # Worker implementation
-├── templates/
-│   ├── AGENTS.md            # Agent guidelines
-│   └── ...
-├── reports/                 # NEW: Generated reports
-│   ├── hourly/
-│   └── daily/
-├── .env.example             # NEW: Environment template
-├── GPT_INSTRUCTIONS.md      # NEW: Operating model spec
-├── AGENT.md                 # NEW: This file
-└── requirements.txt
-```
+#### 3. End-to-End Verification ("The Counter API")
+- **Input**: Provided a simple "Counter API" PRD.
+- **Execution**: The swarm:
+    1.  Ignited and analyzed requirements.
+    2.  Split work into **Implementation** (Worker-0) and **Testing** (Worker-1).
+    3.  Configured 2 parallel tasks.
+    4.  Successfully generated `app/api.py` and `tests/test_api.py`.
+- **Outcome**: Proven capability to generate functional, multi-file codebases from scratch using a local 7B model.
 
 ---
 
 ## How to Continue
 
-### 1. Start Fresh Session
-```bash
-cd evolution-mx-swarm
-source .venv/bin/activate
-```
+### 1. Requirements
+- **Python**: 3.11+
+- **Ollama**: Running `mistral:7b` (or similar).
+- **Dashboard**: `python3 -m uvicorn dashboard.api:app --reload`
 
-### 2. Run Dashboard (No API Keys Needed)
-```bash
-uvicorn dashboard.api:app --host 0.0.0.0 --port 8080
-# Open http://localhost:8080
-# Drop a PRD file to analyze it
-```
+### 2. Ignite the Swarm
+1.  **Edit PRD**: content of `PRD.md` determines what they build.
+2.  **Dashboard**: Go to `http://localhost:8000`.
+3.  **Launch**: Click "Ignite Swarm".
+4.  **Watch**: See the logs in "Event Stream".
 
-### 3. Run Tests
+### 3. Retrieve Code
+The swarm pushes code to local branches.
 ```bash
-pytest tests/ -v
-# All 41 tests should pass
-```
-
-### 4. Run Full Swarm (Needs API Keys)
-```bash
-# Copy .env.example to .env and add your keys:
-# - ANTHROPIC_API_KEY or OPENAI_API_KEY
-# - GITHUB_TOKEN
-
-python cli/main.py run --workers 5
-```
-
-### 5. Run Simulation (No API Keys)
-```bash
-python simulation/harness.py
-# Runs 20 mock agents for 10 minutes
+git branch
+# > feature/task-12345
+git checkout feature/task-12345
 ```
 
 ---
 
-## API Keys Required
+## Roadmap / Next Steps
 
-For full operation, add to `.env`:
-```bash
-# LLM Provider (one of these)
-ANTHROPIC_API_KEY=sk-ant-...
-OPENAI_API_KEY=sk-...
-
-# GitHub (for PR creation)
-GITHUB_TOKEN=ghp_...
-
-# Optional
-REDIS_URL=redis://localhost:6379
-```
+1.  **Security Harness**: Implement the "Judge" as a security gatekeeper (SAST/DAST) before allowing any merge.
+2.  **Production Hardening**: Move from `MockGitHub` to real GitHub App integration for multi-user collaboration.
+3.  **Model Upgrades**: Test with larger local models (Llama-3 70B) for complex architecture tasks.
 
 ---
 
-## Known Issues / TODO
-
-1. **Redis optional**: Queue falls back to in-memory if Redis not available
-2. ~~**Simulation**: Currently mocks LLM responses~~ ✅ DONE - Local model integration complete
-3. **Dashboard**: Escalation panel UI exists but needs wiring to backend events
-4. **Governor**: Hysteresis logic implemented but needs real-world tuning
-5. **LLM Client**: When using `create_llm_client()` with `MXConfig`, call `.to_dict()`:
-   ```python
-   client = create_llm_client(config.llm.to_dict())  # Correct
-   ```
+## Key Files
+- `README.md` - Public documentation.
+- `AGENTS.md` - System instructions.
+- `walkthrough.md` - User guide for Local Mode.
+- `dashboard/api.py` - The brain of the local UI.
+- `worker/service.py` - The muscle (git operations).
 
 ---
-
-## Key Files to Read First
-
-1. `GPT_INSTRUCTIONS.md` - Operating model specification
-2. `PRD.md` - Product requirements document
-3. `templates/AGENTS.md` - Worker guidelines
-4. `boss/governor.py` - Threshold enforcement logic
-5. `boss/escalation.py` - Alert triggers
-6. `dashboard/api.py` - All API endpoints
-
----
-
-## Commands Reference
-
-```bash
-# CLI
-python cli/main.py --help
-python cli/main.py status
-python cli/main.py run --workers 5
-
-# Dashboard
-uvicorn dashboard.api:app --port 8080
-
-# Tests
-pytest tests/ -v
-
-# Simulation
-python simulation/harness.py
-```
-
----
-
-## Contact / Context
-
-This project was built collaboratively by:
-- Initial structure: Claude Code Mobile
-- Enhancements: Antigravity + Claude Code (Opus 4.5)
-
-The goal is autonomous software delivery with minimal human oversight after "ignition".
+**Status**: Alpha (Functional Local Prototype)
+**Sign-off**: Antigravity & User (Heikki)

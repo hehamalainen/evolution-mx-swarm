@@ -513,7 +513,7 @@ After the implementation, provide a brief summary of what you did and any notes.
                 raise RuntimeError(f"Push failed: {push_result.stderr}")
             
             if is_local_mode:
-                print(f"[{self.worker_id}] Local Mode: Pushed branch {branch_name} to {repo._get_repo_url()}")
+                print(f"[{self.worker_id}] Local Mode: Pushed branch {branch_name} to {self._get_repo_url()}")
 
             # Create PR (Mocked in Local Mode if initialized correctly)
             draft = not all_passed  # Draft if checks failed

@@ -67,5 +67,5 @@
     "max_llm_calls_per_task": 50,
     "max_tokens_per_task": 100000
   },
-  "paused": true
+  "paused": false
 }
