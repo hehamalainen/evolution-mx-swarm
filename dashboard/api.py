@@ -887,7 +887,13 @@ async def control_ignite(req: IgniteRequest):
     if req.prd_content:
         with open("PRD.md", "w") as f:
             f.write(req.prd_content)
-        state.add_log(EventType.SYS_CONFIG, "PRD.md updated from dashboard")
+        # Clear old state when new PRD is uploaded
+        state.active_tasks.clear()
+        state.workers.clear()
+        # Remove old SPEC.json so planner regenerates
+        if os.path.exists("SPEC.json"):
+            os.remove("SPEC.json")
+        state.add_log(EventType.SYS_CONFIG, "PRD.md updated - cleared old state")
 
     if req.budget_usd is not None:
         config.budget.daily_usd_cap = req.budget_usd
