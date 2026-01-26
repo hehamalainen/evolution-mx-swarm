@@ -27,6 +27,7 @@ from shared.utils import (
     Message,
     create_llm_client,
     GitHubAPI,
+    MockGitHubAPI,
 )
 from shared.utils.metrics import get_metrics_collector, TaskMetrics
 from boss import (
@@ -169,12 +170,15 @@ class Judge:
         if self._github is None:
             token = self.config.github.token or os.environ.get("GITHUB_TOKEN")
             if not token:
-                raise RuntimeError("GITHUB_TOKEN not configured")
-            self._github = GitHubAPI(
-                token=token,
-                owner=self.config.github.repo_owner,
-                repo=self.config.github.repo_name,
-            )
+                # Use Mock API in Local Mode
+                print("[Judge] No GITHUB_TOKEN found - using Mock GitHub API (Local Mode)")
+                self._github = MockGitHubAPI()
+            else:
+                self._github = GitHubAPI(
+                    token=token,
+                    owner=self.config.github.repo_owner,
+                    repo=self.config.github.repo_name,
+                )
         return self._github
 
     async def initialize(self) -> None:

@@ -1,0 +1,89 @@
+{
+  "version": "1.0.0",
+  "prd_hash": "20ccce74e334ff8b",
+  "generated_at": "2026-01-25T18:08:11.611314",
+  "requirements": [
+    {
+      "id": "REQ-E5788D",
+      "type": "functional",
+      "title": "GET /counter",
+      "description": "Returns the current count",
+      "acceptance_criteria": [
+        "The API returns a JSON object with the current count when GET /counter is called."
+      ],
+      "dependencies": [],
+      "status": "completed",
+      "prd_section": "General",
+      "priority": 5,
+      "estimated_complexity": 5,
+      "assigned_tasks": [
+        "ca2991d9",
+        "fe31b6af"
+      ],
+      "completion_evidence": [
+        "https://github.com/hehamalainen/evolution-mx-swarm/pull/1"
+      ]
+    },
+    {
+      "id": "REQ-B83594",
+      "type": "functional",
+      "title": "POST /counter/increment",
+      "description": "Increases the count by 1",
+      "acceptance_criteria": [
+        "The API increments the count by 1 when POST /counter/increment is called."
+      ],
+      "dependencies": [
+        "REQ-E5788D"
+      ],
+      "status": "in_progress",
+      "prd_section": "General",
+      "priority": 5,
+      "estimated_complexity": 5,
+      "assigned_tasks": [
+        "e1db9893"
+      ],
+      "completion_evidence": []
+    },
+    {
+      "id": "REQ-49483A",
+      "type": "functional",
+      "title": "POST /counter/decrement",
+      "description": "Decreases the count by 1",
+      "acceptance_criteria": [
+        "The API decrements the count by 1 when POST /counter/decrement is called."
+      ],
+      "dependencies": [
+        "REQ-E5788D"
+      ],
+      "status": "in_progress",
+      "prd_section": "General",
+      "priority": 5,
+      "estimated_complexity": 5,
+      "assigned_tasks": [
+        "96ad8180"
+      ],
+      "completion_evidence": []
+    },
+    {
+      "id": "REQ-9E677F",
+      "type": "functional",
+      "title": "POST /counter/reset",
+      "description": "Resets the count to 0",
+      "acceptance_criteria": [
+        "The API resets the count to 0 when POST /counter/reset is called."
+      ],
+      "dependencies": [
+        "REQ-E5788D"
+      ],
+      "status": "in_progress",
+      "prd_section": "General",
+      "priority": 5,
+      "estimated_complexity": 5,
+      "assigned_tasks": [
+        "7e941166"
+      ],
+      "completion_evidence": []
+    }
+  ],
+  "metadata": {}
+}

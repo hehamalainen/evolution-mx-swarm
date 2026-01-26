@@ -35,6 +35,7 @@ from shared.utils import (
     create_llm_client,
     GitRepo,
     GitHubAPI,
+    MockGitHubAPI,
 )
 
 
@@ -624,29 +625,7 @@ After the implementation, provide a brief summary of what you did and any notes.
         return self.metrics
 
 
-class MockGitHubAPI:
-    """Mock GitHub API for Local Mode."""
-    
-    def __init__(self, *args, **kwargs):
-        pass
-        
-    async def create_pull_request(self, title, body, head, base, draft=False) -> dict:
-        print(f"[MockGitHub] Creating PR: {title}")
-        return {
-            "number": 999,
-            "html_url": "http://localhost/mock/pr/999",
-            "title": title,
-            "state": "open"
-        }
-        
-    async def get_pull_request(self, number) -> dict:
-        return {"id": number, "state": "open"}
-        
-    async def list_pull_requests(self, state="open", head=None) -> list:
-        return []
-        
-    async def all_checks_passed(self, ref) -> bool:
-        return True
+
 
 
 async def main():

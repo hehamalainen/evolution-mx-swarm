@@ -160,184 +160,199 @@ async def cmd_run(args):
     """Start the swarm."""
     print_banner()
 
-    config = load_config(args.config)
-
-    # Check prerequisites
-    if not os.path.exists("PRD.md"):
-        print("Error: PRD.md not found. Run 'mx init' first.")
-        sys.exit(1)
-
-    if not os.environ.get("GITHUB_TOKEN") and not config.github.token:
-        print("Warning: GITHUB_TOKEN not set - Enabling Local Mode (Mock GitHub)")
-
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        print("Warning: ANTHROPIC_API_KEY not set - using default LLM config")
-
-    print(f"Starting MX Swarm...")
-    print(f"  Repository: {config.github.repo_owner}/{config.github.repo_name}")
-    print(f"  Max workers: {args.workers or config.worker.max_workers}")
-    print(f"  LLM: {config.llm.provider}/{config.llm.model}")
-    print()
-
-    # Update config with CLI args
-    if args.workers:
-        config.worker.max_workers = args.workers
-    config.paused = False
-    config.save()
-
-    # Run components
-    tasks = []
-
-    # 1. Run planner first
-    print("[1/3] Running planner...")
-    planner = Planner(config, repo_path=".")
-    result = await planner.run()
-    print(f"  Generated {result['tasks_generated']} tasks from {result['spec_requirements']} requirements")
-
-    if result['tasks_published'] == 0:
-        print("  No tasks to execute. Check PRD.md and SPEC.json")
-        return
-
-    # 2. Start workers
-    print(f"\n[2/3] Starting {config.worker.max_workers} workers...")
-    workers = []
-    for i in range(config.worker.max_workers):
-        worker = Worker(config, worker_id=f"worker-{i}")
-        workers.append(worker)
-
-    # 3. Start judge
-    print(f"\n[3/3] Starting judge (interval: {config.judge.interval_minutes}min)...")
-    judge = Judge(config, repo_path=".")
-
-    # Track metrics for dashboard heartbeat
-    swarm_metrics = {
-        "active_workers": config.worker.max_workers,
-        "tasks_completed": 0,
-        "prs_opened": 0,
-        "prs_merged": 0,
-        "ci_passes": 0,
-        "ci_fails": 0,
-        "current_phase": "running",
-    }
-
-    # Create async tasks
-    async def run_worker(w):
-        await w.initialize()
-        try:
-            await w.run_loop()
-        finally:
-            await w.shutdown()
-
-    async def run_judge():
-        await judge.initialize()
-        try:
-            await judge.run_loop()
-        finally:
-            await judge.shutdown()
-
-    async def send_dashboard_heartbeat():
-        """Send periodic heartbeats to the dashboard."""
-        dashboard_url = os.environ.get("MX_DASHBOARD_URL", args.dashboard_url)
-        heartbeat_interval = 5  # seconds
-
-        # Try to use aiohttp, fall back to urllib if not available
-        try:
-            import aiohttp
-            use_aiohttp = True
-        except ImportError:
-            import urllib.request
-            import urllib.error
-            use_aiohttp = False
-
-        while True:
-            try:
-                # Collect worker status
-                worker_details = []
-                active_count = 0
-                for w in workers:
-                    is_active = hasattr(w, '_current_task') and w._current_task is not None
-                    if is_active:
-                        active_count += 1
-                    worker_details.append({
-                        "id": w.worker_id,
-                        "status": "active" if is_active else "idle",
-                        "task_id": getattr(w, '_current_task', {}).get('id') if hasattr(w, '_current_task') and w._current_task else None,
-                    })
-
-                # Send heartbeat
-                payload = {
-                    "active_workers": max(active_count, 1),  # At least 1 if running
-                    "worker_details": worker_details,
-                    "tasks_completed": swarm_metrics["tasks_completed"],
-                    "prs_opened": swarm_metrics["prs_opened"],
-                    "prs_merged": swarm_metrics["prs_merged"],
-                    "ci_passes": swarm_metrics["ci_passes"],
-                    "ci_fails": swarm_metrics["ci_fails"],
-                    "is_running": True,
-                    "current_phase": swarm_metrics["current_phase"],
-                }
-
-                if use_aiohttp:
-                    async with aiohttp.ClientSession() as session:
-                        async with session.post(
-                            f"{dashboard_url}/api/swarm/heartbeat",
-                            json=payload,
-                            timeout=aiohttp.ClientTimeout(total=2)
-                        ) as resp:
-                            pass  # Just send, don't care about response
-                else:
-                    # Fallback to synchronous urllib in thread pool
-                    def sync_post():
-                        req = urllib.request.Request(
-                            f"{dashboard_url}/api/swarm/heartbeat",
-                            data=json.dumps(payload).encode('utf-8'),
-                            headers={'Content-Type': 'application/json'},
-                            method='POST'
-                        )
-                        try:
-                            urllib.request.urlopen(req, timeout=2)
-                        except (urllib.error.URLError, OSError):
-                            pass
-                    await asyncio.get_event_loop().run_in_executor(None, sync_post)
-
-            except Exception:
-                pass  # Ignore errors - dashboard might not be running
-
-            await asyncio.sleep(heartbeat_interval)
-
-    # Handle shutdown
-    shutdown_event = asyncio.Event()
-
-    def signal_handler():
-        print("\n\nShutdown signal received...")
-        shutdown_event.set()
-
-    loop = asyncio.get_event_loop()
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        try:
-            loop.add_signal_handler(sig, signal_handler)
-        except NotImplementedError:
-            pass
-
-    print("\nSwarm is running. Press Ctrl+C to stop.\n")
-
-    # Run all components
-    worker_tasks = [asyncio.create_task(run_worker(w)) for w in workers]
-    judge_task = asyncio.create_task(run_judge())
-    heartbeat_task = asyncio.create_task(send_dashboard_heartbeat())
+    # Check for dashboard URL
+    dashboard_url = os.environ.get("MX_DASHBOARD_URL", args.dashboard_url)
+    remote_logger = None
+    if dashboard_url:
+        from shared.utils.remote_logger import RemoteLogStream
+        remote_logger = RemoteLogStream(dashboard_url, source_id="cli-runner")
+        remote_logger.start()
+        print(f"Streaming logs to dashboard at {dashboard_url}")
 
     try:
-        # Wait for shutdown or completion
-        await shutdown_event.wait()
-    finally:
-        # Cancel all tasks
-        for task in worker_tasks:
-            task.cancel()
-        judge_task.cancel()
-        heartbeat_task.cancel()
 
-        # Wait for cleanup
-        await asyncio.gather(*worker_tasks, judge_task, heartbeat_task, return_exceptions=True)
+
+        config = load_config(args.config)
+
+        # Check prerequisites
+        if not os.path.exists("PRD.md"):
+            print("Error: PRD.md not found. Run 'mx init' first.")
+            sys.exit(1)
+
+        if not os.environ.get("GITHUB_TOKEN") and not config.github.token:
+            print("Warning: GITHUB_TOKEN not set - Enabling Local Mode (Mock GitHub)")
+
+        if not os.environ.get("ANTHROPIC_API_KEY"):
+            print("Warning: ANTHROPIC_API_KEY not set - using default LLM config")
+
+        print(f"Starting MX Swarm...")
+        print(f"  Repository: {config.github.repo_owner}/{config.github.repo_name}")
+        print(f"  Max workers: {args.workers or config.worker.max_workers}")
+        print(f"  LLM: {config.llm.provider}/{config.llm.model}")
+        print()
+
+        # Update config with CLI args
+        if args.workers:
+            config.worker.max_workers = args.workers
+        config.paused = False
+        config.save()
+
+        # Run components
+        tasks = []
+
+        # 1. Run planner first
+        print("[1/3] Running planner...")
+        planner = Planner(config, repo_path=".")
+        result = await planner.run()
+        print(f"  Generated {result['tasks_generated']} tasks from {result['spec_requirements']} requirements")
+
+        if result['tasks_published'] == 0:
+            print("  No new tasks generated. Continuing to process existing tasks...")
+
+        # 2. Start workers
+        print(f"\n[2/3] Starting {config.worker.max_workers} workers...")
+        workers = []
+        for i in range(config.worker.max_workers):
+            worker = Worker(config, worker_id=f"worker-{i}")
+            workers.append(worker)
+
+        # 3. Start judge
+        print(f"\n[3/3] Starting judge (interval: {config.judge.interval_minutes}min)...")
+        judge = Judge(config, repo_path=".")
+
+        # Track metrics for dashboard heartbeat
+        swarm_metrics = {
+            "active_workers": config.worker.max_workers,
+            "tasks_completed": 0,
+            "prs_opened": 0,
+            "prs_merged": 0,
+            "ci_passes": 0,
+            "ci_fails": 0,
+            "current_phase": "running",
+        }
+
+        # Create async tasks
+        async def run_worker(w):
+            await w.initialize()
+            try:
+                await w.run_loop()
+            finally:
+                await w.shutdown()
+
+        async def run_judge():
+            await judge.initialize()
+            try:
+                await judge.run_loop()
+            finally:
+                await judge.shutdown()
+
+        async def send_dashboard_heartbeat():
+            """Send periodic heartbeats to the dashboard."""
+            dashboard_url = os.environ.get("MX_DASHBOARD_URL", args.dashboard_url)
+            heartbeat_interval = 5  # seconds
+
+            # Try to use aiohttp, fall back to urllib if not available
+            try:
+                import aiohttp
+                use_aiohttp = True
+            except ImportError:
+                import urllib.request
+                import urllib.error
+                use_aiohttp = False
+
+            while True:
+                try:
+                    # Collect worker status
+                    worker_details = []
+                    active_count = 0
+                    for w in workers:
+                        is_active = hasattr(w, '_current_task') and w._current_task is not None
+                        if is_active:
+                            active_count += 1
+                        worker_details.append({
+                            "id": w.worker_id,
+                            "status": "active" if is_active else "idle",
+                            "task_id": getattr(w, '_current_task', {}).get('id') if hasattr(w, '_current_task') and w._current_task else None,
+                        })
+
+                    # Send heartbeat
+                    payload = {
+                        "active_workers": max(active_count, 1),  # At least 1 if running
+                        "worker_details": worker_details,
+                        "tasks_completed": swarm_metrics["tasks_completed"],
+                        "prs_opened": swarm_metrics["prs_opened"],
+                        "prs_merged": swarm_metrics["prs_merged"],
+                        "ci_passes": swarm_metrics["ci_passes"],
+                        "ci_fails": swarm_metrics["ci_fails"],
+                        "is_running": True,
+                        "current_phase": swarm_metrics["current_phase"],
+                    }
+
+                    if use_aiohttp:
+                        async with aiohttp.ClientSession() as session:
+                            async with session.post(
+                                f"{dashboard_url}/api/swarm/heartbeat",
+                                json=payload,
+                                timeout=aiohttp.ClientTimeout(total=2)
+                            ) as resp:
+                                pass  # Just send, don't care about response
+                    else:
+                        # Fallback to synchronous urllib in thread pool
+                        def sync_post():
+                            req = urllib.request.Request(
+                                f"{dashboard_url}/api/swarm/heartbeat",
+                                data=json.dumps(payload).encode('utf-8'),
+                                headers={'Content-Type': 'application/json'},
+                                method='POST'
+                            )
+                            try:
+                                urllib.request.urlopen(req, timeout=2)
+                            except (urllib.error.URLError, OSError):
+                                pass
+                        await asyncio.get_event_loop().run_in_executor(None, sync_post)
+
+                except Exception:
+                    pass  # Ignore errors - dashboard might not be running
+
+                await asyncio.sleep(heartbeat_interval)
+
+        # Handle shutdown
+        shutdown_event = asyncio.Event()
+
+        def signal_handler():
+            print("\n\nShutdown signal received...")
+            shutdown_event.set()
+
+        loop = asyncio.get_event_loop()
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            try:
+                loop.add_signal_handler(sig, signal_handler)
+            except NotImplementedError:
+                pass
+
+        print("\nSwarm is running. Press Ctrl+C to stop.\n")
+
+        # Run all components
+        worker_tasks = [asyncio.create_task(run_worker(w)) for w in workers]
+        judge_task = asyncio.create_task(run_judge())
+        heartbeat_task = asyncio.create_task(send_dashboard_heartbeat())
+
+        try:
+            # Wait for shutdown or completion
+            await shutdown_event.wait()
+        finally:
+            # Cancel all tasks
+            for task in worker_tasks:
+                task.cancel()
+            judge_task.cancel()
+            heartbeat_task.cancel()
+
+            # Wait for cleanup
+            await asyncio.gather(*worker_tasks, judge_task, heartbeat_task, return_exceptions=True)
+
+    finally:
+        if remote_logger:
+            await remote_logger.stop()
 
     print("\nSwarm stopped.")
 

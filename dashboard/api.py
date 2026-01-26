@@ -733,6 +733,23 @@ async def api_logs(limit: int = 100):
     return {"logs": list(state.logs)[-limit:]}
 
 
+class LogIngestRequest(BaseModel):
+    logs: list[dict]
+    source: str = "cli"
+
+@app.post("/api/logs/ingest")
+async def api_logs_ingest(req: LogIngestRequest):
+    """Ingest logs from external sources (e.g. CLI runner)."""
+    for log in req.logs:
+        # Map fields to match internal log structure
+        state.add_log(
+            EventType.SYS_CONFIG,  # Default to config/system type
+            f"[{req.source}] {log.get('message', '')}",
+            log.get("level", "info")
+        )
+    return {"status": "ok", "count": len(req.logs)}
+
+
 @app.post("/api/control/pause")
 async def control_pause():
     config = load_config()

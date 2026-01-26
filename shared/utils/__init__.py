@@ -25,6 +25,7 @@ from .git import (
     GitHubAPI,
     run_git,
 )
+from shared.utils.mock_github import MockGitHubAPI
 
 __all__ = [
     "MXConfig",
