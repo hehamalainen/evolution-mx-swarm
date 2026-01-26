@@ -9,13 +9,13 @@ Implements the three reporting cadences from GPT_INSTRUCTIONS:
 Key feature: Narrative layer - "what changed since last check"
 """
 
-import os
 import asyncio
-from datetime import datetime, timedelta
-from typing import List, Dict, Optional, Callable
-from dataclasses import dataclass, field
-from enum import Enum
 import logging
+import os
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+from enum import Enum
 
 logger = logging.getLogger(__name__)
 
@@ -50,10 +50,10 @@ class OpsReport:
     timestamp: str
     period: ReportPeriod
     content: str
-    metrics: Dict
+    metrics: dict
     narrative: str = ""  # What changed since last check
-    decisions_needed: List[Dict] = field(default_factory=list)
-    risks: List[str] = field(default_factory=list)
+    decisions_needed: list[dict] = field(default_factory=list)
+    risks: list[str] = field(default_factory=list)
 
 
 class Reporter:
@@ -75,25 +75,25 @@ class Reporter:
             os.makedirs(os.path.join(self.reports_dir, subdir), exist_ok=True)
 
         # State tracking for narrative generation
-        self._last_metrics: Dict = {}
-        self._last_heartbeat: Optional[datetime] = None
-        self._last_hourly: Optional[datetime] = None
-        self._last_daily: Optional[datetime] = None
+        self._last_metrics: dict = {}
+        self._last_heartbeat: datetime | None = None
+        self._last_hourly: datetime | None = None
+        self._last_daily: datetime | None = None
 
         # Running state
         self._running = False
-        self._tasks: List[asyncio.Task] = []
+        self._tasks: list[asyncio.Task] = []
 
         # Callbacks
-        self._on_report: Optional[Callable[[OpsReport], None]] = None
-        self._get_metrics: Optional[Callable[[], Dict]] = None
-        self._get_decisions: Optional[Callable[[], List[Dict]]] = None
+        self._on_report: Callable[[OpsReport], None] | None = None
+        self._get_metrics: Callable[[], dict] | None = None
+        self._get_decisions: Callable[[], list[dict]] | None = None
 
     def set_callbacks(
         self,
-        get_metrics: Callable[[], Dict],
-        get_decisions: Optional[Callable[[], List[Dict]]] = None,
-        on_report: Optional[Callable[[OpsReport], None]] = None
+        get_metrics: Callable[[], dict],
+        get_decisions: Callable[[], list[dict]] | None = None,
+        on_report: Callable[[OpsReport], None] | None = None
     ):
         """Set callback functions for dynamic data retrieval."""
         self._get_metrics = get_metrics
@@ -178,19 +178,19 @@ class Reporter:
                 logger.error(f"Daily loop error: {e}")
                 await asyncio.sleep(60)
 
-    def _get_current_metrics(self) -> Dict:
+    def _get_current_metrics(self) -> dict:
         """Get current metrics from callback or empty dict."""
         if self._get_metrics:
             return self._get_metrics()
         return {}
 
-    def _get_pending_decisions(self) -> List[Dict]:
+    def _get_pending_decisions(self) -> list[dict]:
         """Get pending decisions from callback or empty list."""
         if self._get_decisions:
             return self._get_decisions()
         return []
 
-    def _calculate_deltas(self, current: Dict, previous: Dict) -> Dict:
+    def _calculate_deltas(self, current: dict, previous: dict) -> dict:
         """Calculate metric deltas between periods."""
         deltas = {}
         for key in ['prs_merged', 'prs_opened', 'tasks_completed', 'tasks_failed',
@@ -201,7 +201,7 @@ class Reporter:
             deltas[key] = curr_val
         return deltas
 
-    def _generate_narrative(self, deltas: Dict, period: str) -> str:
+    def _generate_narrative(self, deltas: dict, period: str) -> str:
         """Generate narrative layer - what changed since last check."""
         changes = []
 
@@ -210,7 +210,7 @@ class Reporter:
         if pr_delta > 0:
             changes.append(f"+{pr_delta} PRs merged")
         elif pr_delta < 0:
-            changes.append(f"PR merge rate decreased")
+            changes.append("PR merge rate decreased")
 
         # Task completion
         task_delta = deltas.get('tasks_completed_delta', 0)
@@ -235,7 +235,7 @@ class Reporter:
 
         return "Since last check: " + ", ".join(changes) + "."
 
-    def _detect_risks(self, metrics: Dict) -> List[str]:
+    def _detect_risks(self, metrics: dict) -> list[str]:
         """Detect risks from current metrics."""
         risks = []
 
@@ -261,8 +261,8 @@ class Reporter:
 
         return risks
 
-    def generate_heartbeat_report(self, metrics: Optional[Dict] = None,
-                                   governor_actions: Optional[List[str]] = None) -> OpsReport:
+    def generate_heartbeat_report(self, metrics: dict | None = None,
+                                   governor_actions: list[str] | None = None) -> OpsReport:
         """
         Generate 15-minute heartbeat report.
 
@@ -335,8 +335,8 @@ class Reporter:
         logger.info(f"Heartbeat report generated: {timestamp}")
         return report
 
-    def generate_hourly_report(self, metrics: Optional[Dict] = None,
-                                governor_actions: Optional[List[str]] = None) -> OpsReport:
+    def generate_hourly_report(self, metrics: dict | None = None,
+                                governor_actions: list[str] | None = None) -> OpsReport:
         """
         Generate 60-minute ops summary.
 
@@ -417,7 +417,7 @@ class Reporter:
         logger.info(f"Hourly report generated: {timestamp}")
         return report
 
-    def generate_daily_report(self, metrics: Optional[Dict] = None) -> OpsReport:
+    def generate_daily_report(self, metrics: dict | None = None) -> OpsReport:
         """
         Generate daily executive standup report.
 
@@ -518,7 +518,7 @@ class Reporter:
         logger.info(f"Daily report generated: {date_str}")
         return report
 
-    def get_latest_report(self, period: ReportPeriod) -> Optional[str]:
+    def get_latest_report(self, period: ReportPeriod) -> str | None:
         """Get the latest report content for a given period."""
         subdir = period.value
         reports_path = os.path.join(self.reports_dir, subdir)
@@ -533,7 +533,7 @@ class Reporter:
         with open(os.path.join(reports_path, files[0])) as f:
             return f.read()
 
-    def list_reports(self, period: ReportPeriod, limit: int = 24) -> List[Dict]:
+    def list_reports(self, period: ReportPeriod, limit: int = 24) -> list[dict]:
         """List available reports for a given period."""
         subdir = period.value
         reports_path = os.path.join(self.reports_dir, subdir)

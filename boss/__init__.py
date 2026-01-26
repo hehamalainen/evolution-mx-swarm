@@ -1,19 +1,34 @@
 """MX Swarm Agent Boss - Strategic Orchestration Layer."""
 
+from shared.schemas.teamplan import GovernorMode
+
 from .agent_boss import (
+    ROLE_TEMPLATES,
     AgentBoss,
-    TeamComposition,
     AgentRole,
     ParallelizationStrategy,
     RiskTolerance,
-    ROLE_TEMPLATES,
+    TeamComposition,
 )
-from .reporter import Reporter, OpsReport, ReportPeriod, MetricsDelta
-from .escalation import EscalationEngine, Escalation, EscalationType, EscalationSeverity
-from .governor import Governor, GovernorState, TelemetrySnapshot, Adjustment, AdjustmentType, TriggerType
-from shared.schemas.teamplan import GovernorMode
-from .decisions import DecisionQueue, Decision, DecisionType, DecisionPriority, DecisionStatus, DecisionAction
+from .decisions import (
+    Decision,
+    DecisionAction,
+    DecisionPriority,
+    DecisionQueue,
+    DecisionStatus,
+    DecisionType,
+)
+from .escalation import Escalation, EscalationEngine, EscalationSeverity, EscalationType
+from .governor import (
+    Adjustment,
+    AdjustmentType,
+    Governor,
+    GovernorState,
+    TelemetrySnapshot,
+    TriggerType,
+)
 from .org_builder import OrgBuilder, OrgConstraints
+from .reporter import MetricsDelta, OpsReport, Reporter, ReportPeriod
 
 __all__ = [
     "AgentBoss",

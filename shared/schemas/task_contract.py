@@ -1,11 +1,10 @@
 """TaskContract schema - the core message payload for workers."""
 
+import json
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Optional
-import json
-import uuid
 
 
 class TaskType(str, Enum):
@@ -94,33 +93,33 @@ class TaskContract:
     # Metadata
     created_at: str = field(default_factory=lambda: datetime.utcnow().isoformat())
     priority: int = 5  # 1-10, higher is more urgent
-    parent_task_id: Optional[str] = None  # For subtasks
+    parent_task_id: str | None = None  # For subtasks
     spec_requirement_ids: list[str] = field(default_factory=list)  # Links to SPEC.json
 
     # TEAMPLAN routing fields (required for Org Builder)
     stream: TaskStream = TaskStream.FEATURE  # Which worker pool handles this
     tier: RiskTier = RiskTier.TIER_1         # Risk tier (0/1/2) for merge policy
-    spec_ref: Optional[str] = None           # SPEC reference e.g. "RG-001"
+    spec_ref: str | None = None           # SPEC reference e.g. "RG-001"
 
     # Execution state (updated by worker)
     attempt_count: int = 0
-    last_error: Optional[str] = None
-    assigned_worker: Optional[str] = None
+    last_error: str | None = None
+    assigned_worker: str | None = None
 
     @classmethod
     def create(
         cls,
         task_type: TaskType,
         goal: str,
-        context: Optional[TaskContext] = None,
-        acceptance: Optional[AcceptanceCriteria] = None,
-        constraints: Optional[TaskConstraints] = None,
+        context: TaskContext | None = None,
+        acceptance: AcceptanceCriteria | None = None,
+        constraints: TaskConstraints | None = None,
         priority: int = 5,
-        parent_task_id: Optional[str] = None,
-        spec_requirement_ids: Optional[list[str]] = None,
+        parent_task_id: str | None = None,
+        spec_requirement_ids: list[str] | None = None,
         stream: TaskStream = TaskStream.FEATURE,
         tier: RiskTier = RiskTier.TIER_1,
-        spec_ref: Optional[str] = None,
+        spec_ref: str | None = None,
     ) -> "TaskContract":
         """Factory method to create a new TaskContract."""
         return cls(

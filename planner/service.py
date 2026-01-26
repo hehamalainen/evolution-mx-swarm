@@ -14,24 +14,22 @@ import os
 import re
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Optional
 
+from shared.adapters import QueueAdapter, create_queue_adapter
 from shared.schemas import (
-    TaskContract,
-    TaskType,
-    TaskContext,
     AcceptanceCriteria,
-    TaskConstraints,
     MergePolicy,
+    Requirement,
+    RequirementStatus,
+    RequirementType,
     RiskLevel,
     Spec,
-    Requirement,
-    RequirementType,
-    RequirementStatus,
+    TaskConstraints,
+    TaskContext,
+    TaskContract,
+    TaskType,
 )
-from shared.adapters import QueueAdapter, create_queue_adapter
-from shared.utils import MXConfig, LLMClient, Message, create_llm_client
-
+from shared.utils import LLMClient, Message, MXConfig, create_llm_client
 
 SYSTEM_PROMPT = """You are an expert software architect and project planner. Your role is to analyze PRDs (Product Requirements Documents) and break them down into machine-readable specifications and actionable tasks.
 
@@ -51,7 +49,7 @@ class PlannerState:
     prd_hash: str
     spec_generated: bool = False
     tasks_published: int = 0
-    last_run: Optional[str] = None
+    last_run: str | None = None
 
 
 class Planner:
@@ -64,15 +62,15 @@ class Planner:
     def __init__(
         self,
         config: MXConfig,
-        queue: Optional[QueueAdapter] = None,
-        llm: Optional[LLMClient] = None,
+        queue: QueueAdapter | None = None,
+        llm: LLMClient | None = None,
         repo_path: str = ".",
     ):
         self.config = config
         self.queue = queue or create_queue_adapter(config.queue.to_dict())
         self.llm = llm or create_llm_client(config.llm.to_dict())
         self.repo_path = repo_path
-        self.state: Optional[PlannerState] = None
+        self.state: PlannerState | None = None
 
     async def initialize(self) -> None:
         """Initialize planner connections."""
@@ -103,7 +101,7 @@ class Planner:
         """Generate hash of PRD for change detection."""
         return hashlib.sha256(prd_content.encode()).hexdigest()[:16]
 
-    def _load_spec(self) -> Optional[Spec]:
+    def _load_spec(self) -> Spec | None:
         """Load existing SPEC.json if present."""
         spec_path = os.path.join(self.repo_path, "SPEC.json")
         if os.path.exists(spec_path):
@@ -397,8 +395,8 @@ Output ONLY valid JSON:"""
 
     async def generate_tasks(
         self,
-        spec: Optional[Spec] = None,
-        requirements_filter: Optional[list[str]] = None,
+        spec: Spec | None = None,
+        requirements_filter: list[str] | None = None,
     ) -> list[TaskContract]:
         """
         Generate TaskContracts from SPEC.

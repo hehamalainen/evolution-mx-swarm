@@ -12,11 +12,9 @@ Metrics tracked:
 5. Error amplification - retry cascades + fix/rollback ratio
 """
 
-from dataclasses import dataclass, field
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional
 from collections import defaultdict
-import time
+from dataclasses import dataclass
+from datetime import datetime, timedelta
 
 
 @dataclass
@@ -25,11 +23,11 @@ class TaskMetrics:
     task_id: str
     stream: str
     tier: int
-    spec_ref: Optional[str]
+    spec_ref: str | None
 
     # Timing
     started_at: datetime
-    completed_at: Optional[datetime] = None
+    completed_at: datetime | None = None
     duration_seconds: float = 0.0
 
     # Cost
@@ -100,7 +98,7 @@ class CoordinationMetrics:
     trend_efficiency: str = "stable"
     trend_quality: str = "stable"
 
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         """Convert to dictionary for dashboard."""
         return {
             "window_hours": self.window_hours,
@@ -173,10 +171,10 @@ class MetricsCollector:
 
     def __init__(self, baseline_cost_per_item: float = 5.0):
         self.baseline_cost = baseline_cost_per_item
-        self.task_metrics: List[TaskMetrics] = []
-        self.file_touch_counts: Dict[str, int] = defaultdict(int)
-        self.pr_intents: Dict[str, int] = defaultdict(int)  # goal hash -> count
-        self.historical_metrics: List[CoordinationMetrics] = []
+        self.task_metrics: list[TaskMetrics] = []
+        self.file_touch_counts: dict[str, int] = defaultdict(int)
+        self.pr_intents: dict[str, int] = defaultdict(int)  # goal hash -> count
+        self.historical_metrics: list[CoordinationMetrics] = []
 
     def record_task(self, metrics: TaskMetrics):
         """Record metrics for a completed task."""
@@ -309,14 +307,14 @@ class MetricsCollector:
             return "degrading"
         return "stable"
 
-    def get_dashboard_data(self) -> Dict:
+    def get_dashboard_data(self) -> dict:
         """Get metrics formatted for dashboard display."""
         metrics = self.compute_metrics(window_hours=1)
         return metrics.to_dict()
 
 
 # Global collector instance
-_collector: Optional[MetricsCollector] = None
+_collector: MetricsCollector | None = None
 
 
 def get_metrics_collector() -> MetricsCollector:

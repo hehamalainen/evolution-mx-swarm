@@ -1,19 +1,19 @@
 """Schema definitions for MX Swarm."""
 
+from .spec import (
+    Requirement,
+    RequirementStatus,
+    RequirementType,
+    Spec,
+)
 from .task_contract import (
-    TaskContract,
-    TaskType,
-    TaskContext,
     AcceptanceCriteria,
-    TaskConstraints,
     MergePolicy,
     RiskLevel,
-)
-from .spec import (
-    Spec,
-    Requirement,
-    RequirementType,
-    RequirementStatus,
+    TaskConstraints,
+    TaskContext,
+    TaskContract,
+    TaskType,
 )
 
 __all__ = [

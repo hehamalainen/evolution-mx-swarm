@@ -1,11 +1,10 @@
 """SPEC schema - machine-readable requirements graph."""
 
+import json
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Optional
-import json
-import uuid
 
 
 class RequirementStatus(str, Enum):
@@ -33,7 +32,7 @@ class Requirement:
     acceptance_criteria: list[str]
     dependencies: list[str] = field(default_factory=list)  # Requirement IDs
     status: RequirementStatus = RequirementStatus.PENDING
-    prd_section: Optional[str] = None
+    prd_section: str | None = None
     priority: int = 5  # 1-10
     estimated_complexity: int = 5  # 1-10
     assigned_tasks: list[str] = field(default_factory=list)  # TaskContract IDs
@@ -46,10 +45,10 @@ class Requirement:
         title: str,
         description: str,
         acceptance_criteria: list[str],
-        prd_section: Optional[str] = None,
+        prd_section: str | None = None,
         priority: int = 5,
         complexity: int = 5,
-        dependencies: Optional[list[str]] = None,
+        dependencies: list[str] | None = None,
     ) -> "Requirement":
         return cls(
             id=f"REQ-{str(uuid.uuid4())[:6].upper()}",
@@ -123,7 +122,7 @@ class Spec:
         """Add a requirement to the spec."""
         self.requirements.append(req)
 
-    def get_requirement(self, req_id: str) -> Optional[Requirement]:
+    def get_requirement(self, req_id: str) -> Requirement | None:
         """Get requirement by ID."""
         for req in self.requirements:
             if req.id == req_id:

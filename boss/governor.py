@@ -13,16 +13,15 @@ Key responsibilities:
 """
 
 import asyncio
-import time
+import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
-from typing import Dict, List, Optional, Callable
-import logging
 
 from shared.schemas.teamplan import (
-    TeamPlan, GovernorMode, RiskTier,
-    ResetTriggers, ReorgPolicy, CapsConfig
+    GovernorMode,
+    TeamPlan,
 )
 
 logger = logging.getLogger(__name__)
@@ -78,7 +77,7 @@ class TelemetrySnapshot:
     # Worker metrics
     workers_active: int = 0
     workers_idle: int = 0
-    workers_by_stream: Dict[str, int] = field(default_factory=dict)
+    workers_by_stream: dict[str, int] = field(default_factory=dict)
 
     # Budget metrics
     spend_today_usd: float = 0.0
@@ -112,7 +111,7 @@ class GovernorState:
     - Cooldown periods after adjustments
     """
     mode: GovernorMode = GovernorMode.NORMAL
-    frozen_tiers: List[int] = field(default_factory=list)  # Risk tiers frozen for new PRs
+    frozen_tiers: list[int] = field(default_factory=list)  # Risk tiers frozen for new PRs
 
     # Current caps (may differ from TEAMPLAN if adjusted)
     current_pr_cap_hour: int = 15
@@ -125,12 +124,12 @@ class GovernorState:
     baseline_max_workers: int = 100
 
     # Trigger history (for hysteresis)
-    trigger_history: Dict[TriggerType, List[datetime]] = field(default_factory=dict)
+    trigger_history: dict[TriggerType, list[datetime]] = field(default_factory=dict)
 
     # Last adjustments (for rate limiting)
-    last_adjustment_time: Optional[datetime] = None
-    last_reorg_time: Optional[datetime] = None
-    cooldown_until: Optional[datetime] = None
+    last_adjustment_time: datetime | None = None
+    last_reorg_time: datetime | None = None
+    cooldown_until: datetime | None = None
 
     # Consecutive issues (for cascade detection)
     consecutive_ci_fails: int = 0
@@ -138,13 +137,13 @@ class GovernorState:
 
     # Total adjustments in current interval (for 20% limit)
     adjustments_this_interval: int = 0
-    interval_start: Optional[datetime] = None
+    interval_start: datetime | None = None
 
 
 @dataclass
 class Adjustment:
     """A single adjustment made by the governor.
-    
+
     Enhanced for explainability (GPT 5.2 Fix 3):
     - threshold: What threshold triggered (e.g., "CI < 85%")
     - current_value: What the actual value was (e.g., "84.6%")
@@ -156,15 +155,15 @@ class Adjustment:
     timestamp: datetime
     type: AdjustmentType
     reason: str
-    details: Dict
-    trigger: Optional[TriggerType] = None
+    details: dict
+    trigger: TriggerType | None = None
     # Explainability fields
-    threshold: Optional[str] = None
-    current_value: Optional[str] = None
-    before_settings: Optional[Dict] = None
-    after_settings: Optional[Dict] = None
-    cooldown_until: Optional[datetime] = None
-    next_eval_at: Optional[datetime] = None
+    threshold: str | None = None
+    current_value: str | None = None
+    before_settings: dict | None = None
+    after_settings: dict | None = None
+    cooldown_until: datetime | None = None
+    next_eval_at: datetime | None = None
 
 
 
@@ -194,7 +193,7 @@ class Governor:
         self,
         teamplan: TeamPlan,
         telemetry_provider: Callable[[], TelemetrySnapshot],
-        on_adjustment: Optional[Callable[[Adjustment], None]] = None
+        on_adjustment: Callable[[Adjustment], None] | None = None
     ):
         self.teamplan = teamplan
         self.get_telemetry = telemetry_provider
@@ -213,11 +212,11 @@ class Governor:
         )
 
         # Adjustment history
-        self.adjustments: List[Adjustment] = []
+        self.adjustments: list[Adjustment] = []
 
         # Running flag
         self._running = False
-        self._task: Optional[asyncio.Task] = None
+        self._task: asyncio.Task | None = None
 
     # =========================================================================
     # Anti-Thrash Methods
@@ -333,7 +332,7 @@ class Governor:
         for trigger in triggers:
             await self._handle_trigger(trigger, telemetry)
 
-    def _check_triggers(self, telemetry: TelemetrySnapshot) -> List[TriggerType]:
+    def _check_triggers(self, telemetry: TelemetrySnapshot) -> list[TriggerType]:
         """Check which trigger conditions are met."""
         triggers = []
         thresholds = self.teamplan.reset_triggers
@@ -394,7 +393,6 @@ class Governor:
 
     def _detect_stall(self, telemetry: TelemetrySnapshot) -> bool:
         """Detect if the swarm has stalled."""
-        threshold = self.teamplan.reset_triggers.stall_minutes_gt
 
         # Stall = workers active but no completions
         if telemetry.workers_active > 0 and telemetry.tasks_completed_1h == 0:
@@ -632,20 +630,20 @@ class Governor:
         self,
         adj_type: AdjustmentType,
         reason: str,
-        details: Dict,
-        trigger: Optional[TriggerType] = None,
+        details: dict,
+        trigger: TriggerType | None = None,
         # Explainability parameters (GPT 5.2 Fix 3)
-        threshold: Optional[str] = None,
-        current_value: Optional[str] = None,
-        before_settings: Optional[Dict] = None,
-        after_settings: Optional[Dict] = None
+        threshold: str | None = None,
+        current_value: str | None = None,
+        before_settings: dict | None = None,
+        after_settings: dict | None = None
     ):
         """Record and notify about an adjustment."""
         # Calculate cooldown
         cooldown_minutes = self.teamplan.reorg_policy.hysteresis_minutes
         cooldown_until = datetime.utcnow() + timedelta(minutes=cooldown_minutes)
         next_eval_at = datetime.utcnow() + timedelta(minutes=5)  # Next eval in 5 min
-        
+
         adjustment = Adjustment(
             timestamp=datetime.utcnow(),
             type=adj_type,
@@ -672,7 +670,7 @@ class Governor:
         if self.on_adjustment:
             self.on_adjustment(adjustment)
 
-    def get_state_summary(self) -> Dict:
+    def get_state_summary(self) -> dict:
         """Get current governor state for dashboard."""
         now = datetime.utcnow()
 

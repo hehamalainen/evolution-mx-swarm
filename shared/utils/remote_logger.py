@@ -1,10 +1,9 @@
-import sys
 import asyncio
-import aiohttp
-import json
-import time
+import sys
 from datetime import datetime
-from typing import Optional
+
+import aiohttp
+
 
 class RemoteLogStream:
     """
@@ -27,7 +26,7 @@ class RemoteLogStream:
                     # Swap buffer
                     batch = self.buffer[:]
                     self.buffer = []
-                    
+
                     try:
                         await session.post(
                             f"{self.dashboard_url}/api/logs/ingest",
@@ -37,7 +36,7 @@ class RemoteLogStream:
                     except Exception:
                         # Fallback to original stderr if logging fails
                         pass
-                
+
                 await asyncio.sleep(0.5)
 
     def write_log(self, message: str, level: str = "info"):

@@ -7,14 +7,10 @@ This module handles:
 4. Base branch synchronization
 """
 
-import asyncio
-import hashlib
 import json
 import os
-import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Optional, Set
 from enum import Enum
 
 
@@ -102,7 +98,7 @@ class CoordinationService:
         task_id: str,
         worker_id: str,
         timeout_minutes: int = 60,
-    ) -> tuple[bool, Optional[str]]:
+    ) -> tuple[bool, str | None]:
         """
         Attempt to acquire lock on a file.
 
@@ -173,7 +169,7 @@ class CoordinationService:
         for file_path in files:
             self.release_file_lock(file_path, task_id)
 
-    def get_lock_status(self, file_path: str) -> tuple[LockStatus, Optional[FileLock]]:
+    def get_lock_status(self, file_path: str) -> tuple[LockStatus, FileLock | None]:
         """Get lock status for a file."""
         self._cleanup_expired()
 

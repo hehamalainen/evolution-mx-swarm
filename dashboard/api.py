@@ -47,7 +47,7 @@ from boss import (
 )
 from shared.adapters import create_queue_adapter
 from shared.schemas import Spec
-from shared.schemas.teamplan import TeamPlan
+from shared.schemas.teamplan import GovernorMode, TeamPlan
 from shared.utils import MXConfig
 from shared.utils.metrics import get_metrics_collector
 
@@ -152,7 +152,7 @@ class SwarmState:
         self.ci_health_trend: deque = deque(maxlen=60)  # Last 60 data points
 
         # Governor state
-        self.governor_state: GovernorState = GovernorState.NORMAL
+        self.governor_state: GovernorMode = GovernorMode.NORMAL
         self.open_pr_cap: int = 25
         self.pr_hour_cap: int = 15
         self.current_open_prs: int = 0
@@ -236,13 +236,13 @@ class SwarmState:
             spend_today_usd=self.total_cost
         )
 
-    def check_governor(self) -> GovernorState:
+    def check_governor(self) -> GovernorMode:
         """Check and update governor state based on caps and config."""
         # Update telemetry and evaluate
         asyncio.create_task(self.governor._evaluate())
 
         # Sync state
-        self.governor_state = GovernorState(self.governor.state.mode.value)
+        self.governor_state = GovernorMode(self.governor.state.mode.value)
         self.open_pr_cap = self.governor.state.current_open_pr_cap
         self.pr_hour_cap = self.governor.state.current_pr_cap_hour
 
@@ -817,7 +817,7 @@ async def control_throttle():
     config.worker.max_workers = max(1, old_workers // 2)  # Halve workers
     save_config(config)
 
-    state.governor_state = GovernorState.THROTTLED
+    state.governor_state = GovernorMode.THROTTLED
     state.add_log(EventType.GOV_THROTTLE, f"Swarm THROTTLED: workers {old_workers} → {config.worker.max_workers}", "warn")
     await state.broadcast_status()
     return {"status": "throttled", "new_workers": config.worker.max_workers}
@@ -829,7 +829,7 @@ async def control_reset():
     # Clear state
     state.workers.clear()
     state.active_tasks.clear()
-    state.governor_state = GovernorState.NORMAL
+    state.governor_state = GovernorMode.NORMAL
 
     state.add_log(EventType.JUDGE_RESET, "Swarm RESET initiated - replanning", "warn")
     await state.broadcast_status()
@@ -897,7 +897,7 @@ async def control_ignite(req: IgniteRequest):
     save_config(config)
 
     state.start_time = datetime.utcnow().isoformat()
-    state.governor_state = GovernorState.NORMAL
+    state.governor_state = GovernorMode.NORMAL
 
     if req.auto_mode:
         state.add_log(EventType.SYS_START, "Agent Boss analyzing PRD and assembling team...")
@@ -1002,7 +1002,7 @@ async def control_stop():
 
     worker_count = len(state.workers)
     state.workers.clear()
-    state.governor_state = GovernorState.FROZEN
+    state.governor_state = GovernorMode.FROZEN
 
     if state.swarm_process:
         state.swarm_process.terminate()
@@ -1061,7 +1061,7 @@ async def simulation_event(event: dict):
 
         # Update governor state
         if "governor_state" in m:
-            state.governor_state = GovernorState(m["governor_state"])
+            state.governor_state = GovernorMode(m["governor_state"])
 
         # Update current open PRs count
         if "prs_open" in m:

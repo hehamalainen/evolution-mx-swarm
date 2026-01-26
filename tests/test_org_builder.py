@@ -2,18 +2,23 @@
 
 import os
 import sys
+
 import pytest
 
 # Add parent to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from shared.schemas.task_contract import RiskTier, TaskContract, TaskStream, TaskType
 from shared.schemas.teamplan import (
-    TeamPlan, Topology, StreamConfig, CapsConfig,
-    RiskMergePolicy, MergePolicy, TaskPolicy,
-    BudgetPolicy, ReorgPolicy, ResetTriggers
-)
-from shared.schemas.task_contract import (
-    TaskContract, TaskType, TaskStream, RiskTier
+    BudgetPolicy,
+    CapsConfig,
+    MergePolicy,
+    ReorgPolicy,
+    ResetTriggers,
+    RiskMergePolicy,
+    StreamConfig,
+    TeamPlan,
+    Topology,
 )
 
 

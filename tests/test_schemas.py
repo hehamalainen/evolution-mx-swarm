@@ -1,20 +1,19 @@
 """Tests for MX Swarm schemas."""
 
-import pytest
 import json
 
 from shared.schemas import (
-    TaskContract,
-    TaskType,
-    TaskContext,
     AcceptanceCriteria,
-    TaskConstraints,
     MergePolicy,
+    Requirement,
+    RequirementStatus,
+    RequirementType,
     RiskLevel,
     Spec,
-    Requirement,
-    RequirementType,
-    RequirementStatus,
+    TaskConstraints,
+    TaskContext,
+    TaskContract,
+    TaskType,
 )
 
 

@@ -6,16 +6,14 @@ Provides cloud-agnostic queue interface with implementations for:
 - In-memory (local dev)
 """
 
-from abc import ABC, abstractmethod
-from dataclasses import dataclass
-from datetime import datetime
-from typing import Optional, Callable, Any
-import json
 import asyncio
-import uuid
-from collections import deque
 import threading
 import time
+import uuid
+from abc import ABC, abstractmethod
+from collections import deque
+from dataclasses import dataclass
+from datetime import datetime
 
 from shared.schemas import TaskContract
 
@@ -365,9 +363,10 @@ class GCPPubSubQueue(QueueAdapter):
         if not self._subscriber:
             raise RuntimeError("Queue not connected")
 
+        import datetime
+
         from google.cloud.pubsub_v1.types import SeekRequest
         from google.protobuf.timestamp_pb2 import Timestamp
-        import datetime
 
         # Seek to now to skip all existing messages
         now = Timestamp()
@@ -391,8 +390,8 @@ class AzureServiceBusQueue(QueueAdapter):
 
     def __init__(
         self,
-        connection_string: Optional[str] = None,
-        namespace: Optional[str] = None,
+        connection_string: str | None = None,
+        namespace: str | None = None,
         queue_name: str = "mx-tasks",
     ):
         self.connection_string = connection_string
@@ -404,8 +403,8 @@ class AzureServiceBusQueue(QueueAdapter):
 
     async def connect(self) -> None:
         try:
-            from azure.servicebus.aio import ServiceBusClient
             from azure.identity.aio import DefaultAzureCredential
+            from azure.servicebus.aio import ServiceBusClient
         except ImportError:
             raise ImportError(
                 "azure-servicebus required. Install with: pip install azure-servicebus azure-identity"

@@ -14,16 +14,22 @@ Key steps:
 """
 
 import hashlib
-import re
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
 from enum import Enum
 
 from shared.schemas.teamplan import (
-    TeamPlan, Topology, StreamConfig, PodConfig,
-    CapsConfig, RiskMergePolicy, MergePolicy,
-    TaskPolicy, RetryPolicy, BudgetPolicy,
-    ReorgPolicy, ResetTriggers, ObservabilityConfig
+    BudgetPolicy,
+    CapsConfig,
+    MergePolicy,
+    ObservabilityConfig,
+    ReorgPolicy,
+    ResetTriggers,
+    RetryPolicy,
+    RiskMergePolicy,
+    StreamConfig,
+    TaskPolicy,
+    TeamPlan,
+    Topology,
 )
 from shared.utils.llm import LLMClient
 
@@ -49,18 +55,18 @@ class WorkPackage:
     title: str
     category: WorkCategory
     description: str
-    dependencies: List[str] = field(default_factory=list)
-    acceptance_criteria: List[str] = field(default_factory=list)
-    risk_indicators: List[str] = field(default_factory=list)
+    dependencies: list[str] = field(default_factory=list)
+    acceptance_criteria: list[str] = field(default_factory=list)
+    risk_indicators: list[str] = field(default_factory=list)
     estimated_complexity: float = 0.5  # 0-1
 
 
 @dataclass
 class PRDAnalysis:
     """Results of PRD analysis."""
-    work_packages: List[WorkPackage]
-    categories_touched: List[WorkCategory]
-    dependency_graph: Dict[str, List[str]]  # id -> [dependency_ids]
+    work_packages: list[WorkPackage]
+    categories_touched: list[WorkCategory]
+    dependency_graph: dict[str, list[str]]  # id -> [dependency_ids]
 
     # Computed scores
     complexity_score: float = 0.0    # 0-1: how much work
@@ -80,11 +86,11 @@ class OrgConstraints:
     """Constraints provided for org building."""
     max_budget_per_day: float = 50.0
     max_workers: int = 100
-    deadline_hours: Optional[int] = None
-    allowed_models: List[str] = field(default_factory=lambda: ["claude-sonnet-4-20250514"])
-    repo_url: Optional[str] = None
+    deadline_hours: int | None = None
+    allowed_models: list[str] = field(default_factory=lambda: ["claude-sonnet-4-20250514"])
+    repo_url: str | None = None
     ci_provider: str = "github"
-    staging_url: Optional[str] = None
+    staging_url: str | None = None
     require_manual_review_tier2: bool = True
 
 
@@ -107,10 +113,10 @@ class OrgBuilder:
     # Coupling indicators
     COUPLING_KEYWORDS = ["depends on", "requires", "after", "before", "shared", "common", "reuse"]
 
-    def __init__(self, llm_client: Optional[LLMClient] = None):
+    def __init__(self, llm_client: LLMClient | None = None):
         self.llm = llm_client
 
-    def analyze_prd(self, prd_content: str, dod_content: Optional[str] = None) -> PRDAnalysis:
+    def analyze_prd(self, prd_content: str, dod_content: str | None = None) -> PRDAnalysis:
         """
         Analyze PRD to extract work structure and compute scores.
 
@@ -169,7 +175,7 @@ class OrgBuilder:
             estimated_tasks=estimated_tasks
         )
 
-    def _detect_categories(self, prd_lower: str) -> List[WorkCategory]:
+    def _detect_categories(self, prd_lower: str) -> list[WorkCategory]:
         """Detect which work categories are present."""
         categories = []
 
@@ -192,7 +198,7 @@ class OrgBuilder:
 
         return categories if categories else [WorkCategory.API, WorkCategory.UI]
 
-    def _extract_work_packages(self, prd_content: str, categories: List[WorkCategory]) -> List[WorkPackage]:
+    def _extract_work_packages(self, prd_content: str, categories: list[WorkCategory]) -> list[WorkPackage]:
         """Extract work packages from PRD sections."""
         packages = []
 
@@ -216,7 +222,7 @@ class OrgBuilder:
 
         return packages
 
-    def _get_risk_indicators(self, category: WorkCategory) -> List[str]:
+    def _get_risk_indicators(self, category: WorkCategory) -> list[str]:
         """Get risk indicators for a category."""
         high_risk_categories = {
             WorkCategory.AUTH: ["credential handling", "session management"],
@@ -226,7 +232,7 @@ class OrgBuilder:
         }
         return high_risk_categories.get(category, [])
 
-    def _build_dependency_graph(self, packages: List[WorkPackage]) -> Dict[str, List[str]]:
+    def _build_dependency_graph(self, packages: list[WorkPackage]) -> dict[str, list[str]]:
         """Build dependency graph from work packages."""
         return {pkg.id: pkg.dependencies for pkg in packages}
 
@@ -234,7 +240,7 @@ class OrgBuilder:
         self,
         prd_content: str,
         constraints: OrgConstraints,
-        dod_content: Optional[str] = None
+        dod_content: str | None = None
     ) -> TeamPlan:
         """
         Main entry point: Build TEAMPLAN from PRD + constraints.
@@ -298,7 +304,7 @@ class OrgBuilder:
 
         return Topology.STREAMS
 
-    def _staff_streams(self, analysis: PRDAnalysis, constraints: OrgConstraints) -> List[StreamConfig]:
+    def _staff_streams(self, analysis: PRDAnalysis, constraints: OrgConstraints) -> list[StreamConfig]:
         """
         Staff role streams based on PRD analysis.
 
@@ -340,7 +346,7 @@ class OrgBuilder:
             feature_pct -= 0.05
 
         # Compute worker counts
-        def compute_workers(pct: float) -> Tuple[int, int]:
+        def compute_workers(pct: float) -> tuple[int, int]:
             target = max(1, int(max_workers * pct))
             max_w = max(target, int(target * 1.4))
             return target, max_w
@@ -420,7 +426,6 @@ class OrgBuilder:
     def _compute_risk_policy(self, analysis: PRDAnalysis, constraints: OrgConstraints) -> RiskMergePolicy:
         """Compute merge policy by risk tier."""
         # Default: tier0 auto, tier1 with flag, tier2 manual
-        tier2_policy = MergePolicy.MANUAL_REVIEW_REQUIRED
 
         # If high risk overall, make tier1 manual too
         if analysis.risk_score > 0.7:
@@ -489,9 +494,9 @@ class OrgBuilder:
 
 async def build_teamplan_from_prd(
     prd_path: str,
-    constraints: Optional[OrgConstraints] = None,
-    dod_path: Optional[str] = None,
-    llm_client: Optional[LLMClient] = None
+    constraints: OrgConstraints | None = None,
+    dod_path: str | None = None,
+    llm_client: LLMClient | None = None
 ) -> TeamPlan:
     """
     Convenience function to build TEAMPLAN from file paths.
@@ -501,13 +506,13 @@ async def build_teamplan_from_prd(
         teamplan.save("./TEAMPLAN.json")
     """
     # Read PRD
-    with open(prd_path, 'r') as f:
+    with open(prd_path) as f:
         prd_content = f.read()
 
     # Read DoD if provided
     dod_content = None
     if dod_path:
-        with open(dod_path, 'r') as f:
+        with open(dod_path) as f:
             dod_content = f.read()
 
     # Use default constraints if not provided

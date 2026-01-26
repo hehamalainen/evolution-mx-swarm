@@ -14,11 +14,10 @@ import os
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Optional
 
-from shared.schemas import Spec, TaskType
-from shared.utils import MXConfig, LLMClient, Message, create_llm_client
 from planner import Planner
+from shared.schemas import TaskType
+from shared.utils import LLMClient, Message, MXConfig, create_llm_client
 
 
 class ParallelizationStrategy(str, Enum):
@@ -292,7 +291,7 @@ class AgentBoss:
     def __init__(
         self,
         config: MXConfig,
-        llm: Optional[LLMClient] = None,
+        llm: LLMClient | None = None,
         repo_path: str = ".",
     ):
         self.config = config
@@ -307,7 +306,7 @@ class AgentBoss:
         with open(prd_path) as f:
             return f.read()
 
-    async def analyze_prd(self, prd: Optional[str] = None) -> TeamComposition:
+    async def analyze_prd(self, prd: str | None = None) -> TeamComposition:
         """
         Analyze PRD and generate team composition.
 
@@ -465,7 +464,7 @@ Consider:
 
     async def ignite_swarm(
         self,
-        composition: Optional[TeamComposition] = None,
+        composition: TeamComposition | None = None,
         dry_run: bool = False,
     ) -> dict:
         """
@@ -491,7 +490,6 @@ Consider:
 
         # Run planner to generate tasks
         print("\nAgent Boss: Initiating Planner...")
-        from judge import Judge
         planner = Planner(config, repo_path=self.repo_path)
         plan_result = await planner.run()
 

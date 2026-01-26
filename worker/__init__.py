@@ -1,5 +1,5 @@
 """MX Swarm Worker Service."""
 
-from .service import Worker, WorkerMetrics, EvidencePack
+from .service import EvidencePack, Worker, WorkerMetrics
 
 __all__ = ["Worker", "WorkerMetrics", "EvidencePack"]

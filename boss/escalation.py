@@ -9,12 +9,11 @@ Triggers escalation when thresholds are breached:
 - Security gate failures on Tier2 work
 """
 
-from dataclasses import dataclass, field
-from datetime import datetime, timedelta
-from enum import Enum
-from typing import List, Dict, Optional
-import os
 import json
+import os
+from dataclasses import dataclass, field
+from datetime import datetime
+from enum import Enum
 
 
 class EscalationSeverity(str, Enum):
@@ -73,16 +72,16 @@ class EscalationEngine:
     def __init__(self, repo_path: str = "."):
         self.repo_path = repo_path
         self.thresholds = EscalationThresholds()
-        self.active_escalations: List[Escalation] = []
+        self.active_escalations: list[Escalation] = []
         self._escalation_counter = 0
 
         # Track breach durations
-        self._ci_breach_start: Optional[datetime] = None
-        self._retry_breach_start: Optional[datetime] = None
-        self._stall_start: Optional[datetime] = None
-        self._last_merge_time: Optional[datetime] = None
+        self._ci_breach_start: datetime | None = None
+        self._retry_breach_start: datetime | None = None
+        self._stall_start: datetime | None = None
+        self._last_merge_time: datetime | None = None
 
-    def check_triggers(self, metrics: Dict) -> List[Escalation]:
+    def check_triggers(self, metrics: dict) -> list[Escalation]:
         """Check all escalation triggers and return new escalations."""
         new_escalations = []
         now = datetime.utcnow()
@@ -173,7 +172,7 @@ class EscalationEngine:
         return new_escalations
 
     def _create_escalation(self, esc_type: EscalationType, severity: EscalationSeverity,
-                          title: str, description: str, action: str) -> Optional[Escalation]:
+                          title: str, description: str, action: str) -> Escalation | None:
         """Create escalation if not already active for this type."""
         # Check if we already have an active escalation of this type
         for esc in self.active_escalations:
@@ -209,7 +208,7 @@ class EscalationEngine:
                 return True
         return False
 
-    def get_active_escalations(self) -> List[Escalation]:
+    def get_active_escalations(self) -> list[Escalation]:
         """Get all unresolved escalations."""
         return [e for e in self.active_escalations if not e.resolved]
 

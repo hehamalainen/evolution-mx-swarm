@@ -15,13 +15,13 @@ Human actions allowed:
 - Ship now (promote to prod)
 """
 
-import os
 import json
+import logging
+import os
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
-from typing import List, Dict, Optional, Callable
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -77,15 +77,15 @@ class Decision:
     priority: DecisionPriority
     title: str
     description: str
-    context: Dict  # Relevant data for making the decision
-    actions: List[DecisionAction] = field(default_factory=list)
-    recommended_action: Optional[str] = None  # ID of recommended action
+    context: dict  # Relevant data for making the decision
+    actions: list[DecisionAction] = field(default_factory=list)
+    recommended_action: str | None = None  # ID of recommended action
     created_at: datetime = field(default_factory=datetime.utcnow)
-    expires_at: Optional[datetime] = None
+    expires_at: datetime | None = None
     status: DecisionStatus = DecisionStatus.PENDING
-    resolved_at: Optional[datetime] = None
-    resolved_by: Optional[str] = None  # "human" or "auto"
-    resolved_action: Optional[str] = None
+    resolved_at: datetime | None = None
+    resolved_by: str | None = None  # "human" or "auto"
+    resolved_action: str | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -125,11 +125,11 @@ class DecisionQueue:
         self.decisions_dir = os.path.join(repo_path, "decisions")
         os.makedirs(self.decisions_dir, exist_ok=True)
 
-        self.decisions: List[Decision] = []
+        self.decisions: list[Decision] = []
         self._decision_counter = 0
 
         # Callbacks for action execution
-        self._action_handlers: Dict[str, Callable[[Decision, str], bool]] = {}
+        self._action_handlers: dict[str, Callable[[Decision, str], bool]] = {}
 
         # Load existing decisions
         self._load_decisions()
@@ -174,11 +174,11 @@ class DecisionQueue:
         decision_type: DecisionType,
         title: str,
         description: str,
-        context: Dict,
+        context: dict,
         priority: DecisionPriority = DecisionPriority.MEDIUM,
-        expires_hours: Optional[int] = 24,
-        actions: Optional[List[DecisionAction]] = None,
-        recommended_action: Optional[str] = None
+        expires_hours: int | None = 24,
+        actions: list[DecisionAction] | None = None,
+        recommended_action: str | None = None
     ) -> Decision:
         """Create a new decision requiring human input."""
         # Check if we already have a pending decision of this type
@@ -212,7 +212,7 @@ class DecisionQueue:
         logger.info(f"Decision created: {decision_id} - {title}")
         return decision
 
-    def _get_default_actions(self, decision_type: DecisionType) -> List[DecisionAction]:
+    def _get_default_actions(self, decision_type: DecisionType) -> list[DecisionAction]:
         """Get default actions for a decision type."""
         if decision_type == DecisionType.BUDGET_INCREASE:
             return [
@@ -313,14 +313,14 @@ class DecisionQueue:
         logger.info(f"Decision {decision_id} resolved with action: {action_id}")
         return True
 
-    def get_decision(self, decision_id: str) -> Optional[Decision]:
+    def get_decision(self, decision_id: str) -> Decision | None:
         """Get a decision by ID."""
         for d in self.decisions:
             if d.id == decision_id:
                 return d
         return None
 
-    def get_pending_decisions(self) -> List[Decision]:
+    def get_pending_decisions(self) -> list[Decision]:
         """Get all pending decisions, sorted by priority."""
         self._check_expirations()
 
@@ -335,7 +335,7 @@ class DecisionQueue:
         }
         return sorted(pending, key=lambda d: priority_order.get(d.priority, 99))
 
-    def get_decisions_for_report(self, limit: int = 3) -> List[Dict]:
+    def get_decisions_for_report(self, limit: int = 3) -> list[dict]:
         """Get decisions formatted for reports."""
         pending = self.get_pending_decisions()[:limit]
         return [d.to_dict() for d in pending]

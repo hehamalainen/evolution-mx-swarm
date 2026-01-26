@@ -6,11 +6,10 @@ and operational policies for a swarm execution. It's deterministic,
 machine-readable, and the runtime MUST obey it.
 """
 
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Literal
-from enum import Enum
 import json
+from dataclasses import dataclass, field
 from datetime import datetime
+from enum import Enum
 
 
 class Topology(str, Enum):
@@ -47,7 +46,7 @@ class StreamConfig:
     role: str                          # role prompt key
     target_workers: int                # desired worker count
     max_workers: int                   # hard cap
-    tools: List[str] = field(default_factory=list)  # allowed tool permissions
+    tools: list[str] = field(default_factory=list)  # allowed tool permissions
     priority: int = 1                  # queue priority (higher = more urgent)
 
     def to_dict(self) -> dict:
@@ -77,9 +76,9 @@ class PodConfig:
     """Configuration for a pod (tightly coupled epic team)."""
     name: str                          # pod identifier
     epic_ref: str                      # SPEC epic reference
-    roles: Dict[str, int]              # role -> worker count
+    roles: dict[str, int]              # role -> worker count
     max_workers: int                   # total pod cap
-    shared_context: List[str] = field(default_factory=list)  # shared files/modules
+    shared_context: list[str] = field(default_factory=list)  # shared files/modules
 
     def to_dict(self) -> dict:
         return {
@@ -194,7 +193,7 @@ class TaskPolicy:
 class RetryPolicy:
     """Task retry and dead-letter queue policy."""
     max_retries: int = 3               # max retry attempts
-    backoff_seconds: List[int] = field(default_factory=lambda: [60, 300, 900])
+    backoff_seconds: list[int] = field(default_factory=lambda: [60, 300, 900])
     dlq_enabled: bool = True           # send to dead-letter after max retries
 
     def to_dict(self) -> dict:
@@ -219,7 +218,7 @@ class BudgetPolicy:
     usd_per_day: float = 50.0          # daily hard cap
     usd_per_hour_soft: float = 10.0    # soft hourly limit (triggers alert)
     hard_stop: bool = True             # stop all work when cap hit
-    burn_alert_thresholds: List[int] = field(default_factory=lambda: [50, 75, 90])
+    burn_alert_thresholds: list[int] = field(default_factory=lambda: [50, 75, 90])
 
     def to_dict(self) -> dict:
         return {
@@ -350,8 +349,8 @@ class TeamPlan:
     topology: Topology = Topology.STREAMS
 
     # Organization structure
-    streams: List[StreamConfig] = field(default_factory=list)
-    pods: List[PodConfig] = field(default_factory=list)
+    streams: list[StreamConfig] = field(default_factory=list)
+    pods: list[PodConfig] = field(default_factory=list)
 
     # Governance
     caps: CapsConfig = field(default_factory=CapsConfig)
@@ -368,9 +367,9 @@ class TeamPlan:
     observability: ObservabilityConfig = field(default_factory=ObservabilityConfig)
 
     # Metadata
-    prd_hash: Optional[str] = None     # hash of source PRD
-    spec_hash: Optional[str] = None    # hash of generated SPEC
-    created_at: Optional[str] = None
+    prd_hash: str | None = None     # hash of source PRD
+    spec_hash: str | None = None    # hash of generated SPEC
+    created_at: str | None = None
     created_by: str = "org_builder"
 
     # Computed scores (from PRD analysis)
@@ -394,14 +393,14 @@ class TeamPlan:
             return sum(s.max_workers for s in self.streams)
         return sum(p.max_workers for p in self.pods)
 
-    def get_stream(self, name: str) -> Optional[StreamConfig]:
+    def get_stream(self, name: str) -> StreamConfig | None:
         """Get stream config by name."""
         for s in self.streams:
             if s.name == name:
                 return s
         return None
 
-    def get_role_mix(self) -> Dict[str, float]:
+    def get_role_mix(self) -> dict[str, float]:
         """Get role mix as percentages."""
         total = self.total_target_workers()
         if total == 0:
@@ -466,7 +465,7 @@ class TeamPlan:
     @classmethod
     def load(cls, path: str) -> "TeamPlan":
         """Load TEAMPLAN from file."""
-        with open(path, 'r') as f:
+        with open(path) as f:
             data = json.load(f)
         return cls.from_dict(data)
 
