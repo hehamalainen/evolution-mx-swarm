@@ -327,11 +327,22 @@ After the implementation, provide a brief summary of what you did and any notes.
 
         content = response.content
 
+        # Debug: print LLM response preview
+        print(f"[{self.worker_id}] LLM response preview: {content[:500]}...")
+
         # Parse file changes
         changed_files = []
         import re
-        file_pattern = r'```file:([^\n]+)\n(.*?)```'
+        # Match multiple formats: ```file:path, ```python:path, ```typescript:path, etc.
+        file_pattern = r'```(?:file|python|typescript|javascript|js|ts|py):([^\n]+)\n(.*?)```'
         matches = re.findall(file_pattern, content, re.DOTALL)
+
+        # Also try to match ```python with # file: comment on first line
+        if not matches:
+            alt_pattern = r'```(?:python|typescript|javascript)?\n#\s*file:\s*([^\n]+)\n(.*?)```'
+            matches = re.findall(alt_pattern, content, re.DOTALL)
+
+        print(f"[{self.worker_id}] Found {len(matches)} file blocks in response")
 
         for path, file_content in matches:
             path = path.strip()
