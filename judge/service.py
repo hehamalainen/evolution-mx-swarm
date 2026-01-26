@@ -29,7 +29,7 @@ from shared.schemas import (
     RequirementStatus,
     Spec,
 )
-from shared.schemas.teamplan import TeamPlan
+from shared.schemas.teamplan import GovernorMode, TeamPlan
 from shared.utils import (
     GitHubAPI,
     LLMClient,
@@ -53,7 +53,7 @@ class JudgeDecision(str, Enum):
 class GovernorReport:
     """Report from a governor check."""
     timestamp: str
-    state: GovernorState
+    state: GovernorMode
     actions: list[str]
     metrics: dict
 
@@ -122,7 +122,7 @@ class JudgeState:
     no_progress_since: str | None = None
     consecutive_failures: int = 0
     total_evaluations: int = 0
-    governor_state: GovernorState = GovernorState.NORMAL
+    governor_state: GovernorMode = GovernorMode.NORMAL
     last_governor_check: str | None = None
 
 
@@ -529,7 +529,7 @@ class Judge:
 
         report = GovernorReport(
             timestamp=datetime.utcnow().isoformat(),
-            state=GovernorState(gov_state["mode"]),
+            state=GovernorMode(gov_state["mode"]),
             actions=[adj["reason"] for adj in gov_state["recent_adjustments"]],
             metrics=gov_state["current_caps"]
         )
