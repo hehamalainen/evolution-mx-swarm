@@ -19,8 +19,6 @@ import json
 import os
 import signal
 import sys
-from datetime import datetime
-from typing import Optional
 
 # Load .env file for GITHUB_TOKEN and other secrets
 # Use absolute path: go up from cli/ to project root
@@ -42,15 +40,15 @@ if os.path.exists(_env_path):
 # Add parent to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from shared.utils import MXConfig
+from boss import AgentBoss
+from boss.org_builder import OrgBuilder, OrgConstraints
+from judge import Judge
+from planner import Planner
 from shared.adapters import create_queue_adapter
 from shared.schemas import Spec
 from shared.schemas.teamplan import TeamPlan
-from planner import Planner
+from shared.utils import MXConfig
 from worker import Worker
-from judge import Judge
-from boss import AgentBoss
-from boss.org_builder import OrgBuilder, OrgConstraints
 
 
 def print_banner():
@@ -68,7 +66,7 @@ def load_config(config_path: str = "mx.config.json") -> MXConfig:
     return MXConfig.load_or_create(config_path)
 
 
-def load_spec(repo_path: str = ".") -> Optional[Spec]:
+def load_spec(repo_path: str = ".") -> Spec | None:
     """Load SPEC.json if exists."""
     spec_path = os.path.join(repo_path, "SPEC.json")
     if os.path.exists(spec_path):
@@ -185,7 +183,7 @@ async def cmd_run(args):
         if not os.environ.get("ANTHROPIC_API_KEY"):
             print("Warning: ANTHROPIC_API_KEY not set - using default LLM config")
 
-        print(f"Starting MX Swarm...")
+        print("Starting MX Swarm...")
         print(f"  Repository: {config.github.repo_owner}/{config.github.repo_name}")
         print(f"  Max workers: {args.workers or config.worker.max_workers}")
         print(f"  LLM: {config.llm.provider}/{config.llm.model}")
@@ -198,7 +196,6 @@ async def cmd_run(args):
         config.save()
 
         # Run components
-        tasks = []
 
         # 1. Run planner first
         print("[1/3] Running planner...")
@@ -256,8 +253,8 @@ async def cmd_run(args):
                 import aiohttp
                 use_aiohttp = True
             except ImportError:
-                import urllib.request
                 import urllib.error
+                import urllib.request
                 use_aiohttp = False
 
             while True:
@@ -294,14 +291,14 @@ async def cmd_run(args):
                                 f"{dashboard_url}/api/swarm/heartbeat",
                                 json=payload,
                                 timeout=aiohttp.ClientTimeout(total=2)
-                            ) as resp:
+                            ):
                                 pass  # Just send, don't care about response
                     else:
                         # Fallback to synchronous urllib in thread pool
-                        def sync_post():
+                        def sync_post(p):
                             req = urllib.request.Request(
                                 f"{dashboard_url}/api/swarm/heartbeat",
-                                data=json.dumps(payload).encode('utf-8'),
+                                data=json.dumps(p).encode('utf-8'),
                                 headers={'Content-Type': 'application/json'},
                                 method='POST'
                             )
@@ -309,7 +306,7 @@ async def cmd_run(args):
                                 urllib.request.urlopen(req, timeout=2)
                             except (urllib.error.URLError, OSError):
                                 pass
-                        await asyncio.get_event_loop().run_in_executor(None, sync_post)
+                        await asyncio.get_event_loop().run_in_executor(None, sync_post, payload)
 
                 except Exception:
                     pass  # Ignore errors - dashboard might not be running
@@ -368,19 +365,19 @@ async def cmd_status(args):
     # TEAMPLAN status
     if os.path.exists("TEAMPLAN.json"):
         teamplan = TeamPlan.load("TEAMPLAN.json")
-        print(f"\nTEAMPLAN (Org-as-Code):")
+        print("\nTEAMPLAN (Org-as-Code):")
         print(f"  Topology: {teamplan.topology.value}")
-        print(f"  Streams:")
+        print("  Streams:")
         for s in teamplan.streams:
             print(f"    - {s.name}: {s.target_workers}/{s.max_workers} workers")
         print(f"  Total: {teamplan.total_target_workers()} workers (max {teamplan.total_max_workers()})")
         print(f"  Scores: complexity={teamplan.complexity_score:.2f}, coupling={teamplan.coupling_score:.2f}, risk={teamplan.risk_score:.2f}")
         print(f"  Caps: {teamplan.caps.pr_cap_per_hour} PR/hr, {teamplan.caps.open_pr_cap} open PRs")
     else:
-        print(f"\nNo TEAMPLAN.json - run 'mx ignite' to generate")
+        print("\nNo TEAMPLAN.json - run 'mx ignite' to generate")
 
     # Config status
-    print(f"\nConfiguration:")
+    print("\nConfiguration:")
     print(f"  Repository: {config.github.repo_owner}/{config.github.repo_name}")
     print(f"  Max workers: {config.worker.max_workers}")
     print(f"  Budget: ${config.budget.daily_usd_cap}/day")
@@ -389,13 +386,13 @@ async def cmd_status(args):
     # Spec/progress status
     if spec:
         progress = spec.progress_summary()
-        print(f"\nProgress:")
+        print("\nProgress:")
         print(f"  Requirements: {progress['completed']}/{progress['total']} ({progress['percent']}%)")
         print(f"  In Progress: {progress['in_progress']}")
         print(f"  Pending: {progress['pending']}")
         print(f"  Blocked: {progress.get('blocked', 0)}")
     else:
-        print(f"\nNo SPEC.json found - run 'mx run' or 'mx plan' first")
+        print("\nNo SPEC.json found - run 'mx run' or 'mx plan' first")
 
     # Queue status
     try:
@@ -403,7 +400,7 @@ async def cmd_status(args):
         await queue.connect()
         depth = await queue.get_queue_depth()
         await queue.disconnect()
-        print(f"\nQueue:")
+        print("\nQueue:")
         print(f"  Depth: {depth if depth >= 0 else 'unknown'}")
     except Exception as e:
         print(f"\nQueue: Unable to connect ({e})")
@@ -460,7 +457,7 @@ async def cmd_plan(args):
     planner = Planner(config, repo_path=".")
     result = await planner.run(force_replan=args.force)
 
-    print(f"\nPlanner Results:")
+    print("\nPlanner Results:")
     print(f"  Requirements: {result['spec_requirements']}")
     print(f"  Tasks Generated: {result['tasks_generated']}")
     print(f"  Tasks Published: {result['tasks_published']}")
@@ -478,15 +475,15 @@ async def cmd_judge(args):
     try:
         report = await judge.run_once()
 
-        print(f"\nJudge Report:")
+        print("\nJudge Report:")
         print(f"  Decision: {report.decision.value.upper()}")
         print(f"  Reason: {report.reason}")
-        print(f"\nMetrics:")
+        print("\nMetrics:")
         for key, value in report.metrics.items():
             print(f"    {key}: {value}")
 
         if report.actions_taken:
-            print(f"\nActions:")
+            print("\nActions:")
             for action in report.actions_taken:
                 print(f"    - {action}")
 
@@ -541,24 +538,24 @@ async def cmd_ignite(args):
     builder = OrgBuilder()
     teamplan = builder.build_teamplan(prd_content, constraints, dod_content)
 
-    print(f"\n  PRD Analysis Scores:")
+    print("\n  PRD Analysis Scores:")
     print(f"    Complexity: {teamplan.complexity_score:.2f}")
     print(f"    Coupling:   {teamplan.coupling_score:.2f}")
     print(f"    Risk:       {teamplan.risk_score:.2f}")
 
-    print(f"\n  TEAMPLAN Generated:")
+    print("\n  TEAMPLAN Generated:")
     print(f"    Topology: {teamplan.topology.value}")
     print(f"    Streams: {len(teamplan.streams)}")
     for s in teamplan.streams:
         print(f"      - {s.name}: {s.target_workers} workers (max {s.max_workers})")
     print(f"    Total Workers: {teamplan.total_target_workers()} (max {teamplan.total_max_workers()})")
 
-    print(f"\n  Governance Caps:")
+    print("\n  Governance Caps:")
     print(f"    PR/hour: {teamplan.caps.pr_cap_per_hour}")
     print(f"    Open PRs: {teamplan.caps.open_pr_cap}")
     print(f"    Active tasks: {teamplan.caps.max_active_tasks}")
 
-    print(f"\n  Risk Merge Policy:")
+    print("\n  Risk Merge Policy:")
     print(f"    Tier 0 (low):  {teamplan.risk_merge_policy.tier0.value}")
     print(f"    Tier 1 (med):  {teamplan.risk_merge_policy.tier1.value}")
     print(f"    Tier 2 (high): {teamplan.risk_merge_policy.tier2.value}")
@@ -600,7 +597,7 @@ async def cmd_ignite(args):
     planner = Planner(config, repo_path=".")
     result = await planner.run()
 
-    print(f"\n  Planner Results:")
+    print("\n  Planner Results:")
     print(f"    SPEC requirements: {result['spec_requirements']}")
     print(f"    Tasks generated:   {result['tasks_generated']}")
     print(f"    Tasks published:   {result['tasks_published']}")
@@ -618,6 +615,7 @@ async def cmd_ignite(args):
 async def cmd_dashboard(args):
     """Start the monitoring dashboard."""
     import uvicorn
+
     from dashboard.api import app
 
     print_banner()

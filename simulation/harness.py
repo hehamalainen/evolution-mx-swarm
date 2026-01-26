@@ -18,21 +18,18 @@ Exit criteria:
 """
 
 import asyncio
-import random
 import logging
+import random
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import List, Dict, Optional, Callable
 from enum import Enum
 
-from shared.utils import MXConfig
-from shared.utils.metrics import get_metrics_collector, TaskMetrics
-from judge.service import Judge
-from boss import (
-    Governor, GovernorMode, TelemetrySnapshot, Reporter,
-    DecisionQueue
-)
 import httpx
+
+from boss import DecisionQueue, Governor, GovernorMode, Reporter, TelemetrySnapshot
+from judge.service import Judge
+from shared.utils import MXConfig
+from shared.utils.metrics import TaskMetrics, get_metrics_collector
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("simulation")
@@ -59,20 +56,20 @@ class MockPR:
 
 class MockGitHub:
     def __init__(self, failure_rate: float = 0.1):
-        self.prs: List[MockPR] = []
+        self.prs: list[MockPR] = []
         self.failure_rate = failure_rate
         self._pr_counter = 0
 
     async def create_pr(self, title: str) -> MockPR:
         self._pr_counter += 1
         pr = MockPR(id=self._pr_counter, title=title)
-        
+
         # Simulate CI
         if random.random() < self.failure_rate:
             pr.ci_status = "failure"
         else:
             pr.ci_status = "success"
-            
+
         self.prs.append(pr)
         return pr
 
@@ -83,7 +80,7 @@ class MockGitHub:
                 return True
         return False
 
-    async def list_prs(self, state: str = "open") -> List[dict]:
+    async def list_prs(self, state: str = "open") -> list[dict]:
         return [
             {
                 "number": pr.id,
@@ -102,7 +99,7 @@ class MockGitHub:
             pr = next((p for p in self.prs if p.id == pr_id), None)
             if pr:
                 return {"check_runs": [{"conclusion": pr.ci_status}]}
-        except:
+        except Exception:
             pass
         return {"check_runs": []}
 
@@ -152,7 +149,7 @@ class ValidationResult:
     reports_generated: bool
     decisions_created: bool
     anti_thrash_working: bool
-    messages: List[str] = field(default_factory=list)
+    messages: list[str] = field(default_factory=list)
 
 
 class SimulationRunner:
@@ -200,11 +197,11 @@ class SimulationRunner:
         # Simulation state
         self.current_phase = SimulationPhase.STARTUP
         self.metrics = SimulationMetrics()
-        self.start_time: Optional[datetime] = None
-        self.current_time: Optional[datetime] = None
+        self.start_time: datetime | None = None
+        self.current_time: datetime | None = None
 
         # Phase configuration
-        self.phase_schedule: Dict[int, SimulationPhase] = {
+        self.phase_schedule: dict[int, SimulationPhase] = {
             0: SimulationPhase.STARTUP,
             5: SimulationPhase.STEADY_STATE,
             20: SimulationPhase.CI_STRESS,
@@ -391,7 +388,7 @@ class SimulationRunner:
         self.metrics.hourly_reports_generated += 1
         logger.info("Hourly report generated")
 
-    def _build_report_metrics(self) -> Dict:
+    def _build_report_metrics(self) -> dict:
         """Build metrics dict for reports."""
         return {
             "ci_health": self.metrics.ci_health_percent() / 100,
@@ -446,7 +443,7 @@ class SimulationRunner:
                 self.metrics.decisions_created += 1
                 logger.info("Replan decision created")
 
-    async def _notify_dashboard(self, event_type: str, data: Dict):
+    async def _notify_dashboard(self, event_type: str, data: dict):
         """Send event to dashboard if enabled."""
         if not self.notify_dashboard:
             return

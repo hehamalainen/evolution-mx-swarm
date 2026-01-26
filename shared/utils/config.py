@@ -1,9 +1,8 @@
 """Configuration management for MX Swarm."""
 
-from dataclasses import dataclass, field
-from typing import Optional
 import json
 import os
+from dataclasses import dataclass, field
 
 
 @dataclass
@@ -12,13 +11,13 @@ class QueueConfig:
     provider: str = "memory"  # memory, gcp, azure
 
     # GCP config
-    gcp_project_id: Optional[str] = None
+    gcp_project_id: str | None = None
     gcp_topic_id: str = "mx-tasks"
     gcp_subscription_id: str = "mx-worker-sub"
 
     # Azure config
-    azure_connection_string: Optional[str] = None
-    azure_namespace: Optional[str] = None
+    azure_connection_string: str | None = None
+    azure_namespace: str | None = None
     azure_queue_name: str = "mx-tasks"
 
     def to_dict(self) -> dict:
@@ -44,13 +43,13 @@ class SecretsConfig:
 
     # Env config
     env_prefix: str = "MX_"
-    env_file: Optional[str] = ".env"
+    env_file: str | None = ".env"
 
     # GCP config
-    gcp_project_id: Optional[str] = None
+    gcp_project_id: str | None = None
 
     # Azure config
-    azure_vault_url: Optional[str] = None
+    azure_vault_url: str | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -73,8 +72,8 @@ class LLMConfig:
     """LLM configuration."""
     provider: str = "anthropic"  # anthropic, openai, ollama
     model: str = "claude-sonnet-4-20250514"
-    api_key: Optional[str] = None  # Will use env var if not set
-    base_url: Optional[str] = None
+    api_key: str | None = None  # Will use env var if not set
+    base_url: str | None = None
     max_tokens: int = 4096
     temperature: float = 0.7
 
@@ -152,7 +151,7 @@ class GitHubConfig:
     repo_owner: str = ""
     repo_name: str = ""
     default_branch: str = "main"
-    token: Optional[str] = None  # Will use GITHUB_TOKEN env var if not set
+    token: str | None = None  # Will use GITHUB_TOKEN env var if not set
     auto_merge_low_risk: bool = False
 
     def to_dict(self) -> dict:

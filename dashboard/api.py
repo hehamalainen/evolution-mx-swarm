@@ -10,14 +10,14 @@ FastAPI backend providing:
 """
 
 import asyncio
-from dataclasses import dataclass
 import json
 import os
 import random
+import subprocess
 import sys
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Optional
 
 # Load .env file for GITHUB_TOKEN and other secrets
 try:
@@ -28,26 +28,28 @@ except ImportError:
 from collections import deque
 from enum import Enum
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 # Add parent to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from shared.utils import MXConfig
+from boss import (
+    DecisionQueue,
+    EscalationEngine,
+    Governor,
+    GovernorState,
+    OrgBuilder,
+    OrgConstraints,
+    Reporter,
+    TelemetrySnapshot,
+)
 from shared.adapters import create_queue_adapter
 from shared.schemas import Spec
 from shared.schemas.teamplan import TeamPlan
-from shared.utils.metrics import get_metrics_collector, CoordinationMetrics
-from boss import (
-    EscalationEngine, Escalation, EscalationType, EscalationSeverity,
-    Governor, GovernorState, TelemetrySnapshot, Adjustment, AdjustmentType, TriggerType,
-    Reporter, ReportPeriod,
-    DecisionQueue, Decision, DecisionType, DecisionPriority,
-    OrgBuilder, OrgConstraints
-)
-
+from shared.utils import MXConfig
+from shared.utils.metrics import get_metrics_collector
 
 # ============================================================================
 # Enums
@@ -83,10 +85,6 @@ class EventType(str, Enum):
     SYS_CONFIG = "SYS_CONFIG"
 
 
-class GovernorState(str, Enum):
-    NORMAL = "NORMAL"
-    THROTTLED = "THROTTLED"
-    FROZEN = "FROZEN"
 
 
 class RiskTier(int, Enum):
@@ -98,7 +96,7 @@ class RiskTier(int, Enum):
 @dataclass
 class WorkerState:
     """3-tier worker state model for UI consistency.
-    
+
     Separates:
     - teamplan_recommended: What Boss analysis recommends
     - runtime_target: What operator has set as target
@@ -109,7 +107,7 @@ class WorkerState:
     runtime_target: int = 10        # Operator setting
     runtime_cap: int = 10           # Hard cap
     online_workers: int = 0         # Actual running (never > cap)
-    
+
     def enforce_invariant(self):
         """Ensure online never exceeds cap."""
         if self.online_workers > self.runtime_cap:
@@ -164,7 +162,7 @@ class SwarmState:
         self.logs: deque = deque(maxlen=1000)
 
         # Timing
-        self.start_time: Optional[str] = None
+        self.start_time: str | None = None
 
         # WebSocket clients
         self.websocket_clients: list[WebSocket] = []
@@ -173,23 +171,23 @@ class SwarmState:
         self.escalation_engine = EscalationEngine(repo_path=".")
         self.reporter = Reporter(repo_path=".")
         self.decision_queue = DecisionQueue(repo_path=".")
-        
+
         # Subprocess management
         self.swarm_process = None
-        
+
         # Initialize Governor
         teamplan_path = "TEAMPLAN.json"
         if os.path.exists(teamplan_path):
             self.teamplan = TeamPlan.load(teamplan_path)
         else:
             self.teamplan = TeamPlan.default()
-            
+
         self.governor = Governor(
             teamplan=self.teamplan,
             telemetry_provider=self._get_telemetry_snapshot
         )
 
-    def register_worker(self, worker_id: str, task_id: Optional[str] = None):
+    def register_worker(self, worker_id: str, task_id: str | None = None):
         """Register or update worker activity."""
         self.workers[worker_id] = {
             "worker_id": worker_id,
@@ -217,7 +215,7 @@ class SwarmState:
         """Get current $/hour burn rate."""
         return self.current_hour_cost
 
-    def get_forecast_to_cap(self, daily_cap: float) -> Optional[str]:
+    def get_forecast_to_cap(self, daily_cap: float) -> str | None:
         """Forecast when daily cap will be hit."""
         if self.current_hour_cost <= 0:
             return None
@@ -242,12 +240,12 @@ class SwarmState:
         """Check and update governor state based on caps and config."""
         # Update telemetry and evaluate
         asyncio.create_task(self.governor._evaluate())
-        
+
         # Sync state
         self.governor_state = GovernorState(self.governor.state.mode.value)
         self.open_pr_cap = self.governor.state.current_open_pr_cap
         self.pr_hour_cap = self.governor.state.current_pr_cap_hour
-            
+
         return self.governor_state
 
     def add_log(self, event_type: EventType, message: str, level: str = "info"):
@@ -302,27 +300,27 @@ class BudgetRequest(BaseModel):
     daily_usd_cap: float
 
 class GovernorRequest(BaseModel):
-    open_pr_cap: Optional[int] = None
-    pr_hour_cap: Optional[int] = None
-    ci_health_threshold: Optional[float] = None
+    open_pr_cap: int | None = None
+    pr_hour_cap: int | None = None
+    ci_health_threshold: float | None = None
 
 class WorkerAction(BaseModel):
     worker_id: str
     action: str  # "stop", "restart"
 
 class IgniteRequest(BaseModel):
-    max_workers: Optional[int] = None
-    budget_usd: Optional[float] = None
+    max_workers: int | None = None
+    budget_usd: float | None = None
     auto_mode: bool = True
-    prd_content: Optional[str] = None
+    prd_content: str | None = None
 
 class ConfigUpdate(BaseModel):
-    llm_provider: Optional[str] = None
-    llm_model: Optional[str] = None
-    timebox_minutes: Optional[int] = None
-    retry_max: Optional[int] = None
-    judge_interval_minutes: Optional[int] = None
-    auto_merge_low_risk: Optional[bool] = None
+    llm_provider: str | None = None
+    llm_model: str | None = None
+    timebox_minutes: int | None = None
+    retry_max: int | None = None
+    judge_interval_minutes: int | None = None
+    auto_merge_low_risk: bool | None = None
 
 class PRDAnalyzeRequest(BaseModel):
     prd_content: str
@@ -440,13 +438,13 @@ def load_config() -> MXConfig:
 def save_config(config: MXConfig):
     config.save("mx.config.json")
 
-def load_spec() -> Optional[Spec]:
+def load_spec() -> Spec | None:
     if os.path.exists("SPEC.json"):
         return Spec.load("SPEC.json")
     return None
 
 
-def load_teamplan() -> Optional[TeamPlan]:
+def load_teamplan() -> TeamPlan | None:
     """Load TEAMPLAN.json if it exists."""
     if os.path.exists("TEAMPLAN.json"):
         return TeamPlan.load("TEAMPLAN.json")
@@ -529,7 +527,7 @@ async def get_swarm_status() -> dict:
             "active_60s": state.get_active_workers(60),
             "idle": len([w for w in state.workers.values() if w["status"] == "idle"]),
         },
-        
+
         # Worker State - 3-tier model (GPT 5.2 feedback)
         "worker_state": {
             "teamplan_recommended": state.worker_state.teamplan_recommended,
@@ -622,7 +620,7 @@ async def get_swarm_status() -> dict:
 
         # Task contracts table - combine SPEC tasks with simulation tasks (GPT 5.2 Fix 2)
         "task_contracts": task_contracts[:20] + list(state.active_tasks.values())[:20],
-        
+
         # Active tasks from simulation (separate for UI convenience)
         "active_tasks": list(state.active_tasks.values()),
         "active_tasks_count": len(state.active_tasks),
@@ -637,10 +635,6 @@ async def get_swarm_status() -> dict:
             "auto_merge": config.github.auto_merge_low_risk,
         },
 
-        # TEAMPLAN (org-as-code)
-        "teamplan": get_teamplan_summary(),
-
-        # Coordination metrics
         "coordination": get_coordination_metrics(),
 
         # Pending decisions
@@ -651,7 +645,7 @@ async def get_swarm_status() -> dict:
     }
 
 
-def get_teamplan_summary() -> Optional[dict]:
+def get_teamplan_summary() -> dict | None:
     """Get TEAMPLAN summary for dashboard."""
     teamplan = load_teamplan()
     if not teamplan:
@@ -850,7 +844,7 @@ async def analyze_prd(req: PRDAnalyzeRequest):
 
     # Perform keyword-based analysis
     analysis = analyze_prd_content(req.prd_content)
-    
+
     # Generate TEAMPLAN using OrgBuilder
     try:
         builder = OrgBuilder()
@@ -862,23 +856,23 @@ async def analyze_prd(req: PRDAnalyzeRequest):
             prd_content=req.prd_content,
             constraints=constraints
         )
-        
+
         # Save TEAMPLAN.json to disk
         teamplan.save("TEAMPLAN.json")
-        
+
         # Add teamplan summary to response
         analysis['teamplan'] = get_teamplan_summary()
-        
-        state.add_log(EventType.SYS_CONFIG, 
+
+        state.add_log(EventType.SYS_CONFIG,
             f"PRD analyzed: {analysis['complexity']} complexity, TEAMPLAN generated with {teamplan.total_target_workers()} workers")
     except Exception as e:
         # Log error with traceback for debugging
         import traceback
         error_details = traceback.format_exc()
-        state.add_log(EventType.SYS_CONFIG, 
+        state.add_log(EventType.SYS_CONFIG,
             f"PRD analyzed: {analysis['complexity']} complexity (TEAMPLAN generation failed: {str(e)})", "error")
         print(f"TEAMPLAN generation error:\n{error_details}", file=sys.stderr)
-    
+
     return analysis
 
 
@@ -907,22 +901,22 @@ async def control_ignite(req: IgniteRequest):
 
     if req.auto_mode:
         state.add_log(EventType.SYS_START, "Agent Boss analyzing PRD and assembling team...")
-        
+
         # Launch 'mx ignite --auto-mode' in background
-        cmd = [sys.executable, "-m", "mx-swarm.cli.main", "ignite", "--analyze-only"]
+        # cmd = [sys.executable, "-m", "mx-swarm.cli.main", "ignite", "--analyze-only"]
         # We start with analyze-only to generate the plan, the dashboard should then trigger run?
         # Actually, for the demo "Launch Swarm" usually implies "GO".
         # Let's run the full 'mx ignite' which does analysis AND tells user to run 'mx run'.
         # Wait, the CLI 'ignite' doesn't actually run the loop. It just preps.
         # So we should run 'mx run' directly if we want immediate action, OR run 'ignite' then 'run'.
-        
+
         # Let's simplify: Run 'mx run' directly. The CLI 'run' command handles missing plans by failing?
         # But ignite sets up the plan.
-        
+
         # Better approach: Run 'mx ignite' to generate the plan, then 'mx run'.
         # For now, let's just launch 'mx run' and assume the user wants to start processing.
         # But if PRD changed, we interpret that as needing a plan.
-        
+
         # Let's spawn a helper to do: ignite -> run
         async def launch_sequence():
             # 1. Ignite (Analyze)
@@ -941,9 +935,9 @@ async def control_ignite(req: IgniteRequest):
             if proc.returncode != 0:
                 state.add_log(EventType.SYS_STOP, f"Ignite failed: {stderr.decode()}", "error")
                 return
-                
+
             state.add_log(EventType.SYS_CONFIG, "Plan generated. Starting swarm...")
-            
+
             # 2. Run with output streaming
             try:
                 # Use asyncio subprocess for non-blocking I/O
@@ -952,9 +946,9 @@ async def control_ignite(req: IgniteRequest):
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE
                 )
-                
+
                 state.add_log(EventType.SYS_START, f"Swarm Process Started (PID: {state.swarm_process.pid})")
-                
+
                 async def stream_output(stream, log_type):
                     while True:
                         line = await stream.readline()
@@ -971,7 +965,7 @@ async def control_ignite(req: IgniteRequest):
                 )
 
                 await state.swarm_process.wait()
-                
+
             except Exception as e:
                 state.add_log(EventType.SYS_STOP, f"Run subprocess failed: {e}", "error")
             finally:
@@ -1028,9 +1022,9 @@ async def simulation_event(event: dict):
     event_type = event.get("type", "SYS_CONFIG")
     message = event.get("message", "Simulation event")
     level = event.get("level", "info")
-    
+
     state.add_log(EventType(event_type), message, level)
-    
+
     # Update metrics if provided
     if "metrics" in event:
         m = event["metrics"]
@@ -1039,7 +1033,7 @@ async def simulation_event(event: dict):
         state.prs_merged += m.get("prs_merged", 0)
         state.ci_passes += m.get("ci_passes", 0)
         state.ci_fails += m.get("ci_fails", 0)
-        
+
         # Update workers and worker_state
         if "workers_active" in m:
             # Register simulated workers with proper structure
@@ -1048,36 +1042,36 @@ async def simulation_event(event: dict):
             for i in range(m["workers_active"]):
                 worker_id = f"sim-worker-{i}"
                 state.workers[worker_id] = {
-                    "status": "active", 
+                    "status": "active",
                     "task": f"task-{i}",
                     "last_seen": now
                 }
             # Update 3-tier worker_state
             state.worker_state.online_workers = m["workers_active"]
             state.worker_state.enforce_invariant()
-            
+
         # Update teamplan recommended (from Boss analysis)
         if "teamplan_workers" in m:
             state.worker_state.teamplan_recommended = m["teamplan_workers"]
-            
+
         # Update runtime target
         if "target_workers" in m:
             state.worker_state.runtime_target = m["target_workers"]
             state.worker_state.runtime_cap = m["target_workers"]  # Cap = target
-        
+
         # Update governor state
         if "governor_state" in m:
             state.governor_state = GovernorState(m["governor_state"])
-            
+
         # Update current open PRs count
         if "prs_open" in m:
             state.current_open_prs = m["prs_open"]
-            
+
         # Update costs
         if "cost" in m:
             state.total_cost += m["cost"]
             state.current_hour_cost += m["cost"]
-    
+
     # Task registry for Active Task Contracts table (GPT 5.2 Fix 2)
     if event_type == "PR_OPEN" and "task_id" in event:
         state.active_tasks[event["task_id"]] = {
@@ -1098,7 +1092,7 @@ async def simulation_event(event: dict):
     elif event_type == "CI_FAIL" and "task_id" in event:
         if event["task_id"] in state.active_tasks:
             state.active_tasks[event["task_id"]]["status"] = "FAILED"
-        
+
     await state.broadcast_status()
     return {"status": "received"}
 
@@ -1501,7 +1495,7 @@ async def get_governor_adjustments():
 class SwarmHeartbeat(BaseModel):
     """Heartbeat from CLI swarm process."""
     active_workers: int = 0
-    worker_details: Optional[list[dict]] = None
+    worker_details: list[dict] | None = None
     tasks_in_progress: int = 0
     tasks_completed: int = 0
     prs_opened: int = 0
@@ -1509,7 +1503,7 @@ class SwarmHeartbeat(BaseModel):
     ci_passes: int = 0
     ci_fails: int = 0
     is_running: bool = True
-    current_phase: Optional[str] = None  # "planning", "working", "judging", etc.
+    current_phase: str | None = None  # "planning", "working", "judging", etc.
 
 
 @app.post("/api/swarm/heartbeat")
@@ -1599,7 +1593,7 @@ async def websocket_endpoint(ws: WebSocket):
                 data = await asyncio.wait_for(ws.receive_text(), timeout=30)
                 if data == "ping":
                     await ws.send_text("pong")
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 await ws.send_json({"type": "heartbeat"})
     except WebSocketDisconnect:
         pass
@@ -1615,10 +1609,9 @@ async def websocket_endpoint(ws: WebSocket):
 @app.post("/api/demo/simulate")
 async def simulate_activity():
     """Simulate realistic swarm activity."""
-    import random
 
     # Register some workers
-    for i in range(random.randint(3, 8)):
+    for _i in range(random.randint(3, 8)):
         worker_id = f"worker-{random.randint(1, 99):02d}"
         task_id = f"TSK{random.randint(1000, 9999)}" if random.random() > 0.3 else None
         state.register_worker(worker_id, task_id)

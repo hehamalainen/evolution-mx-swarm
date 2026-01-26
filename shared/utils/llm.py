@@ -6,11 +6,11 @@ Provides a unified interface for LLM interactions with support for:
 - Local models (ollama)
 """
 
-from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
-from typing import Optional, AsyncIterator
 import json
 import os
+from abc import ABC, abstractmethod
+from collections.abc import AsyncIterator
+from dataclasses import dataclass, field
 
 
 @dataclass
@@ -26,7 +26,7 @@ class LLMResponse:
     content: str
     model: str
     usage: dict = field(default_factory=dict)  # tokens used
-    stop_reason: Optional[str] = None
+    stop_reason: str | None = None
 
 
 class LLMClient(ABC):
@@ -38,7 +38,7 @@ class LLMClient(ABC):
         messages: list[Message],
         max_tokens: int = 4096,
         temperature: float = 0.7,
-        system: Optional[str] = None,
+        system: str | None = None,
     ) -> LLMResponse:
         """
         Send chat completion request.
@@ -60,7 +60,7 @@ class LLMClient(ABC):
         messages: list[Message],
         max_tokens: int = 4096,
         temperature: float = 0.7,
-        system: Optional[str] = None,
+        system: str | None = None,
     ) -> AsyncIterator[str]:
         """Stream response tokens."""
         pass
@@ -71,7 +71,7 @@ class AnthropicClient(LLMClient):
 
     def __init__(
         self,
-        api_key: Optional[str] = None,
+        api_key: str | None = None,
         model: str = "claude-sonnet-4-20250514",
     ):
         self.api_key = api_key or os.environ.get("ANTHROPIC_API_KEY")
@@ -83,7 +83,7 @@ class AnthropicClient(LLMClient):
             try:
                 import anthropic
             except ImportError:
-                raise ImportError("anthropic package required. Install with: pip install anthropic")
+                raise ImportError("anthropic package required. Install with: pip install anthropic") from None
             self._client = anthropic.AsyncAnthropic(api_key=self.api_key)
         return self._client
 
@@ -92,7 +92,7 @@ class AnthropicClient(LLMClient):
         messages: list[Message],
         max_tokens: int = 4096,
         temperature: float = 0.7,
-        system: Optional[str] = None,
+        system: str | None = None,
     ) -> LLMResponse:
         client = await self._get_client()
 
@@ -125,7 +125,7 @@ class AnthropicClient(LLMClient):
         messages: list[Message],
         max_tokens: int = 4096,
         temperature: float = 0.7,
-        system: Optional[str] = None,
+        system: str | None = None,
     ) -> AsyncIterator[str]:
         client = await self._get_client()
 
@@ -150,9 +150,9 @@ class OpenAIClient(LLMClient):
 
     def __init__(
         self,
-        api_key: Optional[str] = None,
+        api_key: str | None = None,
         model: str = "gpt-4-turbo-preview",
-        base_url: Optional[str] = None,
+        base_url: str | None = None,
     ):
         self.api_key = api_key or os.environ.get("OPENAI_API_KEY")
         self.model = model
@@ -164,7 +164,7 @@ class OpenAIClient(LLMClient):
             try:
                 from openai import AsyncOpenAI
             except ImportError:
-                raise ImportError("openai package required. Install with: pip install openai")
+                raise ImportError("openai package required. Install with: pip install openai") from None
             kwargs = {"api_key": self.api_key}
             if self.base_url:
                 kwargs["base_url"] = self.base_url
@@ -176,7 +176,7 @@ class OpenAIClient(LLMClient):
         messages: list[Message],
         max_tokens: int = 4096,
         temperature: float = 0.7,
-        system: Optional[str] = None,
+        system: str | None = None,
     ) -> LLMResponse:
         client = await self._get_client()
 
@@ -208,7 +208,7 @@ class OpenAIClient(LLMClient):
         messages: list[Message],
         max_tokens: int = 4096,
         temperature: float = 0.7,
-        system: Optional[str] = None,
+        system: str | None = None,
     ) -> AsyncIterator[str]:
         client = await self._get_client()
 
@@ -246,7 +246,7 @@ class OllamaClient(LLMClient):
         messages: list[Message],
         max_tokens: int = 4096,
         temperature: float = 0.7,
-        system: Optional[str] = None,
+        system: str | None = None,
     ) -> LLMResponse:
         try:
             import httpx
@@ -289,7 +289,7 @@ class OllamaClient(LLMClient):
         messages: list[Message],
         max_tokens: int = 4096,
         temperature: float = 0.7,
-        system: Optional[str] = None,
+        system: str | None = None,
     ) -> AsyncIterator[str]:
         try:
             import httpx

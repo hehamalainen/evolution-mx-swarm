@@ -22,15 +22,17 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install ruff mypy
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          pip install -e .[dev] || true
 
       - name: Run Ruff linter
-        run: ruff check mx-swarm/ --output-format=github
+        run: ruff check . --output-format=github
 
       - name: Run Ruff formatter check
-        run: ruff format mx-swarm/ --check
+        run: ruff format . --check
 
       - name: Run mypy type checking
-        run: mypy mx-swarm/ --ignore-missing-imports --no-error-summary || true
+        run: mypy . --ignore-missing-imports --no-error-summary || true
 
   test:
     name: Unit Tests
@@ -47,11 +49,10 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install pytest pytest-asyncio pytest-cov
-          pip install -e mx-swarm/[dev] || pip install -r mx-swarm/requirements.txt || true
+          pip install -e .[dev] || pip install -r requirements.txt || true
 
       - name: Run tests
         run: |
-          cd mx-swarm
           pytest tests/ -v --cov=. --cov-report=xml || echo "No tests found"
 
       - name: Upload coverage
@@ -76,11 +77,11 @@ jobs:
           pip install bandit safety
 
       - name: Run Bandit security scan
-        run: bandit -r mx-swarm/ -ll -ii -x '**/tests/*' || true
+        run: bandit -r . -ll -ii -x '**/tests/*' || true
 
       - name: Check dependencies for vulnerabilities
         run: |
-          pip install -r mx-swarm/requirements.txt 2>/dev/null || true
+          pip install -r requirements.txt 2>/dev/null || true
           safety check || echo "Safety check complete"
 
   build:
@@ -96,8 +97,8 @@ jobs:
       - name: Build worker image
         uses: docker/build-push-action@v5
         with:
-          context: mx-swarm
-          file: mx-swarm/Dockerfile.worker
+          context: .
+          file: Dockerfile.worker
           push: false
           tags: mx-swarm-worker:test
           cache-from: type=gha

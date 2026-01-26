@@ -10,34 +10,27 @@ Workers are the execution engines of MX Swarm:
 """
 
 import asyncio
-import json
 import os
 import signal
-import subprocess
-import tempfile
-import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Optional
 
+from shared.adapters import QueueAdapter, QueueMessage, create_queue_adapter
 from shared.schemas import (
+    RiskLevel,
     TaskContract,
     TaskType,
-    MergePolicy,
-    RiskLevel,
 )
-from shared.adapters import QueueAdapter, QueueMessage, create_queue_adapter
 from shared.utils import (
-    MXConfig,
+    GitHubAPI,
+    GitRepo,
     LLMClient,
     Message,
-    create_llm_client,
-    GitRepo,
-    GitHubAPI,
     MockGitHubAPI,
+    MXConfig,
+    create_llm_client,
 )
-
 
 WORKER_SYSTEM_PROMPT = """You are an expert software engineer implementing tasks autonomously.
 
@@ -99,7 +92,7 @@ class EvidencePack:
             status = "✅ Pass" if passed else "❌ Fail"
             md += f"| `{cmd[:50]}` | {status} | {summary[:100]} |\n"
 
-        md += f"""
+        md += """
 ### Files Changed
 """
         for f in self.files_changed:
@@ -133,9 +126,9 @@ class Worker:
     def __init__(
         self,
         config: MXConfig,
-        worker_id: Optional[str] = None,
-        queue: Optional[QueueAdapter] = None,
-        llm: Optional[LLMClient] = None,
+        worker_id: str | None = None,
+        queue: QueueAdapter | None = None,
+        llm: LLMClient | None = None,
     ):
         self.config = config
         self.worker_id = worker_id or f"worker-{str(uuid.uuid4())[:8]}"
@@ -143,7 +136,7 @@ class Worker:
         self.llm = llm or create_llm_client(config.llm.to_dict())
         self.metrics = WorkerMetrics()
         self._running = False
-        self._github: Optional[GitHubAPI] = None
+        self._github: GitHubAPI | None = None
 
     @property
     def github(self) -> GitHubAPI:
@@ -177,12 +170,12 @@ class Worker:
         token = self.config.github.token or os.environ.get("GITHUB_TOKEN")
         if not token:
             return os.getcwd()
-            
+
         owner = self.config.github.repo_owner
         repo = self.config.github.repo_name
         return f"https://github.com/{owner}/{repo}.git"
 
-    async def _read_file(self, repo: GitRepo, path: str) -> Optional[str]:
+    async def _read_file(self, repo: GitRepo, path: str) -> str | None:
         """Read file from repo."""
         full_path = os.path.join(repo.local_path, path)
         if os.path.exists(full_path):
@@ -238,7 +231,7 @@ class Worker:
 
             return success, output[:5000]  # Truncate long outputs
 
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return False, f"Command timed out after {timeout}s"
         except Exception as e:
             return False, f"Error: {str(e)}"
@@ -274,7 +267,7 @@ class Worker:
         ]
 
         if filtered:
-            context_parts.append(f"### File Structure\n```\n" + "\n".join(filtered[:30]) + "\n```")
+            context_parts.append("### File Structure\n```\n" + "\n".join(filtered[:30]) + "\n```")
 
         return "\n\n".join(context_parts)
 
@@ -387,7 +380,7 @@ After the implementation, provide a brief summary of what you did and any notes.
         task: TaskContract,
         evidence: EvidencePack,
         draft: bool = False,
-    ) -> Optional[dict]:
+    ) -> dict | None:
         """Create pull request with evidence pack."""
         # Generate PR title
         task_type_emoji = {
@@ -432,7 +425,7 @@ After the implementation, provide a brief summary of what you did and any notes.
     async def process_task(self, message: QueueMessage) -> bool:
         """
         Process a single task from queue.
-        
+
         Returns:
             True if task completed successfully
         """
@@ -442,11 +435,11 @@ After the implementation, provide a brief summary of what you did and any notes.
         task.assigned_worker = self.worker_id
 
         print(f"[{self.worker_id}] Processing task {task.id}: {task.goal}")
-        
+
         # Determine if we are in Local Mode (no token)
         token = self.config.github.token or os.environ.get("GITHUB_TOKEN")
         is_local_mode = not token
-        
+
         # Initialize Repo
         repo = GitRepo(
             repo_url=self._get_repo_url(),
@@ -512,7 +505,7 @@ After the implementation, provide a brief summary of what you did and any notes.
             push_result = await repo.push(branch_name)
             if not push_result.success:
                 raise RuntimeError(f"Push failed: {push_result.stderr}")
-            
+
             if is_local_mode:
                 print(f"[{self.worker_id}] Local Mode: Pushed branch {branch_name} to {self._get_repo_url()}")
 

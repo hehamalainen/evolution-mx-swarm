@@ -1,16 +1,18 @@
 """Tests for MX Swarm queue adapters."""
 
+
 import pytest
-import asyncio
 
 from shared.adapters import InMemoryQueue, create_queue_adapter
 from shared.schemas import TaskContract, TaskType
 
 
 @pytest.fixture
-def queue():
+async def queue():
     """Create an in-memory queue for testing."""
-    return InMemoryQueue("test-queue")
+    q = InMemoryQueue("test-queue")
+    await q.purge()  # Ensure empty state (singleton persistence)
+    return q
 
 
 @pytest.fixture

@@ -2,11 +2,9 @@
 
 import asyncio
 import os
+import shutil
 import tempfile
 from dataclasses import dataclass
-from typing import Optional
-import subprocess
-import shutil
 
 
 @dataclass
@@ -20,8 +18,8 @@ class GitResult:
 
 async def run_git(
     args: list[str],
-    cwd: Optional[str] = None,
-    env: Optional[dict] = None,
+    cwd: str | None = None,
+    env: dict | None = None,
 ) -> GitResult:
     """
     Run a git command asynchronously.
@@ -65,8 +63,8 @@ class GitRepo:
     def __init__(
         self,
         repo_url: str,
-        local_path: Optional[str] = None,
-        token: Optional[str] = None,
+        local_path: str | None = None,
+        token: str | None = None,
     ):
         """
         Initialize GitRepo.
@@ -95,7 +93,7 @@ class GitRepo:
             )
         return self.repo_url
 
-    async def clone(self, branch: Optional[str] = None, depth: int = 1) -> GitResult:
+    async def clone(self, branch: str | None = None, depth: int = 1) -> GitResult:
         """
         Clone repository.
 
@@ -117,7 +115,7 @@ class GitRepo:
         self._cloned = result.success
         return result
 
-    async def fetch(self, branch: Optional[str] = None) -> GitResult:
+    async def fetch(self, branch: str | None = None) -> GitResult:
         """Fetch from remote."""
         args = ["fetch", "origin"]
         if branch:
@@ -142,7 +140,7 @@ class GitRepo:
 
         return await run_git(args, cwd=self.local_path)
 
-    async def pull(self, branch: Optional[str] = None) -> GitResult:
+    async def pull(self, branch: str | None = None) -> GitResult:
         """Pull from remote."""
         args = ["pull", "origin"]
         if branch:
@@ -167,7 +165,7 @@ class GitRepo:
 
         return await run_git(args, cwd=self.local_path)
 
-    async def commit(self, message: str, author: Optional[str] = None) -> GitResult:
+    async def commit(self, message: str, author: str | None = None) -> GitResult:
         """
         Create commit.
 
@@ -203,7 +201,7 @@ class GitRepo:
 
         return await run_git(args, cwd=self.local_path)
 
-    async def get_current_branch(self) -> Optional[str]:
+    async def get_current_branch(self) -> str | None:
         """Get current branch name."""
         result = await run_git(["branch", "--show-current"], cwd=self.local_path)
         if result.success:
@@ -260,13 +258,13 @@ class GitHubAPI:
         self,
         method: str,
         endpoint: str,
-        data: Optional[dict] = None,
+        data: dict | None = None,
     ) -> dict:
         """Make authenticated API request."""
         try:
             import httpx
         except ImportError:
-            raise ImportError("httpx package required. Install with: pip install httpx")
+            raise ImportError("httpx package required. Install with: pip install httpx") from None
 
         url = f"{self.base_url}{endpoint}"
         headers = {
@@ -326,7 +324,7 @@ class GitHubAPI:
     async def list_pull_requests(
         self,
         state: str = "open",
-        head: Optional[str] = None,
+        head: str | None = None,
     ) -> list[dict]:
         """List pull requests."""
         params = f"?state={state}"
@@ -346,7 +344,7 @@ class GitHubAPI:
         self,
         number: int,
         merge_method: str = "squash",
-        commit_message: Optional[str] = None,
+        commit_message: str | None = None,
     ) -> dict:
         """
         Merge a pull request.

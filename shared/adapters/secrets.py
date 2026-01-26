@@ -6,9 +6,8 @@ Provides cloud-agnostic secrets interface with implementations for:
 - Environment variables (local dev)
 """
 
-from abc import ABC, abstractmethod
-from typing import Optional
 import os
+from abc import ABC, abstractmethod
 
 
 class SecretsAdapter(ABC):
@@ -65,7 +64,7 @@ class EnvSecretsAdapter(SecretsAdapter):
     Optionally loads from .env file.
     """
 
-    def __init__(self, prefix: str = "MX_", env_file: Optional[str] = None):
+    def __init__(self, prefix: str = "MX_", env_file: str | None = None):
         self.prefix = prefix
         self.env_file = env_file
         self._cache: dict[str, str] = {}
@@ -145,7 +144,7 @@ class GCPSecretManager(SecretsAdapter):
             raise ImportError(
                 "google-cloud-secret-manager required. Install with: "
                 "pip install google-cloud-secret-manager"
-            )
+            ) from None
 
         self._client = secretmanager.SecretManagerServiceClient()
 
@@ -160,7 +159,7 @@ class GCPSecretManager(SecretsAdapter):
             return response.payload.data.decode("utf-8")
         except Exception as e:
             if "NOT_FOUND" in str(e):
-                raise KeyError(f"Secret not found: {name}")
+                raise KeyError(f"Secret not found: {name}") from e
             raise
 
     async def set_secret(self, name: str, value: str) -> None:
@@ -235,13 +234,13 @@ class AzureKeyVault(SecretsAdapter):
 
     async def connect(self) -> None:
         try:
-            from azure.keyvault.secrets import SecretClient
             from azure.identity import DefaultAzureCredential
+            from azure.keyvault.secrets import SecretClient
         except ImportError:
             raise ImportError(
                 "azure-keyvault-secrets required. Install with: "
                 "pip install azure-keyvault-secrets azure-identity"
-            )
+            ) from None
 
         credential = DefaultAzureCredential()
         self._client = SecretClient(vault_url=self.vault_url, credential=credential)
@@ -257,7 +256,7 @@ class AzureKeyVault(SecretsAdapter):
             return secret.value
         except Exception as e:
             if "SecretNotFound" in str(e):
-                raise KeyError(f"Secret not found: {name}")
+                raise KeyError(f"Secret not found: {name}") from e
             raise
 
     async def set_secret(self, name: str, value: str) -> None:

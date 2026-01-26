@@ -14,27 +14,30 @@ import os
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
-from typing import Optional
 
-from shared.schemas import (
-    Spec,
-    RequirementStatus,
+from boss import (
+    Adjustment,
+    EscalationEngine,
+    EscalationSeverity,
+    EscalationType,
+    Governor,
+    GovernorState,
+    TelemetrySnapshot,
 )
 from shared.adapters import QueueAdapter, create_queue_adapter
-from shared.utils import (
-    MXConfig,
-    LLMClient,
-    Message,
-    create_llm_client,
-    GitHubAPI,
-    MockGitHubAPI,
-)
-from shared.utils.metrics import get_metrics_collector, TaskMetrics
-from boss import (
-    EscalationEngine, EscalationType, EscalationSeverity,
-    Governor, GovernorState, TelemetrySnapshot, Adjustment, AdjustmentType, TriggerType
+from shared.schemas import (
+    RequirementStatus,
+    Spec,
 )
 from shared.schemas.teamplan import TeamPlan
+from shared.utils import (
+    GitHubAPI,
+    LLMClient,
+    MockGitHubAPI,
+    MXConfig,
+    create_llm_client,
+)
+from shared.utils.metrics import get_metrics_collector
 
 
 class JudgeDecision(str, Enum):
@@ -44,10 +47,6 @@ class JudgeDecision(str, Enum):
     ESCALATE = "escalate"  # Ask human for help
 
 
-class GovernorState(str, Enum):
-    NORMAL = "NORMAL"
-    THROTTLED = "THROTTLED"
-    FROZEN = "FROZEN"
 
 
 @dataclass
@@ -118,13 +117,13 @@ class JudgeReport:
 @dataclass
 class JudgeState:
     """Judge internal state."""
-    last_run: Optional[str] = None
+    last_run: str | None = None
     last_progress: float = 0.0
-    no_progress_since: Optional[str] = None
+    no_progress_since: str | None = None
     consecutive_failures: int = 0
     total_evaluations: int = 0
     governor_state: GovernorState = GovernorState.NORMAL
-    last_governor_check: Optional[str] = None
+    last_governor_check: str | None = None
 
 
 class Judge:
@@ -137,8 +136,8 @@ class Judge:
     def __init__(
         self,
         config: MXConfig,
-        queue: Optional[QueueAdapter] = None,
-        llm: Optional[LLMClient] = None,
+        queue: QueueAdapter | None = None,
+        llm: LLMClient | None = None,
         repo_path: str = ".",
     ):
         self.config = config
@@ -146,18 +145,18 @@ class Judge:
         self.llm = llm or create_llm_client(config.llm.to_dict())
         self.repo_path = repo_path
         self.state = JudgeState()
-        self._github: Optional[GitHubAPI] = None
+        self._github: GitHubAPI | None = None
         self._running = False
         self.metrics_collector = get_metrics_collector()
         self.escalation_engine = EscalationEngine(repo_path=repo_path)
-        
+
         # Initialize Governor with a default TeamPlan if none exists
         teamplan_path = os.path.join(repo_path, "TEAMPLAN.json")
         if os.path.exists(teamplan_path):
             self.teamplan = TeamPlan.load(teamplan_path)
         else:
             self.teamplan = TeamPlan.default()
-            
+
         self.governor = Governor(
             teamplan=self.teamplan,
             telemetry_provider=self._get_telemetry_snapshot,
@@ -190,7 +189,7 @@ class Judge:
         self._running = False
         await self.queue.disconnect()
 
-    def _load_spec(self) -> Optional[Spec]:
+    def _load_spec(self) -> Spec | None:
         """Load SPEC.json from repo."""
         spec_path = os.path.join(self.repo_path, "SPEC.json")
         if os.path.exists(spec_path):
@@ -420,7 +419,7 @@ class Judge:
             decision = JudgeDecision.ESCALATE
             reason = f"High failure rate ({metrics['failure_rate']:.1%}) or repeated failures"
             self.state.consecutive_failures += 1
-            
+
             # Trigger escalation
             self.escalation_engine._create_escalation(
                 EscalationType.RETRY_RATE,
@@ -505,7 +504,7 @@ class Judge:
         # This would ideally be async, but Governor expects a synchronous provider for now
         # We can use the metrics collector and cached PR metrics
         metrics = self.metrics_collector.compute_metrics(window_hours=1)
-        
+
         # We'll use a simplified snapshot for now
         return TelemetrySnapshot(
             ci_health_percent=self.state.last_progress, # Placeholder
@@ -524,22 +523,22 @@ class Judge:
         """Run a governor health check using the boss.Governor."""
         # Update telemetry and evaluate
         await self.governor._evaluate()
-        
+
         # Get state summary for report
         gov_state = self.governor.get_state_summary()
-        
+
         report = GovernorReport(
             timestamp=datetime.utcnow().isoformat(),
             state=GovernorState(gov_state["mode"]),
             actions=[adj["reason"] for adj in gov_state["recent_adjustments"]],
             metrics=gov_state["current_caps"]
         )
-        
+
         # Append to report file
         report_path = os.path.join(self.repo_path, "GOVERNOR_REPORT.md")
         with open(report_path, "a") as f:
             f.write(report.to_markdown())
-            
+
         return report
 
     async def _execute_reset(self) -> None:
@@ -572,7 +571,7 @@ class Judge:
             print(f"[Judge] Planner generated {result['tasks_generated']} tasks")
         except Exception as e:
             print(f"[Judge] Planned execution failed: {e}")
-        
+
         # Reset judge state so we don't immediately reset again
         self.state.no_progress_since = None
         self.state.consecutive_failures = 0
