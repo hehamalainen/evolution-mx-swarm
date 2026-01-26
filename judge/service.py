@@ -560,7 +560,18 @@ class Judge:
             print("[Judge] Spec reset")
 
         # Trigger replan (would need to call planner)
-        print("[Judge] Reset complete - waiting for planner to replan")
+        print("[Judge] Reset complete - Executing Planner...")
+        try:
+            from planner import Planner
+            planner = Planner(self.config, repo_path=self.repo_path)
+            result = await planner.run()
+            print(f"[Judge] Planner generated {result['tasks_generated']} tasks")
+        except Exception as e:
+            print(f"[Judge] Planned execution failed: {e}")
+        
+        # Reset judge state so we don't immediately reset again
+        self.state.no_progress_since = None
+        self.state.consecutive_failures = 0
 
     async def run(self) -> None:
         """
