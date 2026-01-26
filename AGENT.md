@@ -1,6 +1,6 @@
 # MX Swarm Agent Continuation Guide
 
-**Last Updated**: 2026-01-25
+**Last Updated**: 2026-01-26
 **Session**: Claude Code + Antigravity collaboration + User (Heikki)
 
 ---
@@ -46,6 +46,39 @@ It has now evolved to support a **Local Mode**, allowing it to run entirely offl
 
 ---
 
+## Session Work Summary (2026-01-26)
+
+### What Was Done
+
+#### 1. Dashboard-CLI Sync (Heartbeat System)
+Fixed the dashboard showing "Stopped" when swarm was actually running.
+
+**Problem**: Dashboard and CLI swarm run as separate processes with no communication. When running `mx run`, the dashboard had no way to know workers were active.
+
+**Solution**:
+- Added `/api/swarm/heartbeat` endpoint to dashboard API
+- CLI swarm now sends heartbeats every 5 seconds with worker status
+- Dashboard checks both `active_workers` and `online_workers` for status detection
+
+**New CLI argument**:
+```bash
+mx run --dashboard-url http://localhost:8080  # Default
+```
+
+#### 2. Judge Reset Loop Fix
+Fixed the Judge triggering infinite resets because:
+- Planner wasn't actually invoked after reset
+- Stall detection state (`no_progress_since`, `consecutive_failures`) wasn't cleared
+
+#### 3. GitHub Token Integration
+- Added `.env` file support with absolute path resolution
+- Token now loads correctly when CLI runs as subprocess
+
+#### 4. InMemoryQueue Singleton
+Fixed workers not seeing tasks because Planner and Workers created separate queue instances. Now uses singleton pattern per queue name.
+
+---
+
 ## Session Work Summary (2026-01-25)
 
 ### What Was Done
@@ -75,22 +108,41 @@ We successfully implemented a fully "sovereign" mode where the swarm creates cod
 
 ### 1. Requirements
 - **Python**: 3.11+
-- **Ollama**: Running `mistral:7b` (or similar).
-- **Dashboard**: `python3 -m uvicorn dashboard.api:app --reload`
+- **Ollama**: Running `mistral:7b` (or similar)
+- **aiohttp** (optional): For async heartbeats (`pip install aiohttp`)
 
-### 2. Ignite the Swarm
-1.  **Edit PRD**: content of `PRD.md` determines what they build.
-2.  **Dashboard**: Go to `http://localhost:8000`.
-3.  **Launch**: Click "Ignite Swarm".
-4.  **Watch**: See the logs in "Event Stream".
+### 2. Running with Dashboard Sync
 
-### 3. Retrieve Code
-The swarm pushes code to local branches.
+**Terminal 1 - Start Dashboard:**
+```bash
+python -m cli.main dashboard
+# Or: python -m uvicorn dashboard.api:app --port 8080
+# Dashboard available at http://localhost:8080
+```
+
+**Terminal 2 - Start Swarm:**
+```bash
+python -m cli.main run --workers 3
+# Automatically sends heartbeats to dashboard every 5s
+```
+
+The dashboard will show "Running" status and update worker counts in real-time.
+
+### 3. Ignite from Dashboard
+1. **Edit PRD**: content of `PRD.md` determines what they build.
+2. **Dashboard**: Go to `http://localhost:8080`.
+3. **Launch**: Drag & drop PRD file or click "Ignite Swarm".
+4. **Watch**: See the logs in "Event Stream", workers in "Worker Scaling" tile.
+
+### 4. Retrieve Code
+The swarm pushes code to local branches (Local Mode) or creates PRs (GitHub Mode).
 ```bash
 git branch
 # > feature/task-12345
 git checkout feature/task-12345
 ```
+
+With `GITHUB_TOKEN` set, PRs are created on GitHub automatically.
 
 ---
 

@@ -131,6 +131,7 @@ python3 mx_swarm_local_demo_final.py --agents 3 --tasks 5
 
 ```bash
 mx run [--workers N]     # Start full swarm
+mx run --dashboard-url URL  # Sync status with dashboard at URL
 mx status               # Show progress and metrics
 mx plan [--force]       # Run planner only
 mx judge                # Run judge evaluation
@@ -138,7 +139,23 @@ mx scale --max N        # Adjust worker limit
 mx pause                # Pause all workers
 mx resume               # Resume workers
 mx budget --daily N     # Set daily USD cap
+mx ignite               # Agent Boss: analyze PRD and setup team
+mx dashboard [--port N] # Start web dashboard (default: 8080)
 ```
+
+### Dashboard + CLI Sync
+
+Run dashboard and swarm in separate terminals for real-time monitoring:
+
+```bash
+# Terminal 1: Start dashboard
+python -m cli.main dashboard
+
+# Terminal 2: Start swarm (auto-syncs with dashboard)
+python -m cli.main run --workers 5
+```
+
+The CLI swarm sends heartbeats every 5 seconds so the dashboard shows accurate "Running" status.
 
 ## Repo Artifacts
 
