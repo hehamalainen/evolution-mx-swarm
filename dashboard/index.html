@@ -1331,10 +1331,18 @@
             }
 
             const swarmStatus = document.getElementById('swarm-status');
+            // Check multiple indicators of running status:
+            // 1. Active workers from heartbeat/state
+            // 2. Subprocess launched from dashboard
+            // 3. Online workers from 3-tier model
+            const hasActiveWorkers = (status.swarm?.active_workers || 0) > 0;
+            const hasOnlineWorkers = (status.worker_state?.online_workers || 0) > 0;
+            const isRunning = hasActiveWorkers || hasOnlineWorkers;
+
             if (status.swarm?.paused) {
                 swarmStatus.innerHTML = '<span class="dot"></span> Paused';
                 swarmStatus.className = 'status-indicator status-paused';
-            } else if ((status.swarm?.active_workers || 0) > 0) {
+            } else if (isRunning) {
                 swarmStatus.innerHTML = '<span class="dot"></span> Running';
                 swarmStatus.className = 'status-indicator status-running';
             } else {

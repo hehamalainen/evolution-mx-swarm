@@ -1478,6 +1478,89 @@ async def get_governor_adjustments():
 
 
 # ============================================================================
+# Swarm Heartbeat Endpoint (for CLI swarm to report status)
+# ============================================================================
+
+class SwarmHeartbeat(BaseModel):
+    """Heartbeat from CLI swarm process."""
+    active_workers: int = 0
+    worker_details: Optional[list[dict]] = None
+    tasks_in_progress: int = 0
+    tasks_completed: int = 0
+    prs_opened: int = 0
+    prs_merged: int = 0
+    ci_passes: int = 0
+    ci_fails: int = 0
+    is_running: bool = True
+    current_phase: Optional[str] = None  # "planning", "working", "judging", etc.
+
+
+@app.post("/api/swarm/heartbeat")
+async def swarm_heartbeat(heartbeat: SwarmHeartbeat):
+    """Receive heartbeat from CLI swarm process to sync dashboard state."""
+    now = datetime.utcnow().isoformat()
+
+    # Update worker state
+    state.worker_state.online_workers = heartbeat.active_workers
+    state.worker_state.enforce_invariant()
+
+    # Register workers from details or create placeholders
+    if heartbeat.worker_details:
+        for w in heartbeat.worker_details:
+            worker_id = w.get("id", f"worker-{len(state.workers)}")
+            state.workers[worker_id] = {
+                "worker_id": worker_id,
+                "last_seen": now,
+                "task_id": w.get("task_id"),
+                "status": w.get("status", "active"),
+            }
+    else:
+        # Create placeholder workers based on count
+        for i in range(heartbeat.active_workers):
+            worker_id = f"swarm-worker-{i}"
+            state.workers[worker_id] = {
+                "worker_id": worker_id,
+                "last_seen": now,
+                "task_id": None,
+                "status": "active",
+            }
+
+    # Update metrics (incremental)
+    if heartbeat.tasks_completed > state.tasks_completed:
+        state.tasks_completed = heartbeat.tasks_completed
+    if heartbeat.prs_opened > state.prs_opened:
+        state.prs_opened = heartbeat.prs_opened
+    if heartbeat.prs_merged > state.prs_merged:
+        state.prs_merged = heartbeat.prs_merged
+    if heartbeat.ci_passes > state.ci_passes:
+        state.ci_passes = heartbeat.ci_passes
+    if heartbeat.ci_fails > state.ci_fails:
+        state.ci_fails = heartbeat.ci_fails
+
+    # Track current phase
+    if heartbeat.current_phase:
+        state.add_log(EventType.SYS_CONFIG, f"Swarm phase: {heartbeat.current_phase}")
+
+    # Broadcast update to all connected clients
+    await state.broadcast_status()
+
+    return {"status": "ok", "received_at": now}
+
+
+@app.get("/api/swarm/status")
+async def get_swarm_running_status():
+    """Quick check if swarm appears to be running (workers active in last 60s)."""
+    active = state.get_active_workers(60)
+    config = load_config()
+    return {
+        "is_running": active > 0 or (state.swarm_process is not None),
+        "active_workers": active,
+        "paused": config.paused,
+        "subprocess_running": state.swarm_process is not None,
+    }
+
+
+# ============================================================================
 # WebSocket
 # ============================================================================
 
