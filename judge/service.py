@@ -21,7 +21,6 @@ from boss import (
     EscalationSeverity,
     EscalationType,
     Governor,
-    GovernorState,
     TelemetrySnapshot,
 )
 from shared.adapters import QueueAdapter, create_queue_adapter

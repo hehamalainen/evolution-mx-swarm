@@ -39,7 +39,6 @@ from boss import (
     DecisionQueue,
     EscalationEngine,
     Governor,
-    GovernorState,
     OrgBuilder,
     OrgConstraints,
     Reporter,
