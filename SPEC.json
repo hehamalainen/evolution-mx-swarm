@@ -1,86 +1,116 @@
 {
   "version": "1.0.0",
-  "prd_hash": "20ccce74e334ff8b",
-  "generated_at": "2026-01-25T18:08:11.611314",
+  "prd_hash": "34142c481a1cf1d9",
+  "generated_at": "2026-01-29T01:39:03.735693",
   "requirements": [
     {
-      "id": "REQ-E5788D",
+      "id": "REQ-9B0D84",
       "type": "functional",
-      "title": "GET /counter",
-      "description": "Returns the current count",
+      "title": "Scenario-based Gameplay",
+      "description": "Provide business executives with interactive, AI-focused scenarios for learning and decision-making practice.",
       "acceptance_criteria": [
-        "The API returns a JSON object with the current count when GET /counter is called."
+        "Executives can successfully complete a set of predefined scenarios"
+      ],
+      "dependencies": [
+        "REQ-7437B5",
+        "REQ-18DAAF"
+      ],
+      "status": "pending",
+      "prd_section": "General",
+      "priority": 1,
+      "estimated_complexity": 5,
+      "assigned_tasks": [],
+      "completion_evidence": []
+    },
+    {
+      "id": "REQ-4ABFF9",
+      "type": "functional",
+      "title": "Adjustable Difficulty Levels",
+      "description": "Allow users to customize the difficulty level based on their existing AI knowledge.",
+      "acceptance_criteria": [
+        "Users can select and complete scenarios at different levels of difficulty"
+      ],
+      "dependencies": [
+        "REQ-9B0D84"
+      ],
+      "status": "pending",
+      "prd_section": "General",
+      "priority": 2,
+      "estimated_complexity": 5,
+      "assigned_tasks": [],
+      "completion_evidence": []
+    },
+    {
+      "id": "REQ-CCD44B",
+      "type": "functional",
+      "title": "Real-world Business Scenarios",
+      "description": "Simulate real-life AI project situations for practical learning.",
+      "acceptance_criteria": [
+        "Scenarios are based on actual business cases"
       ],
       "dependencies": [],
-      "status": "completed",
-      "prd_section": "General",
-      "priority": 5,
-      "estimated_complexity": 5,
-      "assigned_tasks": [
-        "ca2991d9",
-        "fe31b6af"
-      ],
-      "completion_evidence": [
-        "https://github.com/hehamalainen/evolution-mx-swarm/pull/1"
-      ]
-    },
-    {
-      "id": "REQ-B83594",
-      "type": "functional",
-      "title": "POST /counter/increment",
-      "description": "Increases the count by 1",
-      "acceptance_criteria": [
-        "The API increments the count by 1 when POST /counter/increment is called."
-      ],
-      "dependencies": [
-        "REQ-E5788D"
-      ],
       "status": "in_progress",
       "prd_section": "General",
-      "priority": 5,
+      "priority": 3,
       "estimated_complexity": 5,
       "assigned_tasks": [
-        "e1db9893"
+        "f5240f78"
       ],
       "completion_evidence": []
     },
     {
-      "id": "REQ-49483A",
+      "id": "REQ-7437B5",
       "type": "functional",
-      "title": "POST /counter/decrement",
-      "description": "Decreases the count by 1",
+      "title": "Immediate Feedback Mechanism",
+      "description": "Offer users feedback to help them improve their understanding of AI concepts.",
       "acceptance_criteria": [
-        "The API decrements the count by 1 when POST /counter/decrement is called."
+        "Users receive constructive feedback after each scenario"
       ],
-      "dependencies": [
-        "REQ-E5788D"
-      ],
+      "dependencies": [],
       "status": "in_progress",
       "prd_section": "General",
-      "priority": 5,
+      "priority": 4,
       "estimated_complexity": 5,
       "assigned_tasks": [
-        "96ad8180"
+        "f7a1df8f",
+        "cdfe9930"
       ],
       "completion_evidence": []
     },
     {
-      "id": "REQ-9E677F",
-      "type": "functional",
-      "title": "POST /counter/reset",
-      "description": "Resets the count to 0",
+      "id": "REQ-B690C6",
+      "type": "non_functional",
+      "title": "Subscription-based Platform",
+      "description": "Provide access to the game as a subscription service.",
       "acceptance_criteria": [
-        "The API resets the count to 0 when POST /counter/reset is called."
+        "Users can subscribe and gain access to the platform"
       ],
-      "dependencies": [
-        "REQ-E5788D"
-      ],
+      "dependencies": [],
       "status": "in_progress",
       "prd_section": "General",
       "priority": 5,
       "estimated_complexity": 5,
       "assigned_tasks": [
-        "7e941166"
+        "db4d7a36",
+        "fb12995a"
+      ],
+      "completion_evidence": []
+    },
+    {
+      "id": "REQ-18DAAF",
+      "type": "non_functional",
+      "title": "Evolution of Scenarios",
+      "description": "Regularly update scenarios to keep content fresh and relevant.",
+      "acceptance_criteria": [
+        "New scenarios are added on a regular basis"
+      ],
+      "dependencies": [],
+      "status": "in_progress",
+      "prd_section": "General",
+      "priority": 6,
+      "estimated_complexity": 5,
+      "assigned_tasks": [
+        "f99d86ab"
       ],
       "completion_evidence": []
     }

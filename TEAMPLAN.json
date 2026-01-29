@@ -84,7 +84,7 @@
     "requires_spec_ref": true,
     "max_files_touched": 12,
     "max_modules_touched": 3,
-    "max_task_minutes": 45,
+    "max_task_minutes": 60,
     "require_tests": true,
     "require_evidence": true
   },
@@ -108,7 +108,7 @@
     ]
   },
   "reorg_policy": {
-    "interval_minutes": 60,
+    "interval_minutes": 45,
     "hysteresis_minutes": 30,
     "max_worker_delta_per_interval": 20,
     "prefer_caps_before_reorg": true,
@@ -131,11 +131,11 @@
     "emit_coordination_metrics": true,
     "metrics_interval_seconds": 30
   },
-  "prd_hash": "20ccce74e334ff8b",
+  "prd_hash": "34142c481a1cf1d9",
   "spec_hash": null,
-  "created_at": "2026-01-25T18:07:34.694913",
+  "created_at": "2026-01-29T01:38:24.537841",
   "created_by": "org_builder",
-  "complexity_score": 0.19,
+  "complexity_score": 0.7481666666666666,
   "coupling_score": 0.0,
-  "risk_score": 0.0
+  "risk_score": 0.3333333333333333
 }

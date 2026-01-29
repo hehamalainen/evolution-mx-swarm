@@ -219,6 +219,19 @@ class GitRepo:
             args.append("--staged")
         return await run_git(args, cwd=self.local_path)
 
+    async def diff(self, ref_from: str, ref_to: str) -> GitResult:
+        """Get diff between two refs (commits/branches).
+
+        Args:
+            ref_from: Starting ref (e.g., 'HEAD~1', 'main')
+            ref_to: Ending ref (e.g., 'HEAD', 'feature-branch')
+
+        Returns:
+            GitResult with unified diff in stdout
+        """
+        args = ["diff", ref_from, ref_to]
+        return await run_git(args, cwd=self.local_path)
+
     async def get_log(self, count: int = 10, oneline: bool = True) -> GitResult:
         """Get commit log."""
         args = ["log", f"-{count}"]

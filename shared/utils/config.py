@@ -180,6 +180,28 @@ class BudgetConfig:
 
 
 @dataclass
+class VCSConfig:
+    """VCS backend configuration.
+
+    MX Swarm can push to GitHub (PRs) or Aether (proposals).
+    """
+    provider: str = "github"  # "github" or "aether"
+
+    # Aether-specific config
+    aether_base_url: str = "http://localhost:3000"
+    aether_repo_id: str | None = None
+    aether_agent_id: str = "mx-swarm"
+
+    def to_dict(self) -> dict:
+        return {
+            "provider": self.provider,
+            "aether_base_url": self.aether_base_url,
+            "aether_repo_id": self.aether_repo_id,
+            "aether_agent_id": self.aether_agent_id,
+        }
+
+
+@dataclass
 class MXConfig:
     """Main MX Swarm configuration."""
     version: str = "1.0.0"
@@ -191,6 +213,7 @@ class MXConfig:
     governor: GovernorConfig = field(default_factory=GovernorConfig)
     github: GitHubConfig = field(default_factory=GitHubConfig)
     budget: BudgetConfig = field(default_factory=BudgetConfig)
+    vcs: VCSConfig = field(default_factory=VCSConfig)
 
     # State
     paused: bool = False
@@ -206,6 +229,7 @@ class MXConfig:
             "governor": self.governor.to_dict(),
             "github": self.github.to_dict(),
             "budget": self.budget.to_dict(),
+            "vcs": self.vcs.to_dict(),
             "paused": self.paused,
         }
 
@@ -299,7 +323,19 @@ class MXConfig:
                 max_tokens_per_task=b.get("max_tokens_per_task", 100000),
             )
 
+        if "vcs" in data:
+            v = data["vcs"]
+            # Support both flat (aether_base_url) and nested (aether.base_url) formats
+            aether = v.get("aether", {})
+            config.vcs = VCSConfig(
+                provider=v.get("provider", "github"),
+                aether_base_url=v.get("aether_base_url") or aether.get("base_url", "http://localhost:8100"),
+                aether_repo_id=v.get("aether_repo_id") or aether.get("repo_id"),
+                aether_agent_id=v.get("aether_agent_id") or aether.get("agent_id", "mx-swarm"),
+            )
+
         return config
+
 
     @classmethod
     def from_json(cls, json_str: str) -> "MXConfig":

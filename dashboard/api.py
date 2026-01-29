@@ -312,6 +312,7 @@ class IgniteRequest(BaseModel):
     budget_usd: float | None = None
     auto_mode: bool = True
     prd_content: str | None = None
+    vcs_target: str = "github"  # "aether", "github", or "both"
 
 class ConfigUpdate(BaseModel):
     llm_provider: str | None = None
@@ -898,11 +899,21 @@ async def control_ignite(req: IgniteRequest):
         config.budget.daily_usd_cap = req.budget_usd
         state.add_log(EventType.SYS_CONFIG, f"Manual override: ${req.budget_usd} budget")
 
+    # Handle VCS target selection
+    vcs_labels = {
+        "aether": "🔮 Aether",
+        "github": "🐙 GitHub",
+        "both": "📦 Aether + GitHub"
+    }
+    config.vcs.provider = req.vcs_target
+    state.add_log(EventType.SYS_CONFIG, f"VCS target: {vcs_labels.get(req.vcs_target, req.vcs_target)}")
+
     config.paused = False
     save_config(config)
 
     state.start_time = datetime.utcnow().isoformat()
     state.governor_state = GovernorMode.NORMAL
+
 
     if req.auto_mode:
         state.add_log(EventType.SYS_START, "Agent Boss analyzing PRD and assembling team...")

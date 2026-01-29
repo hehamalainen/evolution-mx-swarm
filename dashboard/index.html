@@ -839,6 +839,16 @@
                 </div>
                 <div class="prd-actions">
                     <button class="btn btn-secondary" onclick="clearPRD(event)">Clear</button>
+                    <div class="vcs-selector" onclick="event.stopPropagation()"
+                        style="display: flex; align-items: center; gap: 0.5rem; background: var(--bg-secondary); padding: 0.5rem 1rem; border-radius: 6px;">
+                        <label style="font-size: 0.8rem; color: var(--text-secondary);">Push to:</label>
+                        <select id="vcs-target" class="control-input" style="width: auto; min-width: 160px;"
+                            onclick="event.stopPropagation()">
+                            <option value="aether">🔮 Aether (Proposals)</option>
+                            <option value="github" selected>🐙 GitHub (PRs)</option>
+                            <option value="both">📦 Both</option>
+                        </select>
+                    </div>
                     <button class="btn btn-primary" onclick="launchSwarm(event)" id="launch-btn" disabled>🚀 Launch
                         Swarm</button>
                 </div>
@@ -1694,7 +1704,7 @@
                 const isLast = i === teamplan.streams.length - 1;
                 const connector = isLast ? '└─' : '├─';
                 const roleColor = s.role === 'Coder' ? 'var(--accent-green)' :
-                                  s.role === 'Tester' ? 'var(--accent-yellow)' : 'var(--accent-blue)';
+                    s.role === 'Tester' ? 'var(--accent-yellow)' : 'var(--accent-blue)';
                 html += `<div style="margin: 0.5rem 0; color: var(--text-primary);">
                     <span style="color: var(--text-secondary);">${connector}</span>
                     <span style="font-weight: 600;">${s.name || 'Stream'}</span>
@@ -1786,8 +1796,16 @@
                 return;
             }
 
-            // Show confirmation
-            if (!confirm('Launch the swarm with this PRD?')) {
+            // Get VCS target selection
+            const vcsTarget = document.getElementById('vcs-target').value;
+            const vcsLabel = {
+                'aether': '🔮 Aether (Proposals)',
+                'github': '🐙 GitHub (PRs)',
+                'both': '📦 Both (Aether + GitHub)'
+            }[vcsTarget];
+
+            // Show confirmation with VCS target
+            if (!confirm(`Launch the swarm with this PRD?\n\nCode changes will go to: ${vcsLabel}`)) {
                 return;
             }
 
@@ -1795,6 +1813,7 @@
                 const result = await apiCall('/control/ignite', 'POST', {
                     auto_mode: true,
                     prd_content: currentPRD,
+                    vcs_target: vcsTarget,
                 });
 
                 if (result.status === 'ok' || result.status === 'ignited') {
@@ -1802,7 +1821,7 @@
                         timestamp: new Date().toLocaleTimeString(),
                         event_type: 'SYS_IGNITE',
                         level: 'info',
-                        message: 'Swarm ignited with uploaded PRD'
+                        message: `Swarm ignited → ${vcsLabel}`
                     });
                 } else {
                     alert('Failed to launch: ' + (result.message || 'Unknown error'));

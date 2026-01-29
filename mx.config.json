@@ -67,5 +67,11 @@
     "max_llm_calls_per_task": 50,
     "max_tokens_per_task": 100000
   },
+  "vcs": {
+    "provider": "aether",
+    "aether_base_url": "http://localhost:8100",
+    "aether_repo_id": "repo_1061db119706",
+    "aether_agent_id": "mx-swarm"
+  },
   "paused": false
 }

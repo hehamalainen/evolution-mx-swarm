@@ -16,11 +16,16 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from shared.adapters import QueueAdapter, QueueMessage, create_queue_adapter
+from shared.adapters import (
+    QueueAdapter,
+    QueueMessage,
+    VCSAdapter,
+    create_queue_adapter,
+    create_vcs_adapter,
+)
 from shared.schemas import (
     RiskLevel,
     TaskContract,
-    TaskType,
 )
 from shared.utils import (
     GitHubAPI,
@@ -129,6 +134,7 @@ class Worker:
         worker_id: str | None = None,
         queue: QueueAdapter | None = None,
         llm: LLMClient | None = None,
+        vcs: VCSAdapter | None = None,
     ):
         self.config = config
         self.worker_id = worker_id or f"worker-{str(uuid.uuid4())[:8]}"
@@ -137,6 +143,30 @@ class Worker:
         self.metrics = WorkerMetrics()
         self._running = False
         self._github: GitHubAPI | None = None
+
+        # Initialize VCS adapter (Aether or GitHub)
+        self._vcs = vcs or create_vcs_adapter(self._build_vcs_config())
+
+    def _build_vcs_config(self) -> dict:
+        """Build VCS config dict from MXConfig."""
+        vcs_cfg = self.config.vcs
+        if vcs_cfg.provider == "aether":
+            return {
+                "provider": "aether",
+                "aether": {
+                    "base_url": vcs_cfg.aether_base_url,
+                    "repo_id": vcs_cfg.aether_repo_id,
+                    "agent_id": vcs_cfg.aether_agent_id or self.worker_id,
+                },
+            }
+        else:
+            return {
+                "provider": "github",
+                "token": self.config.github.token,
+                "owner": self.config.github.repo_owner,
+                "repo": self.config.github.repo_name,
+                "default_branch": self.config.github.default_branch,
+            }
 
     @property
     def github(self) -> GitHubAPI:
@@ -385,6 +415,62 @@ After the implementation, provide a brief summary of what you did and any notes.
 
         return results
 
+    async def _submit_to_vcs(
+        self,
+        repo: GitRepo,
+        task: TaskContract,
+        evidence: EvidencePack,
+        changed_files: list[str],
+        all_passed: bool,
+        draft: bool = False,
+    ) -> dict | None:
+        """Submit code changes via VCS adapter (Aether or GitHub)."""
+        # Generate diff for the commit
+        # Try commit diff first, fallback to staged diff for shallow clones
+        try:
+            diff_result = await repo.diff("HEAD~1", "HEAD")
+            if not diff_result.success or not diff_result.stdout.strip():
+                # Fallback: get staged diff
+                diff_result = await repo.get_diff(staged=True)
+        except Exception:
+            # Last resort: get any diff
+            diff_result = await repo.get_diff(staged=True)
+
+        diff_content = diff_result.stdout if diff_result.success else f"Files changed: {', '.join(changed_files)}"
+
+        # Map risk level to tier (0=low, 1=medium, 2=high)
+        risk_tier = {RiskLevel.LOW: 0, RiskLevel.MEDIUM: 1, RiskLevel.HIGH: 2}.get(task.constraints.risk, 0)
+
+        # Compute confidence based on check pass rate
+        confidence = 0.85 if all_passed else 0.5
+
+        try:
+            result = await self._vcs.submit_change(
+                task_id=task.id,
+                goal=task.goal,
+                branch_name=task.branch_name(),
+                diff=diff_content,
+                affected_paths=changed_files,
+                evidence_markdown=evidence.to_markdown(),
+                confidence=confidence,
+                model_id=self.config.llm.model,
+                risk_tier=risk_tier,
+                draft=draft,
+            )
+
+            if result.success:
+                self.metrics.prs_opened += 1
+                print(f"[{self.worker_id}] VCS submission: {result.submission_type} {result.submission_id} / {result.status}")
+                return {"number": result.submission_id, "type": result.submission_type, "url": result.url}
+            else:
+                print(f"[{self.worker_id}] VCS submission failed: {result.message}")
+                return None
+
+        except Exception as e:
+            print(f"[{self.worker_id}] Failed to submit to VCS: {e}")
+            return None
+
+    # Keep legacy method for backwards compatibility
     async def _create_pr(
         self,
         repo: GitRepo,
@@ -392,46 +478,9 @@ After the implementation, provide a brief summary of what you did and any notes.
         evidence: EvidencePack,
         draft: bool = False,
     ) -> dict | None:
-        """Create pull request with evidence pack."""
-        # Generate PR title
-        task_type_emoji = {
-            TaskType.FEATURE: "✨",
-            TaskType.BUGFIX: "🐛",
-            TaskType.TEST: "🧪",
-            TaskType.REFACTOR: "♻️",
-            TaskType.OPS: "🔧",
-            TaskType.DOC: "📝",
-        }
-        emoji = task_type_emoji.get(task.type, "📦")
-        title = f"{emoji} [{task.id}] {task.goal[:60]}"
-
-        # Generate PR body
-        body = f"""## Task
-
-**ID:** `{task.id}`
-**Type:** {task.type.value}
-**Goal:** {task.goal}
-
-{evidence.to_markdown()}
-
----
-*This PR was created automatically by MX Swarm Worker `{self.worker_id}`*
-"""
-
-        try:
-            # self.github handles both Real and Mock implementations
-            pr = await self.github.create_pull_request(
-                title=title,
-                body=body,
-                head=task.branch_name(),
-                base=self.config.github.default_branch,
-                draft=draft,
-            )
-            self.metrics.prs_opened += 1
-            return pr
-        except Exception as e:
-            print(f"Failed to create PR: {e}")
-            return None
+        """Legacy method - redirects to _submit_to_vcs."""
+        # This is now a wrapper; actual submission goes through VCS adapter
+        return await self._submit_to_vcs(repo, task, evidence, [], True, draft)
 
     async def process_task(self, message: QueueMessage) -> bool:
         """
@@ -512,20 +561,25 @@ After the implementation, provide a brief summary of what you did and any notes.
                 author="MX Swarm <mx-swarm@automated.local>",
             )
 
-            # Push branch (Push to local filesystem in Local Mode)
-            push_result = await repo.push(branch_name)
-            if not push_result.success:
-                raise RuntimeError(f"Push failed: {push_result.stderr}")
+            # Push branch only if using GitHub VCS (not Aether-only)
+            # Aether submissions use the diff directly, no GitHub branch needed
+            vcs_provider = self.config.vcs.provider
+            if vcs_provider != "aether":
+                push_result = await repo.push(branch_name)
+                if not push_result.success:
+                    raise RuntimeError(f"Push failed: {push_result.stderr}")
 
-            if is_local_mode:
-                print(f"[{self.worker_id}] Local Mode: Pushed branch {branch_name} to {self._get_repo_url()}")
+                if is_local_mode:
+                    print(f"[{self.worker_id}] Local Mode: Pushed branch {branch_name} to {self._get_repo_url()}")
+            else:
+                print(f"[{self.worker_id}] Aether mode: Skipping GitHub push, submitting diff directly")
 
-            # Create PR (Mocked in Local Mode if initialized correctly)
+            # Submit via VCS adapter (Aether or GitHub)
             draft = not all_passed  # Draft if checks failed
-            pr = await self._create_pr(repo, task, evidence, draft=draft)
+            submission = await self._submit_to_vcs(repo, task, evidence, changed_files, all_passed, draft=draft)
 
-            if pr:
-                print(f"[{self.worker_id}] Created PR #{pr.get('number')} for task {task.id}")
+            if submission:
+                print(f"[{self.worker_id}] Submitted {submission.get('type')} #{submission.get('number')} for task {task.id}")
 
             # Success
             await self.queue.ack(message.receipt_handle)
