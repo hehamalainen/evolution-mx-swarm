@@ -674,12 +674,32 @@
             background: var(--bg-card);
             border-radius: 8px;
             text-align: left;
-            max-height: 150px;
+            max-height: none;
             overflow-y: auto;
             font-family: monospace;
             font-size: 0.75rem;
             white-space: pre-wrap;
             color: var(--text-secondary);
+        }
+
+        .prd-loaded-grid {
+            display: flex;
+            gap: 2rem;
+            align-items: stretch;
+            text-align: left;
+        }
+
+        .prd-pane {
+            flex: 1;
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .prd-pane .prd-preview {
+            flex: 1;
+            min-height: 220px;
+            max-height: 360px;
         }
 
         .prd-actions {
@@ -896,14 +916,14 @@
                 <div class="prd-drop-subtitle">Drag & drop a PRD.md file, or click to browse</div>
             </div>
             <div id="prd-loaded-content" style="display: none;">
-                <div style="display: flex; gap: 2rem; align-items: flex-start; text-align: left;">
+                <div class="prd-loaded-grid">
                     <!-- Left: PRD Preview -->
-                    <div style="flex: 1;">
+                    <div class="prd-pane">
                         <div class="prd-drop-title" id="prd-filename" style="margin-bottom: 0.5rem;">📄 PRD Loaded</div>
                         <div class="prd-preview" id="prd-preview"></div>
                     </div>
                     <!-- Right: Analysis Results -->
-                    <div id="prd-analysis" style="flex: 1; display: none;">
+                    <div id="prd-analysis" class="prd-pane" style="display: none;">
                         <div class="prd-drop-title" style="margin-bottom: 0.5rem;">🤖 Agent Boss Analysis</div>
                         <div style="background: var(--bg-card); padding: 1rem; border-radius: 8px;">
                             <div
@@ -1698,8 +1718,7 @@
             document.getElementById('prd-drop-content').style.display = 'none';
             document.getElementById('prd-loaded-content').style.display = 'block';
             document.getElementById('prd-filename').textContent = '📄 ' + filename;
-            // Show first 500 chars as preview
-            document.getElementById('prd-preview').textContent = content.substring(0, 500) + (content.length > 500 ? '...' : '');
+            document.getElementById('prd-preview').textContent = content;
             dropZone.classList.add('has-prd');
             // Disable launch until analysis completes
             document.getElementById('launch-btn').disabled = true;
