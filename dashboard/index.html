@@ -744,6 +744,112 @@
             opacity: 0.7;
         }
 
+        /* Org Chart - Force Graph */
+        .org-chart-surface {
+            position: relative;
+            width: 100%;
+            height: 300px;
+            border-radius: 8px;
+            background:
+                radial-gradient(1200px 400px at 10% 10%, rgba(74, 158, 255, 0.08), transparent 60%),
+                radial-gradient(900px 300px at 90% 90%, rgba(52, 211, 153, 0.06), transparent 60%),
+                var(--bg-primary);
+            border: 1px solid var(--border-color);
+            overflow: hidden;
+        }
+
+        .org-chart-overlay {
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+        }
+
+        .org-chart-legend {
+            position: absolute;
+            right: 8px;
+            top: 8px;
+            padding: 0.35rem 0.5rem;
+            border-radius: 6px;
+            background: rgba(35, 43, 62, 0.85);
+            border: 1px solid var(--border-color);
+            font-size: 0.65rem;
+            color: var(--text-secondary);
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .org-node {
+            position: absolute;
+            min-width: 130px;
+            padding: 0.45rem 0.6rem;
+            border-radius: 10px;
+            border: 1px solid var(--border-color);
+            background: rgba(26, 31, 46, 0.95);
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.25);
+            transform: translate(-50%, -50%);
+            color: var(--text-primary);
+            font-size: 0.75rem;
+            pointer-events: auto;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+            cursor: grab;
+        }
+
+        .org-node:hover {
+            transform: translate(-50%, -50%) scale(1.03);
+            box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
+        }
+
+        .org-node.dragging {
+            cursor: grabbing;
+        }
+
+        .org-node-title {
+            font-weight: 700;
+            font-size: 0.8rem;
+            margin-bottom: 0.15rem;
+        }
+
+        .org-node-sub {
+            color: var(--text-secondary);
+            font-size: 0.7rem;
+        }
+
+        .org-node-role {
+            display: inline-block;
+            margin-top: 0.25rem;
+            font-size: 0.65rem;
+            padding: 0.1rem 0.35rem;
+            border-radius: 999px;
+            border: 1px solid var(--border-color);
+        }
+
+        .org-node-boss {
+            background: linear-gradient(135deg, rgba(74, 158, 255, 0.25), rgba(52, 211, 153, 0.2));
+            border-color: rgba(74, 158, 255, 0.4);
+        }
+
+        .org-node-coder { border-color: rgba(52, 211, 153, 0.6); }
+        .org-node-tester { border-color: rgba(251, 191, 36, 0.6); }
+        .org-node-ops { border-color: rgba(251, 146, 60, 0.6); }
+        .org-node-other { border-color: rgba(167, 139, 250, 0.6); }
+
+        .org-chart-toggle {
+            border: 1px solid var(--border-color);
+            background: var(--bg-card);
+            color: var(--text-primary);
+            border-radius: 999px;
+            font-size: 0.6rem;
+            padding: 0.1rem 0.45rem;
+            cursor: pointer;
+        }
+
+        .org-chart-toggle.active {
+            background: rgba(74, 158, 255, 0.2);
+            border-color: rgba(74, 158, 255, 0.6);
+            color: var(--accent-blue);
+        }
+
         @media (max-width: 1400px) {
             .credibility-tiles {
                 grid-template-columns: repeat(3, 1fr);
@@ -774,8 +880,6 @@
         </div>
         <div class="header-actions">
             <button class="btn btn-secondary" onclick="openConfigModal()">Settings</button>
-            <button class="btn btn-warning" onclick="throttleSwarm()">Throttle</button>
-            <button class="btn btn-secondary" onclick="resetSwarm()">Reset</button>
             <button class="btn btn-primary" onclick="igniteSwarm()">Ignite Swarm</button>
             <button class="btn btn-danger" onclick="emergencyStop()">Stop</button>
         </div>
@@ -830,8 +934,8 @@
                                 style="margin-top: 1rem; border-top: 1px solid var(--border-color); padding-top: 1rem;">
                                 <span style="color: var(--text-secondary); font-size: 0.75rem;">Org Chart:</span>
                                 <div id="org-chart-container"
-                                    style="margin-top: 0.5rem; background: var(--bg-primary); border-radius: 4px; padding: 0.5rem; overflow: auto; max-height: 300px;">
-                                    <div id="org-chart"></div>
+                                    style="margin-top: 0.5rem; border-radius: 8px; overflow: hidden; max-height: 300px;">
+                                    <div id="org-chart" class="org-chart-surface"></div>
                                 </div>
                             </div>
                         </div>
@@ -846,7 +950,6 @@
                             onclick="event.stopPropagation()">
                             <option value="aether">🔮 Aether (Proposals)</option>
                             <option value="github" selected>🐙 GitHub (PRs)</option>
-                            <option value="both">📦 Both</option>
                         </select>
                     </div>
                     <button class="btn btn-primary" onclick="launchSwarm(event)" id="launch-btn" disabled>🚀 Launch
@@ -875,9 +978,12 @@
 
             <!-- PR Throughput -->
             <div class="cred-tile">
-                <div class="cred-tile-header">PR Throughput</div>
+                <div class="cred-tile-header" id="throughput-header">PR Throughput</div>
                 <div class="cred-tile-value blue" id="prs-merged">0</div>
-                <div class="cred-tile-sub"><span id="prs-open">0</span> open / <span id="prs-hour">0</span>/hr</div>
+                <div class="cred-tile-sub">
+                    <span id="prs-open">0</span> <span id="throughput-open-label">open</span> /
+                    <span id="prs-hour">0</span><span id="throughput-rate-label">/hr</span>
+                </div>
             </div>
 
             <!-- Governor State -->
@@ -1052,11 +1158,6 @@
                 <div class="stat-sub">Active Workers</div>
                 <div class="progress-bar">
                     <div id="worker-progress" class="progress-fill" style="width: 0%"></div>
-                </div>
-                <div class="slider-container" style="margin-top: 1rem;">
-                    <input type="range" class="slider" id="worker-slider" min="1" max="100" value="10"
-                        onchange="scaleWorkers(this.value)">
-                    <span class="slider-value" id="worker-slider-value">10</span>
                 </div>
                 <div class="controls-row">
                     <button class="btn btn-secondary" onclick="pauseSwarm()">Pause</button>
@@ -1286,6 +1387,17 @@
             document.getElementById('prs-merged').textContent = status.pr_throughput?.merged_total || 0;
             document.getElementById('prs-open').textContent = status.pr_throughput?.open || 0;
             document.getElementById('prs-hour').textContent = status.pr_throughput?.per_hour_rate || 0;
+            const throughputHeader = document.getElementById('throughput-header');
+            if (throughputHeader) {
+                const isAether = status.config?.vcs_provider === 'aether';
+                throughputHeader.textContent = isAether ? 'Submission Throughput' : 'PR Throughput';
+                const openLabel = document.getElementById('throughput-open-label');
+                const rateLabel = document.getElementById('throughput-rate-label');
+                if (openLabel && rateLabel) {
+                    openLabel.textContent = isAether ? 'submitted' : 'open';
+                    rateLabel.textContent = isAether ? ' total' : '/hr';
+                }
+            }
 
             // Governor tile
             const govState = status.governor?.state || 'NORMAL';
@@ -1314,8 +1426,6 @@
             // Swarm control
             document.getElementById('active-workers').textContent = status.swarm?.active_workers || 0;
             document.getElementById('max-workers').textContent = status.swarm?.max_workers || 0;
-            document.getElementById('worker-slider').value = status.swarm?.max_workers || 10;
-            document.getElementById('worker-slider-value').textContent = status.swarm?.max_workers || 10;
 
             const workerPercent = status.swarm?.max_workers > 0 ? (status.swarm.active_workers / status.swarm.max_workers) * 100 : 0;
             document.getElementById('worker-progress').style.width = workerPercent + '%';
@@ -1476,11 +1586,6 @@
             return response.json();
         }
 
-        async function scaleWorkers(value) {
-            document.getElementById('worker-slider-value').textContent = value;
-            await apiCall('/control/scale', 'POST', { max_workers: parseInt(value) });
-        }
-
         async function updateBudget(value) {
             await apiCall('/control/budget', 'POST', { daily_usd_cap: parseFloat(value) });
         }
@@ -1491,18 +1596,6 @@
 
         async function resumeSwarm() {
             await apiCall('/control/resume');
-        }
-
-        async function throttleSwarm() {
-            if (confirm('Throttle the swarm? This will halve workers and pause PR creation.')) {
-                await apiCall('/control/throttle');
-            }
-        }
-
-        async function resetSwarm() {
-            if (confirm('Reset the swarm? This will trigger replanning and restart workers.')) {
-                await apiCall('/control/reset');
-            }
         }
 
         async function emergencyStop() {
@@ -1675,20 +1768,256 @@
             try {
                 const container = document.getElementById('org-chart');
                 if (!container) return;
+                const signature = JSON.stringify(teamplan);
+                if (container.dataset.lastTeamplan === signature) {
+                    return;
+                }
+                container.dataset.lastTeamplan = signature;
                 if (!teamplan || !teamplan.streams || teamplan.streams.length === 0) {
                     container.innerHTML = '<div style="color: #666; padding: 1rem; text-align: center;">No team structure defined</div>';
                     return;
                 }
 
-                // Use fallback text-based display instead of mermaid (more reliable)
-                renderOrgChartFallback(container, teamplan);
+                renderOrgChartForce(container, teamplan);
             } catch (err) {
                 console.error('Org chart render error:', err);
                 const container = document.getElementById('org-chart');
                 if (container) {
-                    container.innerHTML = '<div style="color: #666; padding: 1rem;">Error rendering org chart</div>';
+                    renderOrgChartFallback(container, teamplan);
                 }
             }
+        }
+
+        function renderOrgChartForce(container, teamplan) {
+            container.innerHTML = '';
+            container.classList.add('org-chart-surface');
+            if (container._orgChartFrame) {
+                cancelAnimationFrame(container._orgChartFrame);
+                container._orgChartFrame = null;
+            }
+
+            const legend = document.createElement('div');
+            legend.className = 'org-chart-legend';
+            legend.innerHTML = '<span>Force Map · Live topology</span>';
+            const freezeBtn = document.createElement('button');
+            freezeBtn.className = 'org-chart-toggle';
+            freezeBtn.type = 'button';
+            freezeBtn.textContent = 'Freeze';
+            legend.appendChild(freezeBtn);
+            container.appendChild(legend);
+
+            const overlay = document.createElement('div');
+            overlay.className = 'org-chart-overlay';
+            container.appendChild(overlay);
+
+            const width = container.clientWidth || 600;
+            const height = container.clientHeight || 300;
+
+            const canvas = document.createElement('canvas');
+            canvas.width = width * window.devicePixelRatio;
+            canvas.height = height * window.devicePixelRatio;
+            canvas.style.width = width + 'px';
+            canvas.style.height = height + 'px';
+            overlay.appendChild(canvas);
+            const ctx = canvas.getContext('2d');
+            ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+
+            const nodes = [];
+            const links = [];
+
+            const boss = {
+                id: 'boss',
+                label: 'Agent Boss',
+                sub: 'Planner / Architect',
+                role: 'Boss',
+                roleClass: 'org-node-boss',
+                x: width * 0.5,
+                y: height * 0.25,
+                vx: 0,
+                vy: 0,
+                fixed: true,
+            };
+            nodes.push(boss);
+
+            teamplan.streams.forEach((s, idx) => {
+                const angle = (idx / Math.max(1, teamplan.streams.length)) * Math.PI * 2;
+                const radius = Math.min(width, height) * 0.28;
+                const node = {
+                    id: `stream-${idx}`,
+                    label: s.name || 'Stream',
+                    sub: `${s.target_workers || 0}/${s.max_workers || 0} workers`,
+                    role: s.role || 'Worker',
+                    roleClass: roleToClass(s.role),
+                    x: width * 0.5 + Math.cos(angle) * radius,
+                    y: height * 0.6 + Math.sin(angle) * radius * 0.55,
+                    vx: 0,
+                    vy: 0,
+                };
+                nodes.push(node);
+                links.push({ source: boss, target: node });
+            });
+
+            const nodeEls = new Map();
+            nodes.forEach((n) => {
+                const el = document.createElement('div');
+                el.className = `org-node ${n.roleClass}`;
+                el.innerHTML = `
+                    <div class="org-node-title">${n.label}</div>
+                    <div class="org-node-sub">${n.sub}</div>
+                    <div class="org-node-role">${n.role}</div>
+                `;
+                container.appendChild(el);
+                el.addEventListener('pointerdown', (e) => {
+                    container._dragNode = n;
+                    container._dragNodeEl = el;
+                    n.fixed = true;
+                    el.classList.add('dragging');
+                    el.setPointerCapture(e.pointerId);
+                });
+                el.addEventListener('dblclick', () => {
+                    n.fixed = !n.fixed;
+                });
+                nodeEls.set(n.id, el);
+            });
+
+            const repel = 12000;
+            const spring = 0.0025;
+            const damping = 0.88;
+            const centerPull = 0.0015;
+            const minDistance = 120;
+            const maxDistance = 260;
+
+            const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+            function step() {
+                if (!container.isConnected) return;
+
+                // Forces
+                for (let i = 0; i < nodes.length; i++) {
+                    const a = nodes[i];
+                    for (let j = i + 1; j < nodes.length; j++) {
+                        const b = nodes[j];
+                        let dx = a.x - b.x;
+                        let dy = a.y - b.y;
+                        let dist = Math.hypot(dx, dy) || 1;
+                        const force = repel / (dist * dist);
+                        dx /= dist;
+                        dy /= dist;
+                        a.vx += dx * force;
+                        a.vy += dy * force;
+                        b.vx -= dx * force;
+                        b.vy -= dy * force;
+                    }
+                }
+
+                links.forEach((l) => {
+                    const dx = l.target.x - l.source.x;
+                    const dy = l.target.y - l.source.y;
+                    const dist = Math.hypot(dx, dy) || 1;
+                    const stretch = Math.min(Math.max(dist - minDistance, -maxDistance), maxDistance);
+                    const fx = (dx / dist) * stretch * spring;
+                    const fy = (dy / dist) * stretch * spring;
+                    l.source.vx += fx;
+                    l.source.vy += fy;
+                    l.target.vx -= fx;
+                    l.target.vy -= fy;
+                });
+
+                nodes.forEach((n) => {
+                    if (n.fixed) {
+                        n.vx = 0;
+                        n.vy = 0;
+                    } else {
+                        const cx = width * 0.5;
+                        const cy = height * (n.id === 'boss' ? 0.28 : 0.62);
+                        n.vx += (cx - n.x) * centerPull;
+                        n.vy += (cy - n.y) * centerPull;
+                        n.vx *= damping;
+                        n.vy *= damping;
+                        n.x += n.vx;
+                        n.y += n.vy;
+                    }
+
+                    n.x = Math.max(70, Math.min(width - 70, n.x));
+                    n.y = Math.max(50, Math.min(height - 40, n.y));
+                });
+
+                return true;
+            }
+
+            function render() {
+                ctx.clearRect(0, 0, width, height);
+                ctx.lineWidth = 1;
+                ctx.strokeStyle = 'rgba(154, 160, 166, 0.35)';
+                ctx.beginPath();
+                links.forEach((l) => {
+                    ctx.moveTo(l.source.x, l.source.y);
+                    ctx.lineTo(l.target.x, l.target.y);
+                });
+                ctx.stroke();
+
+                nodes.forEach((n) => {
+                    const el = nodeEls.get(n.id);
+                    if (el) {
+                        el.style.left = `${n.x}px`;
+                        el.style.top = `${n.y}px`;
+                    }
+                });
+            }
+
+            function animate() {
+                if (!step()) return;
+                render();
+                container._orgChartFrame = requestAnimationFrame(animate);
+            }
+
+            if (!reduceMotion) {
+                animate();
+            } else {
+                // One layout pass for reduced motion
+                for (let i = 0; i < 60; i++) step();
+                render();
+            }
+
+            freezeBtn.addEventListener('click', () => {
+                container._orgChartFrozen = !container._orgChartFrozen;
+                freezeBtn.classList.toggle('active', container._orgChartFrozen);
+                if (container._orgChartFrozen) {
+                    if (container._orgChartFrame) {
+                        cancelAnimationFrame(container._orgChartFrame);
+                        container._orgChartFrame = null;
+                    }
+                    freezeBtn.textContent = 'Unfreeze';
+                } else {
+                    freezeBtn.textContent = 'Freeze';
+                    animate();
+                }
+            });
+
+            container.addEventListener('pointermove', (e) => {
+                const n = container._dragNode;
+                if (!n) return;
+                const rect = container.getBoundingClientRect();
+                n.x = Math.max(70, Math.min(width - 70, e.clientX - rect.left));
+                n.y = Math.max(50, Math.min(height - 40, e.clientY - rect.top));
+                render();
+            });
+
+            container.addEventListener('pointerup', () => {
+                if (container._dragNodeEl) {
+                    container._dragNodeEl.classList.remove('dragging');
+                }
+                container._dragNode = null;
+                container._dragNodeEl = null;
+            });
+        }
+
+        function roleToClass(role) {
+            const r = (role || '').toLowerCase();
+            if (r.includes('coder') || r.includes('engineer') || r.includes('dev')) return 'org-node-coder';
+            if (r.includes('test') || r.includes('qa')) return 'org-node-tester';
+            if (r.includes('ops') || r.includes('infra')) return 'org-node-ops';
+            return 'org-node-other';
         }
 
         function renderOrgChartFallback(container, teamplan) {
@@ -1800,8 +2129,7 @@
             const vcsTarget = document.getElementById('vcs-target').value;
             const vcsLabel = {
                 'aether': '🔮 Aether (Proposals)',
-                'github': '🐙 GitHub (PRs)',
-                'both': '📦 Both (Aether + GitHub)'
+                'github': '🐙 GitHub (PRs)'
             }[vcsTarget];
 
             // Show confirmation with VCS target

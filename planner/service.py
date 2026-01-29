@@ -13,7 +13,7 @@ import json
 import os
 import re
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 
 from shared.adapters import QueueAdapter, create_queue_adapter
 from shared.schemas import (
@@ -291,7 +291,7 @@ RESPOND WITH ONLY JSON:"""
         self.state = PlannerState(
             prd_hash=prd_hash,
             spec_generated=True,
-            last_run=datetime.utcnow().isoformat(),
+            last_run=datetime.now(timezone.utc).isoformat(),
         )
 
         return spec
@@ -337,7 +337,7 @@ Output ONLY valid JSON:"""
         response = await self.llm.chat(
             messages=[Message(role="user", content=prompt)],
             system=SYSTEM_PROMPT,
-            max_tokens=3000,
+            max_tokens=1024,
             temperature=0.4,
         )
 

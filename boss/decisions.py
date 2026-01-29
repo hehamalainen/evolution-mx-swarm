@@ -20,7 +20,7 @@ import logging
 import os
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 
 logger = logging.getLogger(__name__)
@@ -80,7 +80,7 @@ class Decision:
     context: dict  # Relevant data for making the decision
     actions: list[DecisionAction] = field(default_factory=list)
     recommended_action: str | None = None  # ID of recommended action
-    created_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     expires_at: datetime | None = None
     status: DecisionStatus = DecisionStatus.PENDING
     resolved_at: datetime | None = None
@@ -203,7 +203,7 @@ class DecisionQueue:
             context=context,
             actions=actions,
             recommended_action=recommended_action,
-            expires_at=datetime.utcnow() + timedelta(hours=expires_hours) if expires_hours else None
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=expires_hours) if expires_hours else None
         )
 
         self.decisions.append(decision)
@@ -305,7 +305,7 @@ class DecisionQueue:
 
         # Update decision status
         decision.status = DecisionStatus.APPROVED if action_id != "dismiss" else DecisionStatus.DISMISSED
-        decision.resolved_at = datetime.utcnow()
+        decision.resolved_at = datetime.now(timezone.utc)
         decision.resolved_by = resolved_by
         decision.resolved_action = action_id
 
@@ -342,7 +342,7 @@ class DecisionQueue:
 
     def _check_expirations(self):
         """Check and mark expired decisions."""
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         for decision in self.decisions:
             if decision.status == DecisionStatus.PENDING and decision.expires_at:
                 if now > decision.expires_at:

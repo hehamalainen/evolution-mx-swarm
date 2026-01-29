@@ -10,7 +10,7 @@ This module handles:
 import json
 import os
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 
 
@@ -30,7 +30,10 @@ class FileLock:
     expires_at: str
 
     def is_expired(self) -> bool:
-        return datetime.utcnow() > datetime.fromisoformat(self.expires_at)
+        expires_at = datetime.fromisoformat(self.expires_at)
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        return datetime.now(timezone.utc) > expires_at
 
 
 @dataclass
@@ -114,7 +117,7 @@ class CoordinationService:
                 return False, existing.task_id
 
         # Acquire lock
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         self._locks[file_path] = FileLock(
             file_path=file_path,
             task_id=task_id,

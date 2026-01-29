@@ -14,7 +14,7 @@ Metrics tracked:
 
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 
 @dataclass
@@ -197,7 +197,7 @@ class MetricsCollector:
 
     def compute_metrics(self, window_hours: int = 1) -> CoordinationMetrics:
         """Compute coordination metrics for the given time window."""
-        cutoff = datetime.utcnow() - timedelta(hours=window_hours)
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=window_hours)
         recent_tasks = [t for t in self.task_metrics if t.started_at > cutoff]
 
         metrics = CoordinationMetrics(window_hours=window_hours)

@@ -16,7 +16,7 @@ import asyncio
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 
 from shared.schemas.teamplan import (
@@ -53,7 +53,7 @@ class AdjustmentType(str, Enum):
 @dataclass
 class TelemetrySnapshot:
     """Point-in-time telemetry data."""
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     # CI metrics
     ci_health_percent: float = 100.0
@@ -208,7 +208,7 @@ class Governor:
             baseline_pr_cap_hour=teamplan.caps.pr_cap_per_hour,
             baseline_open_pr_cap=teamplan.caps.open_pr_cap,
             baseline_max_workers=teamplan.total_max_workers(),
-            interval_start=datetime.utcnow()
+            interval_start=datetime.now(timezone.utc)
         )
 
         # Adjustment history
@@ -226,11 +226,11 @@ class Governor:
         """Check if we're in a cooldown period after a recent adjustment."""
         if self.state.cooldown_until is None:
             return False
-        return datetime.utcnow() < self.state.cooldown_until
+        return datetime.now(timezone.utc) < self.state.cooldown_until
 
     def _check_interval_reset(self):
         """Reset the 20% limit on new interval."""
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         if self.state.interval_start is None:
             self.state.interval_start = now
             self.state.adjustments_this_interval = 0
@@ -270,7 +270,7 @@ class Governor:
 
     def _set_cooldown(self):
         """Set cooldown period after an adjustment."""
-        self.state.cooldown_until = datetime.utcnow() + timedelta(minutes=self.COOLDOWN_MINUTES)
+        self.state.cooldown_until = datetime.now(timezone.utc) + timedelta(minutes=self.COOLDOWN_MINUTES)
         self.state.adjustments_this_interval += 1
 
     def _can_adjust(self) -> bool:
@@ -374,7 +374,7 @@ class Governor:
 
         This prevents oscillation by requiring conditions to persist.
         """
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         hysteresis = timedelta(minutes=self.teamplan.reorg_policy.hysteresis_minutes)
 
         # Record this trigger
@@ -515,7 +515,7 @@ class Governor:
         if not self._can_adjust():
             return
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         if self.state.last_adjustment_time:
             min_interval = timedelta(minutes=10)  # At least 10 min between major changes
             if now - self.state.last_adjustment_time < min_interval:
@@ -622,7 +622,7 @@ class Governor:
         # Simplified: just check we've been stable for a while
         if self.state.last_adjustment_time:
             recovery_window = timedelta(minutes=self.teamplan.reorg_policy.hysteresis_minutes)
-            if datetime.utcnow() - self.state.last_adjustment_time < recovery_window:
+            if datetime.now(timezone.utc) - self.state.last_adjustment_time < recovery_window:
                 return False
         return True
 
@@ -641,11 +641,11 @@ class Governor:
         """Record and notify about an adjustment."""
         # Calculate cooldown
         cooldown_minutes = self.teamplan.reorg_policy.hysteresis_minutes
-        cooldown_until = datetime.utcnow() + timedelta(minutes=cooldown_minutes)
-        next_eval_at = datetime.utcnow() + timedelta(minutes=5)  # Next eval in 5 min
+        cooldown_until = datetime.now(timezone.utc) + timedelta(minutes=cooldown_minutes)
+        next_eval_at = datetime.now(timezone.utc) + timedelta(minutes=5)  # Next eval in 5 min
 
         adjustment = Adjustment(
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
             type=adj_type,
             reason=reason,
             details=details,
@@ -672,7 +672,7 @@ class Governor:
 
     def get_state_summary(self) -> dict:
         """Get current governor state for dashboard."""
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         # Calculate time until cooldown ends
         cooldown_remaining = None

@@ -157,6 +157,10 @@ python -m cli.main run --workers 5
 
 The CLI swarm sends heartbeats every 5 seconds so the dashboard shows accurate "Running" status.
 
+Org chart interactions:
+- Drag nodes to reposition streams during demos.
+- Click "Freeze" to pause the layout animation (click again to unfreeze).
+
 ## Repo Artifacts
 
 | File | Purpose |

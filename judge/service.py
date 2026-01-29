@@ -12,7 +12,7 @@ import asyncio
 import json
 import os
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 
 from boss import (
@@ -309,7 +309,7 @@ class Judge:
         if self.state.no_progress_since:
             no_progress_time = datetime.fromisoformat(self.state.no_progress_since)
             timeout = timedelta(minutes=self.config.judge.no_progress_timeout_minutes)
-            if datetime.utcnow() - no_progress_time > timeout:
+            if datetime.now(timezone.utc) - no_progress_time > timeout:
                 return True
 
         return False
@@ -369,7 +369,7 @@ class Judge:
             JudgeReport with decision and metrics
         """
         self.state.total_evaluations += 1
-        timestamp = datetime.utcnow().isoformat()
+        timestamp = datetime.now(timezone.utc).isoformat()
         actions_taken = []
 
         # Load spec
@@ -527,7 +527,7 @@ class Judge:
         gov_state = self.governor.get_state_summary()
 
         report = GovernorReport(
-            timestamp=datetime.utcnow().isoformat(),
+            timestamp=datetime.now(timezone.utc).isoformat(),
             state=GovernorMode(gov_state["mode"]),
             actions=[adj["reason"] for adj in gov_state["recent_adjustments"]],
             metrics=gov_state["current_caps"]

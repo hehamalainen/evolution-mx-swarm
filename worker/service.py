@@ -14,7 +14,7 @@ import os
 import signal
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 
 from shared.adapters import (
     QueueAdapter,
@@ -69,7 +69,7 @@ class WorkerMetrics:
     prs_opened: int = 0
     llm_calls: int = 0
     total_tokens: int = 0
-    start_time: str = field(default_factory=lambda: datetime.utcnow().isoformat())
+    start_time: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 
 @dataclass
@@ -196,6 +196,10 @@ class Worker:
 
     def _get_repo_url(self) -> str:
         """Get repository URL."""
+        # In Aether mode, always use local filesystem as the source repo.
+        if self.config.vcs.provider == "aether":
+            return os.getcwd()
+
         # If running in Local Mode (no token), use local filesystem as 'remote'
         token = self.config.github.token or os.environ.get("GITHUB_TOKEN")
         if not token:
@@ -495,6 +499,7 @@ After the implementation, provide a brief summary of what you did and any notes.
         task.assigned_worker = self.worker_id
 
         print(f"[{self.worker_id}] Processing task {task.id}: {task.goal}")
+        self._current_task = task
 
         # Determine if we are in Local Mode (no token)
         token = self.config.github.token or os.environ.get("GITHUB_TOKEN")
@@ -605,6 +610,7 @@ After the implementation, provide a brief summary of what you did and any notes.
 
         finally:
             repo.cleanup()
+            self._current_task = None
             self.metrics.tasks_processed += 1
 
     async def run_once(self) -> bool:

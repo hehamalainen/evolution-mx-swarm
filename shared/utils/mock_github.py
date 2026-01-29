@@ -1,6 +1,6 @@
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 
@@ -45,7 +45,7 @@ class MockGitHubAPI:
 
         # Simulate Auto-Merge for passed tests (non-draft)
         state = "closed" if not draft else "open"
-        merged_at = datetime.utcnow().isoformat() if not draft else None
+        merged_at = datetime.now(timezone.utc).isoformat() if not draft else None
 
         pr = {
             "number": pr_id,
@@ -55,7 +55,7 @@ class MockGitHubAPI:
             "state": state,
             "head": {"ref": head, "sha": "mock-sha"},
             "base": {"ref": base},
-            "created_at": datetime.utcnow().isoformat(),
+            "created_at": datetime.now(timezone.utc).isoformat(),
             "merged_at": merged_at,
             "draft": draft,
             "user": {"login": "mx-worker-local"}

@@ -21,7 +21,7 @@ import asyncio
 import logging
 import random
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 
 import httpx
@@ -51,7 +51,7 @@ class MockPR:
     title: str
     status: str = "open"  # open, merged, closed
     ci_status: str = "pending"  # pending, success, failure
-    created_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class MockGitHub:
@@ -87,7 +87,7 @@ class MockGitHub:
                 "title": pr.title,
                 "state": pr.status,
                 "head": {"sha": f"sha-{pr.id}"},
-                "merged_at": datetime.utcnow().isoformat() if pr.status == "merged" else None
+                "merged_at": datetime.now(timezone.utc).isoformat() if pr.status == "merged" else None
             }
             for pr in self.prs if pr.status == state
         ]
@@ -220,7 +220,7 @@ class SimulationRunner:
         logger.info(f"Starting simulation: {self.agents} agents, {self.duration_minutes}m")
         logger.info(f"Accelerated mode: {self.accelerated}")
 
-        self.start_time = datetime.utcnow()
+        self.start_time = datetime.now(timezone.utc)
         end_time = self.start_time + timedelta(minutes=self.duration_minutes)
         self.current_time = self.start_time
 

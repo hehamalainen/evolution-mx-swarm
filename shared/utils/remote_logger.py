@@ -1,6 +1,6 @@
 import asyncio
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 
 import aiohttp
 
@@ -41,7 +41,7 @@ class RemoteLogStream:
 
     def write_log(self, message: str, level: str = "info"):
         """Add log to buffer."""
-        timestamp = datetime.utcnow().strftime("%H.%M.%S")
+        timestamp = datetime.now(timezone.utc).strftime("%H.%M.%S")
         self.buffer.append({
             "timestamp": timestamp,
             "message": message,
@@ -76,4 +76,3 @@ class RemoteLogStream:
         sys.stderr = self.original_stderr
         if self._task:
             await self._task
-

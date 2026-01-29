@@ -8,7 +8,7 @@ machine-readable, and the runtime MUST obey it.
 
 import json
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 
 
@@ -379,7 +379,7 @@ class TeamPlan:
 
     def __post_init__(self):
         if self.created_at is None:
-            self.created_at = datetime.utcnow().isoformat()
+            self.created_at = datetime.now(timezone.utc).isoformat()
 
     def total_target_workers(self) -> int:
         """Total target workers across all streams/pods."""

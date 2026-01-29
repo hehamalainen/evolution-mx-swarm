@@ -13,7 +13,7 @@ import uuid
 from abc import ABC, abstractmethod
 from collections import deque
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 
 from shared.schemas import TaskContract
 
@@ -151,7 +151,7 @@ class InMemoryQueue(QueueAdapter):
             body=task.to_json(),
             receipt_handle="",  # Set on receive
             receive_count=0,
-            enqueued_at=datetime.utcnow(),
+            enqueued_at=datetime.now(timezone.utc),
             attributes={"priority": priority, "task_id": task.id},
         )
         with self._lock:
@@ -363,14 +363,12 @@ class GCPPubSubQueue(QueueAdapter):
         if not self._subscriber:
             raise RuntimeError("Queue not connected")
 
-        import datetime
-
         from google.cloud.pubsub_v1.types import SeekRequest
         from google.protobuf.timestamp_pb2 import Timestamp
 
         # Seek to now to skip all existing messages
         now = Timestamp()
-        now.FromDatetime(datetime.datetime.utcnow())
+        now.FromDatetime(datetime.now(timezone.utc))
         self._subscriber.seek(
             request=SeekRequest(
                 subscription=self._subscription_path,

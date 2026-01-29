@@ -3,7 +3,7 @@
 import json
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 
 
@@ -91,7 +91,7 @@ class TaskContract:
     constraints: TaskConstraints
 
     # Metadata
-    created_at: str = field(default_factory=lambda: datetime.utcnow().isoformat())
+    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     priority: int = 5  # 1-10, higher is more urgent
     parent_task_id: str | None = None  # For subtasks
     spec_requirement_ids: list[str] = field(default_factory=list)  # Links to SPEC.json
@@ -208,7 +208,7 @@ class TaskContract:
                 merge_policy=MergePolicy(data.get("constraints", {}).get("merge_policy", "require_review")),
                 retry_max=data.get("constraints", {}).get("retry_max", 3),
             ),
-            created_at=data.get("created_at", datetime.utcnow().isoformat()),
+            created_at=data.get("created_at", datetime.now(timezone.utc).isoformat()),
             priority=data.get("priority", 5),
             parent_task_id=data.get("parent_task_id"),
             spec_requirement_ids=data.get("spec_requirement_ids", []),

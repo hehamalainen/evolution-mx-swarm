@@ -44,8 +44,9 @@ from boss import AgentBoss
 from boss.org_builder import OrgBuilder, OrgConstraints
 from judge import Judge
 from planner import Planner
-from shared.adapters import create_queue_adapter
-from shared.schemas import Spec
+from shared.adapters import create_queue_adapter, create_vcs_adapter
+from shared.adapters.aether_vcs import AetherVCS
+from shared.schemas import Spec, RequirementStatus
 from shared.schemas.teamplan import TeamPlan
 from shared.utils import MXConfig
 from worker import Worker
@@ -72,6 +73,93 @@ def load_spec(repo_path: str = ".") -> Spec | None:
     if os.path.exists(spec_path):
         return Spec.load(spec_path)
     return None
+
+
+async def sync_spec_with_aether(spec: Spec, config: MXConfig) -> None:
+    """Sync SPEC state with Aether proposals."""
+    print("Syncing with Aether...")
+    
+    # Create temp adapter to fetch proposals
+    vcs_config = config.vcs.to_dict()
+    # Ensure provider is set correctly for factory
+    if "provider" not in vcs_config:
+        vcs_config["provider"] = config.vcs.provider
+        
+    try:
+        vcs = create_vcs_adapter(vcs_config)
+    except Exception as e:
+        print(f"Warning: Could not create VCS adapter for sync: {e}")
+        return
+
+    if not isinstance(vcs, AetherVCS):
+        return
+
+    proposals = await vcs.get_agent_proposals(config.vcs.aether_agent_id or "mx-swarm")
+    
+    # Map task_id -> status
+    # Note: Aether returns multiple proposals per task (history). 
+    # We care if ANY proposal for a task is PROMOTED.
+    task_status_map = {}
+    for p in proposals:
+        tid = p.get('task_id')
+        status = p.get('status')
+        if not tid:
+            continue
+        
+        # Priority: PROMOTED > PENDING > SUPERSEDED
+        current = task_status_map.get(tid)
+        if status == "PROMOTED":
+            task_status_map[tid] = "PROMOTED"
+        elif status == "PENDING" and current != "PROMOTED":
+            task_status_map[tid] = "PENDING"
+        elif status == "SUPERSEDED" and current is None:
+            task_status_map[tid] = "SUPERSEDED"
+    
+    updates = 0
+    for req in spec.requirements:
+        if req.status == RequirementStatus.COMPLETED:
+            continue
+            
+        # Check assigned tasks
+        if not req.assigned_tasks:
+            continue
+            
+        # Check if ANY assigned task is PROMOTED
+        # (Assuming 1 major task per requirement, or if one part is done we count it)
+        promoted = any(task_status_map.get(tid) == "PROMOTED" for tid in req.assigned_tasks)
+        
+        if promoted:
+            req.status = RequirementStatus.COMPLETED
+            req.completion_evidence.append("Aether Proposal Promoted")
+            updates += 1
+            print(f"  > Marked {req.id} as COMPLETED (Aether promoted)")
+        
+        elif req.status == RequirementStatus.IN_PROGRESS:
+            # If not promoted, and currently marked IN_PROGRESS from previous run,
+            # we must reset it to PENDING so planner regenerates tasks.
+            # Otherwise it's stuck in "limbo" (planner thinks it's busy, but queue is empty).
+            
+            # Exception: If we verify the task ID is currently PENDING in Aether, maybe we wait?
+            # But we lost the queue item, so no worker is monitoring it.
+            # Ideally we should "re-adopt" the pending proposal? 
+            # Phase 1 Strategy: Aggressive retry. Reset to PENDING.
+            # Aether will see a new proposal for the same task (actually new task ID gets generated).
+            # This causes duplicate "Pending" proposals in Aether.
+            # But the user logic handles duplicates (Superseded).
+            
+            req.status = RequirementStatus.PENDING
+            # Keep assigned_tasks for history? No, planner appends. Clearing avoids confusion.
+            # But we lose the link to the old proposal.
+            # Ideally: Move old task IDs to 'history'?
+            # For now: Clear responsible output.
+            req.assigned_tasks = []
+            updates += 1
+            print(f"  > Reset {req.id} to PENDING (retry needed)")
+
+    if updates:
+        print(f"Synced {updates} requirements with Aether state.")
+    else:
+        print("Aether sync: No state changes needed.")
 
 
 async def cmd_init(args):
@@ -177,6 +265,13 @@ async def cmd_run(args):
             print("Error: PRD.md not found. Run 'mx init' first.")
             sys.exit(1)
 
+        # 0. Sync with Aether (Status Sync Phase 1)
+        if config.vcs.provider == "aether":
+            spec = load_spec(".")
+            if spec:
+                await sync_spec_with_aether(spec, config)
+                spec.save("SPEC.json")
+
         if not os.environ.get("GITHUB_TOKEN") and not config.github.token:
             print("Warning: GITHUB_TOKEN not set - Enabling Local Mode (Mock GitHub)")
 
@@ -200,7 +295,30 @@ async def cmd_run(args):
         # 1. Run planner first
         print("[1/3] Running planner...")
         planner = Planner(config, repo_path=".")
-        result = await planner.run()
+        
+        # Split run() to inject Aether sync
+        await planner.initialize()
+        try:
+            # Step 1: Generate Spec from PRD (or load existing)
+            spec = await planner.generate_spec()
+            
+            # Step 2: Sync with Aether (Phase 1 Logic)
+            if config.vcs.provider == "aether":
+                await sync_spec_with_aether(spec, config)
+                spec.save("SPEC.json")
+                
+            # Step 3: Generate and Publish Tasks (skips COMPLETED/PROMOTED requirements)
+            tasks = await planner.generate_tasks(spec)
+            published = await planner.publish_tasks(tasks)
+            
+            result = {
+                "tasks_generated": len(tasks),
+                "tasks_published": published,
+                "spec_requirements": len(spec.requirements)
+            }
+        finally:
+            await planner.shutdown()
+
         print(f"  Generated {result['tasks_generated']} tasks from {result['spec_requirements']} requirements")
 
         if result['tasks_published'] == 0:
@@ -266,21 +384,45 @@ async def cmd_run(args):
                         is_active = hasattr(w, '_current_task') and w._current_task is not None
                         if is_active:
                             active_count += 1
+                        current_task = getattr(w, "_current_task", None)
                         worker_details.append({
                             "id": w.worker_id,
                             "status": "active" if is_active else "idle",
-                            "task_id": getattr(w, '_current_task', {}).get('id') if hasattr(w, '_current_task') and w._current_task else None,
+                            "task_id": current_task.id if current_task else None,
+                            "task_goal": current_task.goal if current_task else None,
+                            "spec_ref": current_task.spec_ref if current_task else None,
                         })
+
+                    tasks_completed = sum(w.metrics.tasks_succeeded for w in workers)
+                    tasks_failed = sum(w.metrics.tasks_failed for w in workers)
+                    tasks_processed = sum(w.metrics.tasks_processed for w in workers)
+
+                    queue_depth = None
+                    if workers:
+                        try:
+                            queue_depth = await workers[0].queue.get_queue_depth()
+                        except Exception:
+                            queue_depth = None
+
+                    vcs_provider = config.vcs.provider
+                    prs_opened = tasks_completed if vcs_provider == "github" else 0
+                    submissions_opened = tasks_completed if vcs_provider == "aether" else 0
 
                     # Send heartbeat
                     payload = {
                         "active_workers": max(active_count, 1),  # At least 1 if running
                         "worker_details": worker_details,
-                        "tasks_completed": swarm_metrics["tasks_completed"],
-                        "prs_opened": swarm_metrics["prs_opened"],
-                        "prs_merged": swarm_metrics["prs_merged"],
-                        "ci_passes": swarm_metrics["ci_passes"],
-                        "ci_fails": swarm_metrics["ci_fails"],
+                        "tasks_in_progress": active_count,
+                        "tasks_completed": tasks_completed,
+                        "tasks_failed": tasks_failed,
+                        "tasks_processed": tasks_processed,
+                        "prs_opened": prs_opened,
+                        "prs_merged": 0,
+                        "submissions_opened": submissions_opened,
+                        "submissions_accepted": 0,
+                        "ci_passes": 0,
+                        "ci_fails": 0,
+                        "queue_depth": queue_depth,
                         "is_running": True,
                         "current_phase": swarm_metrics["current_phase"],
                     }

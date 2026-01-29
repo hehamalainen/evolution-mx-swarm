@@ -17,7 +17,7 @@ import subprocess
 import sys
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 # Load .env file for GITHUB_TOKEN and other secrets
 try:
@@ -136,6 +136,8 @@ class SwarmState:
         self.prs_opened: int = 0
         self.prs_merged: int = 0
         self.prs_rejected: int = 0
+        self.submissions_opened: int = 0
+        self.submissions_accepted: int = 0
         self.ci_passes: int = 0
         self.ci_fails: int = 0
 
@@ -143,7 +145,7 @@ class SwarmState:
         self.total_cost: float = 0.0
         self.hourly_costs: deque = deque(maxlen=24)  # Last 24 hours
         self.current_hour_cost: float = 0.0
-        self.last_hour_reset: datetime = datetime.utcnow()
+        self.last_hour_reset: datetime = datetime.now(timezone.utc)
 
         # Time series for charts
         self.tasks_per_minute: deque = deque(maxlen=60)  # Last 60 minutes
@@ -156,6 +158,7 @@ class SwarmState:
         self.pr_hour_cap: int = 15
         self.current_open_prs: int = 0
         self.prs_this_hour: int = 0
+        self.last_queue_depth: int | None = None
 
         # Logs
         self.logs: deque = deque(maxlen=1000)
@@ -190,14 +193,14 @@ class SwarmState:
         """Register or update worker activity."""
         self.workers[worker_id] = {
             "worker_id": worker_id,
-            "last_seen": datetime.utcnow().isoformat(),
+            "last_seen": datetime.now(timezone.utc).isoformat(),
             "task_id": task_id,
             "status": "active" if task_id else "idle",
         }
 
     def get_active_workers(self, seconds: int = 60) -> int:
         """Count workers active in last N seconds."""
-        cutoff = datetime.utcnow() - timedelta(seconds=seconds)
+        cutoff = datetime.now(timezone.utc) - timedelta(seconds=seconds)
         return sum(
             1 for w in self.workers.values()
             if datetime.fromisoformat(w["last_seen"]) > cutoff
@@ -222,7 +225,7 @@ class SwarmState:
         hours_left = remaining / self.current_hour_cost
         if hours_left <= 0:
             return "NOW"
-        eta = datetime.utcnow() + timedelta(hours=hours_left)
+        eta = datetime.now(timezone.utc) + timedelta(hours=hours_left)
         return eta.strftime("%H:%M")
 
     def _get_telemetry_snapshot(self) -> TelemetrySnapshot:
@@ -250,7 +253,7 @@ class SwarmState:
     def add_log(self, event_type: EventType, message: str, level: str = "info"):
         """Add structured log entry."""
         entry = {
-            "timestamp": datetime.utcnow().strftime("%H.%M.%S"),
+            "timestamp": datetime.now(timezone.utc).strftime("%H.%M.%S"),
             "event_type": event_type.value,
             "level": level,
             "message": message,
@@ -312,7 +315,7 @@ class IgniteRequest(BaseModel):
     budget_usd: float | None = None
     auto_mode: bool = True
     prd_content: str | None = None
-    vcs_target: str = "github"  # "aether", "github", or "both"
+    vcs_target: str = "github"  # "aether" or "github"
 
 class ConfigUpdate(BaseModel):
     llm_provider: str | None = None
@@ -461,15 +464,18 @@ async def get_swarm_status() -> dict:
     config = load_config()
     spec = load_spec()
 
-    # Queue depth
-    queue_depth = 0
-    try:
-        queue = create_queue_adapter(config.queue.to_dict())
-        await queue.connect()
-        queue_depth = await queue.get_queue_depth()
-        await queue.disconnect()
-    except Exception:
-        queue_depth = -1
+    # Queue depth (prefer swarm heartbeat if available)
+    if state.last_queue_depth is not None:
+        queue_depth = state.last_queue_depth
+    else:
+        queue_depth = 0
+        try:
+            queue = create_queue_adapter(config.queue.to_dict())
+            await queue.connect()
+            queue_depth = await queue.get_queue_depth()
+            await queue.disconnect()
+        except Exception:
+            queue_depth = -1
 
     # SPEC/DoD progress
     spec_progress = {"total": 0, "completed": 0, "percent": 0}
@@ -545,13 +551,13 @@ async def get_swarm_status() -> dict:
             "queue_time_sec": 70,
         },
 
-        # PR Throughput tile
+        # PR / Submission Throughput tile
         "pr_throughput": {
-            "open": state.current_open_prs,
+            "open": state.submissions_opened if config.vcs.provider == "aether" else state.current_open_prs,
             "merged_last_hour": state.prs_this_hour,
-            "merged_total": state.prs_merged,
+            "merged_total": state.submissions_opened if config.vcs.provider == "aether" else state.prs_merged,
             "rejected": state.prs_rejected,
-            "per_hour_rate": state.prs_this_hour,
+            "per_hour_rate": 0 if config.vcs.provider == "aether" else state.prs_this_hour,
         },
 
         # TeamPlan (Org Builder 5.6)
@@ -633,6 +639,7 @@ async def get_swarm_status() -> dict:
             "retry_max": config.worker.retry_max,
             "judge_interval": config.judge.interval_minutes,
             "auto_merge": config.github.auto_merge_low_risk,
+            "vcs_provider": config.vcs.provider,
         },
 
         "coordination": get_coordination_metrics(),
@@ -879,6 +886,8 @@ async def analyze_prd(req: PRDAnalyzeRequest):
 @app.post("/api/control/ignite")
 async def control_ignite(req: IgniteRequest):
     config = load_config()
+    if req.vcs_target not in {"aether", "github"}:
+        raise HTTPException(400, "vcs_target must be 'aether' or 'github'")
 
     if req.max_workers is not None:
         config.worker.max_workers = req.max_workers
@@ -903,7 +912,6 @@ async def control_ignite(req: IgniteRequest):
     vcs_labels = {
         "aether": "🔮 Aether",
         "github": "🐙 GitHub",
-        "both": "📦 Aether + GitHub"
     }
     config.vcs.provider = req.vcs_target
     state.add_log(EventType.SYS_CONFIG, f"VCS target: {vcs_labels.get(req.vcs_target, req.vcs_target)}")
@@ -911,7 +919,7 @@ async def control_ignite(req: IgniteRequest):
     config.paused = False
     save_config(config)
 
-    state.start_time = datetime.utcnow().isoformat()
+    state.start_time = datetime.now(timezone.utc).isoformat()
     state.governor_state = GovernorMode.NORMAL
 
 
@@ -1054,7 +1062,7 @@ async def simulation_event(event: dict):
         if "workers_active" in m:
             # Register simulated workers with proper structure
 
-            now = datetime.utcnow().isoformat()
+            now = datetime.now(timezone.utc).isoformat()
             for i in range(m["workers_active"]):
                 worker_id = f"sim-worker-{i}"
                 state.workers[worker_id] = {
@@ -1099,7 +1107,7 @@ async def simulation_event(event: dict):
             "status": event.get("status", "RUNNING"),
             "progress": 50,
             "pr_number": event.get("pr_number"),
-            "created_at": datetime.utcnow().isoformat()
+            "created_at": datetime.now(timezone.utc).isoformat()
         }
     elif event_type == "PR_MERGE" and "task_id" in event:
         if event["task_id"] in state.active_tasks:
@@ -1514,10 +1522,15 @@ class SwarmHeartbeat(BaseModel):
     worker_details: list[dict] | None = None
     tasks_in_progress: int = 0
     tasks_completed: int = 0
+    tasks_failed: int = 0
+    tasks_processed: int = 0
     prs_opened: int = 0
     prs_merged: int = 0
+    submissions_opened: int = 0
+    submissions_accepted: int = 0
     ci_passes: int = 0
     ci_fails: int = 0
+    queue_depth: int | None = None
     is_running: bool = True
     current_phase: str | None = None  # "planning", "working", "judging", etc.
 
@@ -1525,7 +1538,7 @@ class SwarmHeartbeat(BaseModel):
 @app.post("/api/swarm/heartbeat")
 async def swarm_heartbeat(heartbeat: SwarmHeartbeat):
     """Receive heartbeat from CLI swarm process to sync dashboard state."""
-    now = datetime.utcnow().isoformat()
+    now = datetime.now(timezone.utc).isoformat()
 
     # Update worker state
     state.worker_state.online_workers = heartbeat.active_workers
@@ -1533,6 +1546,7 @@ async def swarm_heartbeat(heartbeat: SwarmHeartbeat):
 
     # Register workers from details or create placeholders
     if heartbeat.worker_details:
+        heartbeat_tasks: dict[str, dict] = {}
         for w in heartbeat.worker_details:
             worker_id = w.get("id", f"worker-{len(state.workers)}")
             state.workers[worker_id] = {
@@ -1541,6 +1555,19 @@ async def swarm_heartbeat(heartbeat: SwarmHeartbeat):
                 "task_id": w.get("task_id"),
                 "status": w.get("status", "active"),
             }
+            task_id = w.get("task_id")
+            if task_id:
+                heartbeat_tasks[task_id] = {
+                    "id": task_id,
+                    "spec_ref": w.get("spec_ref") or "-",
+                    "prd_ref": w.get("spec_ref") or "-",
+                    "goal": w.get("task_goal") or "In progress",
+                    "worker": worker_id,
+                    "risk_tier": 1,
+                    "status": "RUNNING",
+                    "progress": 50,
+                }
+        state.active_tasks = heartbeat_tasks
     else:
         # Create placeholder workers based on count
         for i in range(heartbeat.active_workers):
@@ -1555,14 +1582,22 @@ async def swarm_heartbeat(heartbeat: SwarmHeartbeat):
     # Update metrics (incremental)
     if heartbeat.tasks_completed > state.tasks_completed:
         state.tasks_completed = heartbeat.tasks_completed
+    if heartbeat.tasks_failed > state.tasks_failed:
+        state.tasks_failed = heartbeat.tasks_failed
     if heartbeat.prs_opened > state.prs_opened:
         state.prs_opened = heartbeat.prs_opened
     if heartbeat.prs_merged > state.prs_merged:
         state.prs_merged = heartbeat.prs_merged
+    if heartbeat.submissions_opened > state.submissions_opened:
+        state.submissions_opened = heartbeat.submissions_opened
+    if heartbeat.submissions_accepted > state.submissions_accepted:
+        state.submissions_accepted = heartbeat.submissions_accepted
     if heartbeat.ci_passes > state.ci_passes:
         state.ci_passes = heartbeat.ci_passes
     if heartbeat.ci_fails > state.ci_fails:
         state.ci_fails = heartbeat.ci_fails
+    if heartbeat.queue_depth is not None:
+        state.last_queue_depth = heartbeat.queue_depth
 
     # Track current phase
     if heartbeat.current_phase:
