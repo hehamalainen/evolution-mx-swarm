@@ -468,11 +468,11 @@ After the implementation, provide a brief summary of what you did and any notes.
                 return {"number": result.submission_id, "type": result.submission_type, "url": result.url}
             else:
                 print(f"[{self.worker_id}] VCS submission failed: {result.message}")
-                return None
+                raise RuntimeError(result.message)
 
         except Exception as e:
             print(f"[{self.worker_id}] Failed to submit to VCS: {e}")
-            return None
+            raise
 
     # Keep legacy method for backwards compatibility
     async def _create_pr(

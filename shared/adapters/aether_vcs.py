@@ -35,6 +35,8 @@ class AetherVCS(VCSAdapter):
         base_url: str = "http://localhost:3000",
         repo_id: str | None = None,
         agent_id: str = "mx-swarm",
+        max_retries: int = 3,
+        base_backoff_s: float = 1.0,
     ):
         """Initialize Aether VCS adapter.
 
@@ -42,10 +44,14 @@ class AetherVCS(VCSAdapter):
             base_url: Aether server URL (e.g., http://localhost:3000)
             repo_id: Aether repository ID (required for submissions)
             agent_id: Agent identifier for proposals
+            max_retries: Max retry attempts for submissions
+            base_backoff_s: Base backoff (seconds) between retries
         """
         self.base_url = base_url.rstrip("/")
         self.repo_id = repo_id
         self.agent_id = agent_id
+        self.max_retries = max_retries
+        self.base_backoff_s = base_backoff_s
 
     async def submit_change(
         self,
@@ -91,22 +97,66 @@ class AetherVCS(VCSAdapter):
 
         url = f"{self.base_url}/v1/repos/{self.repo_id}/proposals"
 
+        last_error: str | None = None
+        for attempt in range(1, self.max_retries + 1):
+            healthy = await self.health_check()
+            if not healthy:
+                last_error = "Aether health check failed"
+            else:
+                try:
+                    if aiohttp:
+                        return await self._submit_aiohttp(url, proposal_data)
+                    return await self._submit_sync(url, proposal_data)
+                except Exception as e:
+                    last_error = str(e)
+
+            if attempt < self.max_retries:
+                backoff = self.base_backoff_s * (2 ** (attempt - 1))
+                await asyncio.sleep(backoff)
+
+        return SubmitResult(
+            success=False,
+            submission_type="proposal",
+            submission_id="",
+            status="error",
+            message=f"Aether submission failed after {self.max_retries} attempts: {last_error}",
+        )
+
+    async def get_agent_proposals(self, agent_id: str) -> list[dict]:
+        """Fetch all proposals submitted by a specific agent.
+
+        Used for syncing state on startup.
+        """
+        if not self.repo_id:
+            return []
+
+        url = f"{self.base_url}/v1/repos/{self.repo_id}/proposals"
+        params = {"agent_id": agent_id}
+
         try:
             if aiohttp:
-                result = await self._submit_aiohttp(url, proposal_data)
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(url, params=params) as resp:
+                        if resp.status != 200:
+                            print(f"Error fetching proposals: {resp.status}")
+                            return []
+                        data = await resp.json()
+                        return data.get("proposals", [])
             else:
-                result = await self._submit_sync(url, proposal_data)
-
-            return result
+                # Sync fallback
+                import urllib.request
+                import json
+                import urllib.parse
+                
+                query = urllib.parse.urlencode(params)
+                req = urllib.request.Request(f"{url}?{query}")
+                with urllib.request.urlopen(req) as response:
+                    data = json.loads(response.read())
+                    return data.get("proposals", [])
 
         except Exception as e:
-            return SubmitResult(
-                success=False,
-                submission_type="proposal",
-                submission_id="",
-                status="error",
-                message=f"Aether submission failed: {e}",
-            )
+            # print(f"Failed to fetch agent proposals: {e}")
+            return []
 
     async def _submit_aiohttp(self, url: str, data: dict) -> SubmitResult:
         """Submit using aiohttp (async)."""
