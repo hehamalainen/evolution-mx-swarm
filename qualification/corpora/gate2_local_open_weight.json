@@ -1,0 +1,36 @@
+{
+  "name": "gate2_local_open_weight",
+  "description": "Reusable narrow-task qualification corpus for admitting a model into the local/open-weight worker pool.",
+  "model_pool": "local_open_weight",
+  "default_runs": 3,
+  "default_workers": 5,
+  "timeout_seconds": 1200,
+  "thresholds": {
+    "min_format_compliance_rate": 0.95,
+    "min_deterministic_acceptance_rate": 0.95,
+    "max_false_success_rate": 0.0,
+    "max_duplicate_settlement_events": 0,
+    "max_duplicate_claim_events": 0,
+    "max_lifecycle_bug_events": 0
+  },
+  "slices": [
+    {
+      "key": "jsonpeek",
+      "prd_path": "prds/golden_path_002_jsonpeek.md",
+      "implementation_path": "tools/jsonpeek.py",
+      "test_paths": ["tests/test_jsonpeek.py"]
+    },
+    {
+      "key": "envpeek",
+      "prd_path": "prds/golden_path_003_envpeek.md",
+      "implementation_path": "tools/envpeek.py",
+      "test_paths": ["tests/test_envpeek.py"]
+    },
+    {
+      "key": "tomlpeek",
+      "prd_path": "prds/golden_path_004_tomlpeek.md",
+      "implementation_path": "tools/tomlpeek.py",
+      "test_paths": ["tests/test_tomlpeek.py"]
+    }
+  ]
+}

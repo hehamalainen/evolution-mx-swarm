@@ -12,12 +12,14 @@ import asyncio
 import json
 import os
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 
 from planner import Planner
 from shared.schemas import TaskType
 from shared.utils import LLMClient, Message, MXConfig, create_llm_client
+from shared.utils.bazaar_client import MoltBazaarClient
+from shared.utils.metrics import append_decision_event
 
 
 class ParallelizationStrategy(str, Enum):
@@ -82,7 +84,7 @@ class TeamComposition:
 
     # Metadata
     reasoning: str                     # Why these decisions
-    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    created_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
 
     def to_dict(self) -> dict:
         return {
@@ -399,7 +401,7 @@ Consider:
         cost_per_task = 1.50  # Rough estimate: ~$1.50 per task with Claude
         budget = analysis.get("budget_recommendation_usd", estimated_tasks * cost_per_task)
 
-        return TeamComposition(
+        composition = TeamComposition(
             estimated_complexity=analysis.get("complexity", 5),
             estimated_tasks=estimated_tasks,
             recommended_workers=min(total_workers, 100),  # Cap at 100
@@ -417,6 +419,17 @@ Consider:
             without_swarm_days=analysis.get("estimated_days_without_swarm", 14),
             reasoning=analysis.get("reasoning", "Default analysis"),
         )
+
+        # Decision Transparency: Log the team composition strategy
+        append_decision_event(
+            task_id="strategic-boss-planning",
+            reasoning=composition.reasoning,
+            choice="team_composition",
+            impact_level="high",
+            context=composition.to_dict()
+        )
+
+        return composition
 
     def _default_composition(self) -> TeamComposition:
         """Fallback default team composition."""
@@ -492,9 +505,34 @@ Consider:
         print("\nAgent Boss: Initiating Planner...")
         planner = Planner(config, repo_path=self.repo_path)
         plan_result = await planner.run()
-
         print(f"  Generated {plan_result['tasks_generated']} tasks")
         print(f"  Published {plan_result['tasks_published']} to queue")
+
+        # Real Bazaar Outsourcing for non-core tasks
+        if not dry_run:
+            bazaar = MoltBazaarClient()
+            
+            # Extract a few tasks to "outsource"
+            tasks = plan_result.get("tasks", [])
+            if tasks:
+                external_task = tasks[-1] # Simple heuristic: last task
+                
+                # Decision Transparency: Log the decision to outsource
+                append_decision_event(
+                    task_id=external_task.id,
+                    reasoning=f"Outsourcing task {external_task.id} ('{external_task.goal[:50]}') to the Moltbook Bazaar to optimize swarm resources.",
+                    choice="outsource_to_bazaar",
+                    impact_level="medium",
+                    context={
+                        "task_id": external_task.id,
+                        "goal": external_task.goal,
+                        "reward_est": "x402 simulated"
+                    }
+                )
+                
+                posting_id = await bazaar.post_task(external_task)
+                if posting_id:
+                    print(f"  [Marketplace] Outsource task {external_task.id} published to Bazaar (Post ID: {posting_id})")
 
         return {
             "status": "ignited",

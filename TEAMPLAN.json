@@ -5,8 +5,8 @@
     {
       "name": "feature",
       "role": "feature_engineer",
-      "target_workers": 5,
-      "max_workers": 7,
+      "target_workers": 1,
+      "max_workers": 2,
       "tools": [
         "git",
         "tests",
@@ -19,7 +19,7 @@
     {
       "name": "qa",
       "role": "qa_engineer",
-      "target_workers": 2,
+      "target_workers": 1,
       "max_workers": 2,
       "tools": [
         "git",
@@ -28,52 +28,71 @@
         "read"
       ],
       "priority": 3
-    },
-    {
-      "name": "ops",
-      "role": "ops_engineer",
-      "target_workers": 1,
-      "max_workers": 1,
-      "tools": [
-        "git",
-        "ci",
-        "deploy",
-        "observability"
-      ],
-      "priority": 2
-    },
-    {
-      "name": "security",
-      "role": "security_engineer",
-      "target_workers": 1,
-      "max_workers": 1,
-      "tools": [
-        "git",
-        "ci",
-        "scan",
-        "read"
-      ],
-      "priority": 4
-    },
-    {
-      "name": "docs",
-      "role": "docs_engineer",
-      "target_workers": 1,
-      "max_workers": 1,
-      "tools": [
-        "git",
-        "read",
-        "write"
-      ],
-      "priority": 1
     }
   ],
   "pods": [],
+  "rig_plans": [
+    {
+      "rig_id": "rig-backend",
+      "goal_cluster_node_ids": [
+        "WP-001"
+      ],
+      "frontier_budget_cap_usd": 13.39,
+      "governance_owner_id": "governor:backend",
+      "streams": [
+        {
+          "stream_id": "backend-execution",
+          "stream_type": "execution",
+          "qa_density_ratio": 0.255,
+          "shards": [
+            {
+              "shard_id": "backend.execution",
+              "target_task_classes": [
+                "feature"
+              ],
+              "supported_toolchains": [
+                "python"
+              ],
+              "max_mutable_files": 2,
+              "concurrency_cap": 1,
+              "freeze_condition_threshold": 3,
+              "allowed_model_tiers": [
+                "local_open_weight"
+              ]
+            }
+          ]
+        },
+        {
+          "stream_id": "backend-qa",
+          "stream_type": "qa_verification",
+          "qa_density_ratio": 0.255,
+          "shards": [
+            {
+              "shard_id": "backend.qa",
+              "target_task_classes": [
+                "test",
+                "bugfix"
+              ],
+              "supported_toolchains": [
+                "python"
+              ],
+              "max_mutable_files": 2,
+              "concurrency_cap": 1,
+              "freeze_condition_threshold": 3,
+              "allowed_model_tiers": [
+                "local_open_weight"
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
   "caps": {
     "pr_cap_per_hour": 15,
     "open_pr_cap": 25,
     "max_parallel_ci": 10,
-    "max_active_tasks": 10
+    "max_active_tasks": 1
   },
   "risk_merge_policy": {
     "tier0": "auto_on_green",
@@ -84,7 +103,7 @@
     "requires_spec_ref": true,
     "max_files_touched": 12,
     "max_modules_touched": 3,
-    "max_task_minutes": 60,
+    "max_task_minutes": 45,
     "require_tests": true,
     "require_evidence": true
   },
@@ -98,8 +117,8 @@
     "dlq_enabled": true
   },
   "budget_policy": {
-    "usd_per_day": 50.0,
-    "usd_per_hour_soft": 6.25,
+    "usd_per_day": 25.0,
+    "usd_per_hour_soft": 3.125,
     "hard_stop": true,
     "burn_alert_thresholds": [
       50,
@@ -108,7 +127,7 @@
     ]
   },
   "reorg_policy": {
-    "interval_minutes": 45,
+    "interval_minutes": 60,
     "hysteresis_minutes": 30,
     "max_worker_delta_per_interval": 20,
     "prefer_caps_before_reorg": true,
@@ -131,11 +150,11 @@
     "emit_coordination_metrics": true,
     "metrics_interval_seconds": 30
   },
-  "prd_hash": "34142c481a1cf1d9",
+  "prd_hash": "aaea60897639ad76",
   "spec_hash": null,
-  "created_at": "2026-01-29T01:38:24.537841",
+  "created_at": "2026-03-12T20:14:12.107665+00:00",
   "created_by": "org_builder",
-  "complexity_score": 0.7481666666666666,
+  "complexity_score": 0.357,
   "coupling_score": 0.0,
-  "risk_score": 0.3333333333333333
+  "risk_score": 0.0
 }

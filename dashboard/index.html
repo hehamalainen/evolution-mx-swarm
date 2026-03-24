@@ -971,6 +971,11 @@
                             <option value="aether">🔮 Aether (Proposals)</option>
                             <option value="github" selected>🐙 GitHub (PRs)</option>
                         </select>
+                        <span id="vcs-preflight-status"
+                            style="font-size: 0.75rem; color: var(--text-secondary); margin-left: 0.25rem;">Not
+                            checked</span>
+                        <span id="vcs-preflight-info" title="Not checked"
+                            style="font-size: 0.7rem; color: var(--text-secondary); border: 1px solid var(--border-color); border-radius: 999px; width: 16px; height: 16px; display: inline-flex; align-items: center; justify-content: center; cursor: help;">i</span>
                     </div>
                     <button class="btn btn-primary" onclick="launchSwarm(event)" id="launch-btn" disabled>🚀 Launch
                         Swarm</button>
@@ -1043,6 +1048,27 @@
                 <div class="cred-tile-sub">
                     $<span id="spent-total">0</span> / $<span id="daily-cap">50</span>
                     <span id="cap-eta" style="color: var(--accent-yellow);"></span>
+                </div>
+            </div>
+        </div>
+
+        <div class="card" style="margin-bottom: 1.5rem;">
+            <div class="card-header">
+                <div class="card-title">Latest Settlement</div>
+                <div class="card-badge"><span id="settlement-count">0</span> settled / 24h</div>
+            </div>
+            <div class="metric-grid">
+                <div class="metric-item">
+                    <div class="metric-value" id="latest-branch">-</div>
+                    <div class="metric-label">Latest Successful Branch</div>
+                </div>
+                <div class="metric-item">
+                    <div class="metric-value" id="latest-submission-id">-</div>
+                    <div class="metric-label">Latest Submission</div>
+                </div>
+                <div class="metric-item">
+                    <div class="metric-value" id="latest-settlement-time">-</div>
+                    <div class="metric-label">Last Settlement Time</div>
                 </div>
             </div>
         </div>
@@ -1443,6 +1469,18 @@
             const eta = status.budget?.forecast_cap_eta;
             document.getElementById('cap-eta').textContent = eta ? (' ETA ' + eta) : '';
 
+            // Latest settlement echo
+            const submissions = status.submissions || {};
+            document.getElementById('settlement-count').textContent = submissions.recent_settlement_count || 0;
+            document.getElementById('latest-branch').textContent = submissions.latest_successful_branch || '-';
+            document.getElementById('latest-submission-id').textContent = submissions.latest_successful_submission_id || '-';
+            if (submissions.latest_settlement_timestamp) {
+                document.getElementById('latest-settlement-time').textContent =
+                    new Date(submissions.latest_settlement_timestamp).toLocaleTimeString();
+            } else {
+                document.getElementById('latest-settlement-time').textContent = '-';
+            }
+
             // Swarm control
             document.getElementById('active-workers').textContent = status.swarm?.active_workers || 0;
             document.getElementById('max-workers').textContent = status.swarm?.max_workers || 0;
@@ -1526,6 +1564,12 @@
 
             // Config
             if (status.config) {
+                if (status.config.vcs_provider && vcsTargetSelect && !vcsSelectionTouched) {
+                    if (vcsTargetSelect.value !== status.config.vcs_provider) {
+                        vcsTargetSelect.value = status.config.vcs_provider;
+                        runVcsPreflight(vcsTargetSelect.value);
+                    }
+                }
                 document.getElementById('config-llm-provider').value = status.config.llm_provider || 'anthropic';
                 document.getElementById('config-llm-model').value = status.config.llm_model || 'claude-sonnet-4-20250514';
                 document.getElementById('config-timebox').value = status.config.timebox_minutes || 60;
@@ -1671,6 +1715,14 @@
         // PRD Drop Zone functionality
         let currentPRD = null;
         const dropZone = document.getElementById('prd-drop-zone');
+        const vcsTargetSelect = document.getElementById('vcs-target');
+        const vcsPreflightStatus = document.getElementById('vcs-preflight-status');
+        const vcsPreflightInfo = document.getElementById('vcs-preflight-info');
+        let vcsSelectionTouched = false;
+        let lastPreflightTarget = null;
+        let lastPreflightOk = false;
+        let lastPreflightAt = 0;
+        let lastPreflightMessage = '';
 
         // Drag and drop handlers
         dropZone.addEventListener('dragover', (e) => {
@@ -2137,6 +2189,63 @@
             dropZone.classList.remove('has-prd');
         }
 
+        async function runVcsPreflight(target, force = false) {
+            if (!target) {
+                return false;
+            }
+            const now = Date.now();
+            if (!force && target === lastPreflightTarget && (now - lastPreflightAt) < 15000) {
+                return lastPreflightOk;
+            }
+
+            if (vcsPreflightStatus) {
+                vcsPreflightStatus.textContent = 'Checking...';
+                vcsPreflightStatus.style.color = 'var(--text-secondary)';
+                vcsPreflightStatus.title = 'Checking...';
+            }
+            if (vcsPreflightInfo) {
+                vcsPreflightInfo.title = 'Checking...';
+            }
+
+            try {
+                const result = await apiCall('/control/vcs_preflight', 'POST', { vcs_target: target });
+                lastPreflightTarget = target;
+                lastPreflightAt = now;
+                lastPreflightOk = !!result.ok;
+                lastPreflightMessage = result.message || (result.ok ? 'Ready' : 'Not ready');
+                if (vcsPreflightStatus) {
+                    vcsPreflightStatus.textContent = result.ok ? 'Ready' : lastPreflightMessage;
+                    vcsPreflightStatus.style.color = result.ok ? '#4ade80' : '#f87171';
+                    vcsPreflightStatus.title = lastPreflightMessage;
+                }
+                if (vcsPreflightInfo) {
+                    vcsPreflightInfo.title = lastPreflightMessage;
+                }
+                return lastPreflightOk;
+            } catch (err) {
+                lastPreflightTarget = target;
+                lastPreflightAt = now;
+                lastPreflightOk = false;
+                lastPreflightMessage = 'Preflight error';
+                if (vcsPreflightStatus) {
+                    vcsPreflightStatus.textContent = lastPreflightMessage;
+                    vcsPreflightStatus.style.color = '#f87171';
+                    vcsPreflightStatus.title = lastPreflightMessage;
+                }
+                if (vcsPreflightInfo) {
+                    vcsPreflightInfo.title = lastPreflightMessage;
+                }
+                return false;
+            }
+        }
+
+        if (vcsTargetSelect) {
+            vcsTargetSelect.addEventListener('change', () => {
+                vcsSelectionTouched = true;
+                runVcsPreflight(vcsTargetSelect.value, true);
+            });
+        }
+
         async function launchSwarm(event) {
             event.stopPropagation();
             if (!currentPRD) {
@@ -2157,6 +2266,11 @@
             }
 
             try {
+                const ready = await runVcsPreflight(vcsTarget, true);
+                if (!ready) {
+                    alert('VCS target is not ready. Please fix configuration or try again.');
+                    return;
+                }
                 const result = await apiCall('/control/ignite', 'POST', {
                     auto_mode: true,
                     prd_content: currentPRD,

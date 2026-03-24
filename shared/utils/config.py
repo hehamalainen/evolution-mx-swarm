@@ -76,6 +76,8 @@ class LLMConfig:
     base_url: str | None = None
     max_tokens: int = 4096
     temperature: float = 0.7
+    input_cost_per_million_usd: float = 0.0
+    output_cost_per_million_usd: float = 0.0
 
     def to_dict(self) -> dict:
         return {
@@ -85,6 +87,8 @@ class LLMConfig:
             "base_url": self.base_url,
             "max_tokens": self.max_tokens,
             "temperature": self.temperature,
+            "input_cost_per_million_usd": self.input_cost_per_million_usd,
+            "output_cost_per_million_usd": self.output_cost_per_million_usd,
         }
 
 
@@ -96,6 +100,10 @@ class WorkerConfig:
     retry_max: int = 3
     poll_interval_seconds: int = 5
     visibility_timeout_seconds: int = 300
+    lease_heartbeat_enabled: bool = True
+    lease_heartbeat_interval_seconds: int = 40
+    lease_extension_seconds: int = 120
+    lease_max_seconds: int = 900
 
     def to_dict(self) -> dict:
         return {
@@ -104,6 +112,10 @@ class WorkerConfig:
             "retry_max": self.retry_max,
             "poll_interval_seconds": self.poll_interval_seconds,
             "visibility_timeout_seconds": self.visibility_timeout_seconds,
+            "lease_heartbeat_enabled": self.lease_heartbeat_enabled,
+            "lease_heartbeat_interval_seconds": self.lease_heartbeat_interval_seconds,
+            "lease_extension_seconds": self.lease_extension_seconds,
+            "lease_max_seconds": self.lease_max_seconds,
         }
 
 
@@ -168,14 +180,47 @@ class GitHubConfig:
 class BudgetConfig:
     """Budget and limits configuration."""
     daily_usd_cap: float = 100.0
+    frontier_daily_usd_cap: float = 25.0
+    control_plane_daily_usd_cap: float = 5.0
+    bulk_lane_daily_usd_cap: float = 0.0
     max_llm_calls_per_task: int = 50
     max_tokens_per_task: int = 100000
+    enforcement: str = "on"  # on/off
+    throttle_threshold_pct: int = 85
+    freeze_threshold_pct: int = 100
+    freeze_mode: str = "frontier_only"  # frontier_only, all_new_claims, throttle_only
+    freeze_new_claims_only: bool = True
+    max_frontier_escalations_per_hour: int = 5
+    max_frontier_concurrency: int = 2
+    max_frontier_attempts_per_task_contract: int = 2
+    cost_per_success_ceiling_usd: float = 5.0
+    settlement_exempt_states: list[str] = field(
+        default_factory=lambda: [
+            "submitted_pending_ledger",
+            "settled_ack",
+            "settled_nack",
+            "dead_letter",
+        ]
+    )
 
     def to_dict(self) -> dict:
         return {
             "daily_usd_cap": self.daily_usd_cap,
+            "frontier_daily_usd_cap": self.frontier_daily_usd_cap,
+            "control_plane_daily_usd_cap": self.control_plane_daily_usd_cap,
+            "bulk_lane_daily_usd_cap": self.bulk_lane_daily_usd_cap,
             "max_llm_calls_per_task": self.max_llm_calls_per_task,
             "max_tokens_per_task": self.max_tokens_per_task,
+            "enforcement": self.enforcement,
+            "throttle_threshold_pct": self.throttle_threshold_pct,
+            "freeze_threshold_pct": self.freeze_threshold_pct,
+            "freeze_mode": self.freeze_mode,
+            "freeze_new_claims_only": self.freeze_new_claims_only,
+            "max_frontier_escalations_per_hour": self.max_frontier_escalations_per_hour,
+            "max_frontier_concurrency": self.max_frontier_concurrency,
+            "max_frontier_attempts_per_task_contract": self.max_frontier_attempts_per_task_contract,
+            "cost_per_success_ceiling_usd": self.cost_per_success_ceiling_usd,
+            "settlement_exempt_states": self.settlement_exempt_states,
         }
 
 
@@ -191,13 +236,41 @@ class VCSConfig:
     aether_base_url: str = "http://localhost:3000"
     aether_repo_id: str | None = None
     aether_agent_id: str = "mx-swarm"
+    canonical_enforcement: bool = True
+    post_landing_verification_required: bool = True
+    settlement_retry_max: int = 5
+    settlement_retry_backoff_seconds: int = 30
+    reconciliation_enabled: bool = True
+    reconciliation_interval_seconds: int = 60
 
     def to_dict(self) -> dict:
         return {
             "provider": self.provider,
-            "aether_base_url": self.aether_base_url,
-            "aether_repo_id": self.aether_repo_id,
-            "aether_agent_id": self.aether_agent_id,
+            "aether": {
+                "base_url": self.aether_base_url,
+                "repo_id": self.aether_repo_id,
+                "agent_id": self.aether_agent_id,
+            },
+            "canonical_enforcement": self.canonical_enforcement,
+            "post_landing_verification_required": self.post_landing_verification_required,
+            "settlement_retry_max": self.settlement_retry_max,
+            "settlement_retry_backoff_seconds": self.settlement_retry_backoff_seconds,
+            "reconciliation_enabled": self.reconciliation_enabled,
+            "reconciliation_interval_seconds": self.reconciliation_interval_seconds,
+        }
+
+
+@dataclass
+class GuardrailConfig:
+    """Drift firewall configuration."""
+
+    mode: str = "disabled"  # disabled, shadow, deterministic, semantic
+    deterministic_fp_threshold_pct: float = 1.0
+
+    def to_dict(self) -> dict:
+        return {
+            "mode": self.mode,
+            "deterministic_fp_threshold_pct": self.deterministic_fp_threshold_pct,
         }
 
 
@@ -208,12 +281,14 @@ class MXConfig:
     queue: QueueConfig = field(default_factory=QueueConfig)
     secrets: SecretsConfig = field(default_factory=SecretsConfig)
     llm: LLMConfig = field(default_factory=LLMConfig)
+    frontier_llm: LLMConfig | None = None
     worker: WorkerConfig = field(default_factory=WorkerConfig)
     judge: JudgeConfig = field(default_factory=JudgeConfig)
     governor: GovernorConfig = field(default_factory=GovernorConfig)
     github: GitHubConfig = field(default_factory=GitHubConfig)
     budget: BudgetConfig = field(default_factory=BudgetConfig)
     vcs: VCSConfig = field(default_factory=VCSConfig)
+    guardrails: GuardrailConfig = field(default_factory=GuardrailConfig)
 
     # State
     paused: bool = False
@@ -224,12 +299,14 @@ class MXConfig:
             "queue": self.queue.to_dict(),
             "secrets": self.secrets.to_dict(),
             "llm": self.llm.to_dict(),
+            "frontier_llm": self.frontier_llm.to_dict() if self.frontier_llm else None,
             "worker": self.worker.to_dict(),
             "judge": self.judge.to_dict(),
             "governor": self.governor.to_dict(),
             "github": self.github.to_dict(),
             "budget": self.budget.to_dict(),
             "vcs": self.vcs.to_dict(),
+            "guardrails": self.guardrails.to_dict(),
             "paused": self.paused,
         }
 
@@ -273,6 +350,21 @@ class MXConfig:
                 base_url=l.get("base_url"),
                 max_tokens=l.get("max_tokens", 4096),
                 temperature=l.get("temperature", 0.7),
+                input_cost_per_million_usd=l.get("input_cost_per_million_usd", 0.0),
+                output_cost_per_million_usd=l.get("output_cost_per_million_usd", 0.0),
+            )
+
+        if data.get("frontier_llm"):
+            l = data["frontier_llm"]
+            config.frontier_llm = LLMConfig(
+                provider=l.get("provider", "anthropic"),
+                model=l.get("model", "claude-sonnet-4-20250514"),
+                api_key=l.get("api_key"),
+                base_url=l.get("base_url"),
+                max_tokens=l.get("max_tokens", 4096),
+                temperature=l.get("temperature", 0.7),
+                input_cost_per_million_usd=l.get("input_cost_per_million_usd", 0.0),
+                output_cost_per_million_usd=l.get("output_cost_per_million_usd", 0.0),
             )
 
         if "worker" in data:
@@ -283,6 +375,10 @@ class MXConfig:
                 retry_max=w.get("retry_max", 3),
                 poll_interval_seconds=w.get("poll_interval_seconds", 5),
                 visibility_timeout_seconds=w.get("visibility_timeout_seconds", 300),
+                lease_heartbeat_enabled=w.get("lease_heartbeat_enabled", True),
+                lease_heartbeat_interval_seconds=w.get("lease_heartbeat_interval_seconds", 40),
+                lease_extension_seconds=w.get("lease_extension_seconds", 120),
+                lease_max_seconds=w.get("lease_max_seconds", 900),
             )
 
         if "judge" in data:
@@ -319,8 +415,29 @@ class MXConfig:
             b = data["budget"]
             config.budget = BudgetConfig(
                 daily_usd_cap=b.get("daily_usd_cap", 100.0),
+                frontier_daily_usd_cap=b.get("frontier_daily_usd_cap", 25.0),
+                control_plane_daily_usd_cap=b.get("control_plane_daily_usd_cap", 5.0),
+                bulk_lane_daily_usd_cap=b.get("bulk_lane_daily_usd_cap", 0.0),
                 max_llm_calls_per_task=b.get("max_llm_calls_per_task", 50),
                 max_tokens_per_task=b.get("max_tokens_per_task", 100000),
+                enforcement=b.get("enforcement", "on"),
+                throttle_threshold_pct=b.get("throttle_threshold_pct", 85),
+                freeze_threshold_pct=b.get("freeze_threshold_pct", 100),
+                freeze_mode=b.get("freeze_mode", "frontier_only"),
+                freeze_new_claims_only=b.get("freeze_new_claims_only", True),
+                max_frontier_escalations_per_hour=b.get("max_frontier_escalations_per_hour", 5),
+                max_frontier_concurrency=b.get("max_frontier_concurrency", 2),
+                max_frontier_attempts_per_task_contract=b.get("max_frontier_attempts_per_task_contract", 2),
+                cost_per_success_ceiling_usd=b.get("cost_per_success_ceiling_usd", 5.0),
+                settlement_exempt_states=b.get(
+                    "settlement_exempt_states",
+                    [
+                        "submitted_pending_ledger",
+                        "settled_ack",
+                        "settled_nack",
+                        "dead_letter",
+                    ],
+                ),
             )
 
         if "vcs" in data:
@@ -332,6 +449,19 @@ class MXConfig:
                 aether_base_url=v.get("aether_base_url") or aether.get("base_url", "http://localhost:8100"),
                 aether_repo_id=v.get("aether_repo_id") or aether.get("repo_id"),
                 aether_agent_id=v.get("aether_agent_id") or aether.get("agent_id", "mx-swarm"),
+                canonical_enforcement=v.get("canonical_enforcement", True),
+                post_landing_verification_required=v.get("post_landing_verification_required", True),
+                settlement_retry_max=v.get("settlement_retry_max", 5),
+                settlement_retry_backoff_seconds=v.get("settlement_retry_backoff_seconds", 30),
+                reconciliation_enabled=v.get("reconciliation_enabled", True),
+                reconciliation_interval_seconds=v.get("reconciliation_interval_seconds", 60),
+            )
+
+        if "guardrails" in data:
+            g = data["guardrails"]
+            config.guardrails = GuardrailConfig(
+                mode=g.get("mode", "disabled"),
+                deterministic_fp_threshold_pct=g.get("deterministic_fp_threshold_pct", 1.0),
             )
 
         return config

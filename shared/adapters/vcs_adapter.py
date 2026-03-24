@@ -21,8 +21,22 @@ class SubmitResult:
     submission_id: str  # PR number or proposal_id
     url: str | None = None
     status: str = "pending"
+    http_status: int | None = None
     message: str = ""
     raw_response: dict | None = None
+
+
+@dataclass
+class LandingVerificationResult:
+    """Result of verifying that a canonical sink contains the intended artifact."""
+
+    supported: bool
+    verified: bool
+    canonical_status: str = ""
+    provider: str = ""
+    detail: str = ""
+    verified_paths: list[str] | None = None
+    raw_response: dict[str, Any] | None = None
 
 
 class VCSAdapter(ABC):
@@ -45,6 +59,12 @@ class VCSAdapter(ABC):
         model_id: str | None = None,
         risk_tier: int = 0,
         draft: bool = False,
+        source: str | None = None,
+        source_run_id: str | None = None,
+        source_task_id: str | None = None,
+        source_agent_id: str | None = None,
+        source_attempt_id: str | None = None,
+        intent_type: str | None = None,
     ) -> SubmitResult:
         """Submit a code change to the VCS backend.
 
@@ -59,6 +79,12 @@ class VCSAdapter(ABC):
             model_id: LLM model used (e.g., "mistral:7b")
             risk_tier: Risk level 0=low, 1=medium, 2=high
             draft: Create as draft/pending if True
+            source: Optional producer/source label for sink provenance
+            source_run_id: Optional end-to-end run correlation identifier
+            source_task_id: Optional original task identifier from producer
+            source_agent_id: Optional worker/lane/agent identifier from producer
+            source_attempt_id: Optional original attempt identifier from producer
+            intent_type: Optional normalized producer intent label
 
         Returns:
             SubmitResult with submission details
@@ -76,6 +102,28 @@ class VCSAdapter(ABC):
             Status dict with backend-specific fields
         """
         pass
+
+    async def verify_landed_change(
+        self,
+        submission_id: str,
+        *,
+        expected_paths: list[str],
+        expected_diff: str | None = None,
+    ) -> LandingVerificationResult:
+        """Verify that a canonical sink accepted and landed the intended artifact.
+
+        Backends that do not support post-landing verification should return
+        supported=False rather than raising.
+        """
+        return LandingVerificationResult(
+            supported=False,
+            verified=False,
+            canonical_status="unsupported",
+            provider=type(self).__name__,
+            detail="Post-landing verification is not implemented for this backend.",
+            verified_paths=[],
+            raw_response=None,
+        )
 
     @abstractmethod
     async def health_check(self) -> bool:

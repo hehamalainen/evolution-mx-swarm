@@ -9,15 +9,76 @@ merging and probabilistic proposal scoring.
 
 import asyncio
 import json
-from typing import Any
+import re
+from typing import Any, cast
 
-from shared.adapters.vcs_adapter import SubmitResult, VCSAdapter
+from shared.adapters.vcs_adapter import LandingVerificationResult, SubmitResult, VCSAdapter
+from shared.utils.metrics import append_decision_event
 
 # Use aiohttp for async HTTP requests
+aiohttp: Any = None
 try:
-    import aiohttp
+    import aiohttp as aiohttp_module
+    aiohttp = aiohttp_module
 except ImportError:
-    aiohttp = None  # Will use fallback sync
+    pass  # Will use fallback sync
+
+
+def _as_dict(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return cast(dict[str, Any], value)
+    return {}
+
+
+def _as_list_of_dicts(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    return [cast(dict[str, Any], item) for item in value if isinstance(item, dict)]
+
+
+def _normalize_status(payload: dict[str, Any]) -> str:
+    return str(payload.get("status") or payload.get("state") or "").strip().lower()
+
+
+def _extract_paths(payload: dict[str, Any]) -> list[str]:
+    for key in ("affected_paths", "paths", "changed_paths", "landed_paths"):
+        value = payload.get(key)
+        if isinstance(value, list):
+            return [str(item).strip() for item in value if str(item).strip()]
+    proposal = payload.get("proposal")
+    if isinstance(proposal, dict):
+        for key in ("affected_paths", "paths", "changed_paths", "landed_paths"):
+            value = proposal.get(key)
+            if isinstance(value, list):
+                return [str(item).strip() for item in value if str(item).strip()]
+    diff_payload = str(
+        payload.get("change_content")
+        or payload.get("landed_change_content")
+        or (proposal.get("change_content") if isinstance(proposal, dict) else "")
+        or (proposal.get("landed_change_content") if isinstance(proposal, dict) else "")
+        or ""
+    )
+    if diff_payload:
+        paths: list[str] = []
+        seen: set[str] = set()
+        for line in diff_payload.splitlines():
+            stripped = line.strip()
+            match = re.match(r"^\+\+\+\s+b/(.+)$", stripped)
+            if not match:
+                match = re.match(r"^diff --git a/(.+?) b/(.+)$", stripped)
+                if match:
+                    candidate = match.group(2).strip()
+                else:
+                    continue
+            else:
+                candidate = match.group(1).strip()
+            if not candidate or candidate == "/dev/null" or candidate in seen:
+                continue
+            seen.add(candidate)
+            paths.append(candidate)
+        if paths:
+            return paths
+    return []
 
 
 class AetherVCS(VCSAdapter):
@@ -53,6 +114,47 @@ class AetherVCS(VCSAdapter):
         self.max_retries = max_retries
         self.base_backoff_s = base_backoff_s
 
+    def _build_proposal_payload(
+        self,
+        *,
+        task_id: str,
+        goal: str,
+        branch_name: str,
+        diff: str,
+        affected_paths: list[str],
+        evidence_markdown: str,
+        confidence: float,
+        model_id: str | None,
+        risk_tier: int,
+        source: str | None,
+        source_run_id: str | None,
+        source_task_id: str | None,
+        source_agent_id: str | None,
+        source_attempt_id: str | None,
+        intent_type: str | None,
+    ) -> dict[str, Any]:
+        """Build the exact Aether ProposalCreate payload used for submission."""
+        return {
+            "agent_id": self.agent_id,
+            "task_id": task_id,
+            "change_type": "unified_diff",
+            "change_content": diff,
+            "affected_paths": affected_paths,
+            "risk_tier": risk_tier + 1,  # Aether uses 1-3, MX uses 0-2
+            "confidence_score": confidence,
+            "model_id": model_id or "unknown",
+            "rationale": f"{goal}\n\n{evidence_markdown}",
+            "requires_tests": True,
+            "requires_security_scan": risk_tier >= 2,
+            "idempotency_key": f"mx-{task_id}-{branch_name}",
+            "source": source or "mx_swarm",
+            "source_run_id": source_run_id,
+            "source_task_id": source_task_id or task_id,
+            "source_agent_id": source_agent_id,
+            "source_attempt_id": source_attempt_id,
+            "intent_type": intent_type or "other",
+        }
+
     async def submit_change(
         self,
         task_id: str,
@@ -65,6 +167,12 @@ class AetherVCS(VCSAdapter):
         model_id: str | None = None,
         risk_tier: int = 0,
         draft: bool = False,
+        source: str | None = None,
+        source_run_id: str | None = None,
+        source_task_id: str | None = None,
+        source_agent_id: str | None = None,
+        source_attempt_id: str | None = None,
+        intent_type: str | None = None,
     ) -> SubmitResult:
         """Submit a proposal to Aether.
 
@@ -79,21 +187,36 @@ class AetherVCS(VCSAdapter):
                 message="Aether repo_id not configured",
             )
 
-        # Build Aether ProposalCreate payload
-        proposal_data = {
-            "agent_id": self.agent_id,
-            "task_id": task_id,
-            "change_type": "unified_diff",
-            "change_content": diff,
-            "affected_paths": affected_paths,
-            "risk_tier": risk_tier + 1,  # Aether uses 1-3, we use 0-2
-            "confidence_score": confidence,
-            "model_id": model_id or "unknown",
-            "rationale": f"{goal}\n\n{evidence_markdown}",
-            "requires_tests": True,
-            "requires_security_scan": risk_tier >= 2,
-            "idempotency_key": f"mx-{task_id}-{branch_name}",
-        }
+        proposal_data = self._build_proposal_payload(
+            task_id=task_id,
+            goal=goal,
+            branch_name=branch_name,
+            diff=diff,
+            affected_paths=affected_paths,
+            evidence_markdown=evidence_markdown,
+            confidence=confidence,
+            model_id=model_id,
+            risk_tier=risk_tier,
+            source=source,
+            source_run_id=source_run_id,
+            source_task_id=source_task_id,
+            source_agent_id=source_agent_id,
+            source_attempt_id=source_attempt_id,
+            intent_type=intent_type,
+        )
+
+        # Decision Transparency: Log the intent to submit
+        append_decision_event(
+            task_id=task_id,
+            reasoning=f"Submitting Aether proposal for task: {goal[:100]}",
+            choice="submit_proposal",
+            impact_level="medium",
+            context={
+                "affected_paths": affected_paths,
+                "confidence": confidence,
+                "risk_tier": risk_tier
+            }
+        )
 
         url = f"{self.base_url}/v1/repos/{self.repo_id}/proposals"
 
@@ -122,7 +245,7 @@ class AetherVCS(VCSAdapter):
             message=f"Aether submission failed after {self.max_retries} attempts: {last_error}",
         )
 
-    async def get_agent_proposals(self, agent_id: str) -> list[dict]:
+    async def get_agent_proposals(self, agent_id: str) -> list[dict[str, Any]]:
         """Fetch all proposals submitted by a specific agent.
 
         Used for syncing state on startup.
@@ -140,21 +263,21 @@ class AetherVCS(VCSAdapter):
                         if resp.status != 200:
                             print(f"Error fetching proposals: {resp.status}")
                             return []
-                        data = await resp.json()
-                        return data.get("proposals", [])
+                        data = _as_dict(await resp.json())
+                        return _as_list_of_dicts(data.get("proposals"))
             else:
                 # Sync fallback
-                import urllib.request
-                import json
                 import urllib.parse
-                
+                import urllib.request
+
                 query = urllib.parse.urlencode(params)
                 req = urllib.request.Request(f"{url}?{query}")
                 with urllib.request.urlopen(req) as response:
-                    data = json.loads(response.read())
-                    return data.get("proposals", [])
+                    raw = response.read().decode("utf-8")
+                    data = _as_dict(json.loads(raw))
+                    return _as_list_of_dicts(data.get("proposals"))
 
-        except Exception as e:
+        except Exception:
             # print(f"Failed to fetch agent proposals: {e}")
             return []
 
@@ -166,15 +289,16 @@ class AetherVCS(VCSAdapter):
                 json=data,
                 headers={"Content-Type": "application/json"},
             ) as response:
-                body = await response.json()
+                body = _as_dict(await response.json())
 
                 if response.status in (200, 201):
                     return SubmitResult(
                         success=True,
                         submission_type="proposal",
                         submission_id=body.get("proposal_id", ""),
-                        url=f"{self.base_url}/repos/{self.repo_id}/proposals/{body.get('proposal_id')}",
+                        url=f"{self.base_url}/v1/repos/{self.repo_id}/proposals/{body.get('proposal_id')}",
                         status=body.get("status", "PENDING"),
+                        http_status=response.status,
                         message=body.get("message", "Proposal submitted"),
                         raw_response=body,
                     )
@@ -184,6 +308,7 @@ class AetherVCS(VCSAdapter):
                         submission_type="proposal",
                         submission_id="",
                         status="error",
+                        http_status=response.status,
                         message=body.get("detail", f"HTTP {response.status}"),
                         raw_response=body,
                     )
@@ -206,14 +331,16 @@ class AetherVCS(VCSAdapter):
             lambda: urllib.request.urlopen(req, timeout=30),
         )
 
-        body = json.loads(response.read().decode("utf-8"))
+        body = _as_dict(json.loads(response.read().decode("utf-8")))
+        http_status = response.getcode()
 
         return SubmitResult(
             success=True,
             submission_type="proposal",
             submission_id=body.get("proposal_id", ""),
-            url=f"{self.base_url}/repos/{self.repo_id}/proposals/{body.get('proposal_id')}",
+            url=f"{self.base_url}/v1/repos/{self.repo_id}/proposals/{body.get('proposal_id')}",
             status=body.get("status", "PENDING"),
+            http_status=http_status,
             message=body.get("message", "Proposal submitted"),
             raw_response=body,
         )
@@ -237,7 +364,7 @@ class AetherVCS(VCSAdapter):
                 async with aiohttp.ClientSession() as session:
                     async with session.get(url) as response:
                         if response.status == 200:
-                            return await response.json()
+                            return _as_dict(await response.json())
                         else:
                             return {"error": f"HTTP {response.status}"}
             else:
@@ -245,7 +372,7 @@ class AetherVCS(VCSAdapter):
 
                 req = urllib.request.Request(url, method="GET")
                 response = urllib.request.urlopen(req, timeout=10)
-                return json.loads(response.read().decode("utf-8"))
+                return _as_dict(json.loads(response.read().decode("utf-8")))
 
         except Exception as e:
             return {
@@ -253,6 +380,95 @@ class AetherVCS(VCSAdapter):
                 "proposal_id": submission_id,
                 "error": str(e),
             }
+
+    async def verify_landed_change(
+        self,
+        submission_id: str,
+        *,
+        expected_paths: list[str],
+        expected_diff: str | None = None,
+    ) -> LandingVerificationResult:
+        """Verify Aether canonical landing using returned proposal evidence."""
+        payload = await self.get_status(submission_id)
+        normalized = _normalize_status(payload)
+        provider = "aether"
+        accepted = {"accepted", "committed", "merged", "settled_ack", "complete", "completed", "promoted"}
+
+        if payload.get("error"):
+            return LandingVerificationResult(
+                supported=True,
+                verified=False,
+                canonical_status=normalized or "error",
+                provider=provider,
+                detail=str(payload.get("error")),
+                verified_paths=[],
+                raw_response=payload,
+            )
+
+        if normalized not in accepted:
+            return LandingVerificationResult(
+                supported=True,
+                verified=False,
+                canonical_status=normalized or "unknown",
+                provider=provider,
+                detail=f"Canonical status is not accepted: {normalized or 'unknown'}",
+                verified_paths=[],
+                raw_response=payload,
+            )
+
+        landed_paths = _extract_paths(payload)
+        if not landed_paths:
+            return LandingVerificationResult(
+                supported=True,
+                verified=False,
+                canonical_status=normalized,
+                provider=provider,
+                detail="Aether accepted the proposal but did not return landed path evidence.",
+                verified_paths=[],
+                raw_response=payload,
+            )
+
+        expected = {path.strip() for path in expected_paths if path.strip()}
+        actual = set(landed_paths)
+        missing = sorted(expected - actual)
+        if missing:
+            return LandingVerificationResult(
+                supported=True,
+                verified=False,
+                canonical_status=normalized,
+                provider=provider,
+                detail=f"Aether landed-path evidence is missing expected paths: {missing}",
+                verified_paths=landed_paths,
+                raw_response=payload,
+            )
+
+        if expected_diff:
+            diff_echo = str(
+                payload.get("change_content")
+                or payload.get("landed_change_content")
+                or _as_dict(payload.get("proposal")).get("change_content")
+                or ""
+            )
+            if diff_echo and diff_echo.strip() != expected_diff.strip():
+                return LandingVerificationResult(
+                    supported=True,
+                    verified=False,
+                    canonical_status=normalized,
+                    provider=provider,
+                    detail="Aether landed diff evidence does not match the submitted diff.",
+                    verified_paths=landed_paths,
+                    raw_response=payload,
+                )
+
+        return LandingVerificationResult(
+            supported=True,
+            verified=True,
+            canonical_status=normalized,
+            provider=provider,
+            detail="Aether canonical landing verified.",
+            verified_paths=landed_paths,
+            raw_response=payload,
+        )
 
     async def health_check(self) -> bool:
         """Check if Aether server is reachable."""
@@ -263,14 +479,14 @@ class AetherVCS(VCSAdapter):
                 async with aiohttp.ClientSession() as session:
                     async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as response:
                         if response.status == 200:
-                            data = await response.json()
+                            data = _as_dict(await response.json())
                             return data.get("status") == "healthy"
             else:
                 import urllib.request
 
                 req = urllib.request.Request(url, method="GET")
                 response = urllib.request.urlopen(req, timeout=5)
-                data = json.loads(response.read().decode("utf-8"))
+                data = _as_dict(json.loads(response.read().decode("utf-8")))
                 return data.get("status") == "healthy"
 
         except Exception:

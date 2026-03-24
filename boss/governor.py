@@ -16,7 +16,7 @@ import asyncio
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from enum import Enum
 
 from shared.schemas.teamplan import (
@@ -36,6 +36,7 @@ class TriggerType(str, Enum):
     RETRY_CASCADE = "retry_cascade"
     BUDGET_ALERT = "budget_alert"
     PR_CAP_REACHED = "pr_cap_reached"
+    REPUTATION_LOW = "reputation_low"
 
 
 class AdjustmentType(str, Enum):
@@ -48,12 +49,13 @@ class AdjustmentType(str, Enum):
     UNTHROTTLE = "unthrottle"
     TRIGGER_REPLAN = "trigger_replan"
     SHIFT_WORKERS = "shift_workers"  # Move workers between streams
+    FIRE_AGENTS = "fire_agents"  # Blacklist low-performing agents
 
 
 @dataclass
 class TelemetrySnapshot:
     """Point-in-time telemetry data."""
-    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     # CI metrics
     ci_health_percent: float = 100.0
@@ -82,6 +84,10 @@ class TelemetrySnapshot:
     # Budget metrics
     spend_today_usd: float = 0.0
     burn_rate_hour_usd: float = 0.0
+
+    # Reputation metrics
+    blacklisted_count: int = 0
+    low_trust_agents: list[str] = field(default_factory=list)
 
     # Spec progress
     spec_items_completed: int = 0
@@ -208,7 +214,7 @@ class Governor:
             baseline_pr_cap_hour=teamplan.caps.pr_cap_per_hour,
             baseline_open_pr_cap=teamplan.caps.open_pr_cap,
             baseline_max_workers=teamplan.total_max_workers(),
-            interval_start=datetime.now(timezone.utc)
+            interval_start=datetime.now(UTC)
         )
 
         # Adjustment history
@@ -226,11 +232,11 @@ class Governor:
         """Check if we're in a cooldown period after a recent adjustment."""
         if self.state.cooldown_until is None:
             return False
-        return datetime.now(timezone.utc) < self.state.cooldown_until
+        return datetime.now(UTC) < self.state.cooldown_until
 
     def _check_interval_reset(self):
         """Reset the 20% limit on new interval."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         if self.state.interval_start is None:
             self.state.interval_start = now
             self.state.adjustments_this_interval = 0
@@ -270,7 +276,7 @@ class Governor:
 
     def _set_cooldown(self):
         """Set cooldown period after an adjustment."""
-        self.state.cooldown_until = datetime.now(timezone.utc) + timedelta(minutes=self.COOLDOWN_MINUTES)
+        self.state.cooldown_until = datetime.now(UTC) + timedelta(minutes=self.COOLDOWN_MINUTES)
         self.state.adjustments_this_interval += 1
 
     def _can_adjust(self) -> bool:
@@ -361,10 +367,13 @@ class Governor:
         if telemetry.prs_open_total >= self.state.current_open_pr_cap:
             triggers.append(TriggerType.PR_CAP_REACHED)
 
-        # Budget check
-        budget = self.teamplan.budget_policy
-        if telemetry.spend_today_usd >= budget.usd_per_day * 0.9:
+        if telemetry.spend_today_usd >= self.teamplan.budget_policy.usd_per_day * 0.9:
             triggers.append(TriggerType.BUDGET_ALERT)
+
+        # Reputation check
+        if telemetry.low_trust_agents or telemetry.blacklisted_count > 0:
+            if self._check_hysteresis(TriggerType.REPUTATION_LOW):
+                triggers.append(TriggerType.REPUTATION_LOW)
 
         return triggers
 
@@ -374,7 +383,7 @@ class Governor:
 
         This prevents oscillation by requiring conditions to persist.
         """
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         hysteresis = timedelta(minutes=self.teamplan.reorg_policy.hysteresis_minutes)
 
         # Record this trigger
@@ -394,11 +403,16 @@ class Governor:
     def _detect_stall(self, telemetry: TelemetrySnapshot) -> bool:
         """Detect if the swarm has stalled."""
 
-        # Stall = workers active but no completions
+        # Do not classify as stall when there is no outstanding work.
+        has_outstanding_work = telemetry.queue_depth > 0 or telemetry.tasks_in_progress > 0
+        if not has_outstanding_work:
+            return False
+
+        # Stall = workers active, work exists, but no completions.
         if telemetry.workers_active > 0 and telemetry.tasks_completed_1h == 0:
             return True
 
-        # Stall = queue has items but nothing in progress
+        # Stall = queue has items but nothing in progress.
         if telemetry.queue_depth > 0 and telemetry.tasks_in_progress == 0:
             return True
 
@@ -515,7 +529,7 @@ class Governor:
         if not self._can_adjust():
             return
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         if self.state.last_adjustment_time:
             min_interval = timedelta(minutes=10)  # At least 10 min between major changes
             if now - self.state.last_adjustment_time < min_interval:
@@ -576,6 +590,26 @@ class Governor:
                 self.state.mode = GovernorMode.FROZEN
                 self._set_cooldown()
 
+        elif trigger == TriggerType.REPUTATION_LOW:
+            # Discharge untrusted agents
+            reason = f"Low trust detected for agents: {', '.join(telemetry.low_trust_agents[:3])}"
+            if telemetry.blacklisted_count > 0:
+                reason += f" ({telemetry.blacklisted_count} blacklisted)"
+
+            self._make_adjustment(
+                AdjustmentType.FIRE_AGENTS,
+                reason,
+                {"low_trust_agents": telemetry.low_trust_agents, "blacklisted_count": telemetry.blacklisted_count},
+                trigger=trigger
+            )
+
+            # If reputation is a systemic issue, scale down
+            if len(telemetry.low_trust_agents) > 2:
+                old_workers = self.state.current_max_workers
+                new_workers = int(old_workers * 0.8)
+                self.state.current_max_workers = new_workers
+                self._set_cooldown()
+
         self.state.last_adjustment_time = now
 
     async def _check_recovery(self, telemetry: TelemetrySnapshot):
@@ -622,7 +656,7 @@ class Governor:
         # Simplified: just check we've been stable for a while
         if self.state.last_adjustment_time:
             recovery_window = timedelta(minutes=self.teamplan.reorg_policy.hysteresis_minutes)
-            if datetime.now(timezone.utc) - self.state.last_adjustment_time < recovery_window:
+            if datetime.now(UTC) - self.state.last_adjustment_time < recovery_window:
                 return False
         return True
 
@@ -641,11 +675,11 @@ class Governor:
         """Record and notify about an adjustment."""
         # Calculate cooldown
         cooldown_minutes = self.teamplan.reorg_policy.hysteresis_minutes
-        cooldown_until = datetime.now(timezone.utc) + timedelta(minutes=cooldown_minutes)
-        next_eval_at = datetime.now(timezone.utc) + timedelta(minutes=5)  # Next eval in 5 min
+        cooldown_until = datetime.now(UTC) + timedelta(minutes=cooldown_minutes)
+        next_eval_at = datetime.now(UTC) + timedelta(minutes=5)  # Next eval in 5 min
 
         adjustment = Adjustment(
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
             type=adj_type,
             reason=reason,
             details=details,
@@ -672,7 +706,7 @@ class Governor:
 
     def get_state_summary(self) -> dict:
         """Get current governor state for dashboard."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         # Calculate time until cooldown ends
         cooldown_remaining = None

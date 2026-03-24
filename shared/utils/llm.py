@@ -3,6 +3,7 @@
 Provides a unified interface for LLM interactions with support for:
 - Anthropic Claude
 - OpenAI GPT
+- Google Gemini
 - Local models (ollama)
 """
 
@@ -55,7 +56,7 @@ class LLMClient(ABC):
         pass
 
     @abstractmethod
-    async def stream(
+    def stream(
         self,
         messages: list[Message],
         max_tokens: int = 4096,
@@ -230,6 +231,121 @@ class OpenAIClient(LLMClient):
                 yield chunk.choices[0].delta.content
 
 
+class GeminiClient(LLMClient):
+    """Google Gemini client."""
+
+    def __init__(
+        self,
+        api_key: str | None = None,
+        model: str = "gemini-2.5-flash",
+    ):
+        self.api_key = api_key or os.environ.get("GEMINI_API_KEY")
+        self.model = model
+        self._client = None
+
+    async def _get_client(self):
+        if self._client is None:
+            try:
+                import google.generativeai as genai
+            except ImportError:
+                raise ImportError("google-generativeai package required. Install with: pip install google-generativeai") from None
+            genai.configure(api_key=self.api_key)
+            
+            # Note: system instruction should theoretically be passed here if required constantly, 
+            # but we will pass it ad-hoc where possible or handle directly if the API demands.
+            self._client = genai.GenerativeModel(self.model)
+        return self._client
+
+    async def chat(
+        self,
+        messages: list[Message],
+        max_tokens: int = 4096,
+        temperature: float = 0.7,
+        system: str | None = None,
+    ) -> LLMResponse:
+        client = await self._get_client()
+
+        # Convert roles: "assistant" -> "model"
+        formatted_messages = []
+        for m in messages:
+            role = "model" if m.role == "assistant" else m.role
+            # skip 'system' if it happens to be bleeding in, though usually it's passed via `system` kwarg
+            if role == "system":
+                continue
+            formatted_messages.append({"role": role, "parts": [m.content]})
+            
+        kwargs = {
+            "generation_config": {
+                "max_output_tokens": max_tokens,
+                "temperature": temperature,
+            }
+        }
+        
+        # In the modern SDK, system_instruction can be passed to generate_content or the model init.
+        # It's safest to prepend to the first user message if we can't cleanly inject it at generation time.
+        if system and formatted_messages:
+            if formatted_messages[0]["role"] == "user":
+                formatted_messages[0]["parts"][0] = f"System Instruction:\n{system}\n\nUser Request:\n" + formatted_messages[0]["parts"][0]
+            else:
+                formatted_messages.insert(0, {"role": "user", "parts": [f"System Instruction:\n{system}"]})
+                formatted_messages.insert(1, {"role": "model", "parts": ["Understood."]})
+
+        response = await client.generate_content_async(
+            contents=formatted_messages,
+            **kwargs
+        )
+
+        return LLMResponse(
+            content=response.text,
+            model=self.model,
+            usage={
+                "input_tokens": response.usage_metadata.prompt_token_count if hasattr(response, "usage_metadata") else 0,
+                "output_tokens": response.usage_metadata.candidates_token_count if hasattr(response, "usage_metadata") else 0,
+            },
+            stop_reason="stop",
+        )
+
+    async def stream(
+        self,
+        messages: list[Message],
+        max_tokens: int = 4096,
+        temperature: float = 0.7,
+        system: str | None = None,
+    ) -> AsyncIterator[str]:
+        client = await self._get_client()
+
+        formatted_messages = []
+        for m in messages:
+            role = "model" if m.role == "assistant" else m.role
+            if role == "system":
+                continue
+            formatted_messages.append({"role": role, "parts": [m.content]})
+            
+        kwargs = {
+            "generation_config": {
+                "max_output_tokens": max_tokens,
+                "temperature": temperature,
+            }
+        }
+        
+        if system and formatted_messages:
+            if formatted_messages[0]["role"] == "user":
+                formatted_messages[0]["parts"][0] = f"System Instruction:\n{system}\n\nUser Request:\n" + formatted_messages[0]["parts"][0]
+            else:
+                formatted_messages.insert(0, {"role": "user", "parts": [f"System Instruction:\n{system}"]})
+                formatted_messages.insert(1, {"role": "model", "parts": ["Understood."]})
+
+        response = await client.generate_content_async(
+            contents=formatted_messages,
+            stream=True,
+            **kwargs
+        )
+
+        async for chunk in response:
+            if chunk.text:
+                yield chunk.text
+
+
 class OllamaClient(LLMClient):
     """Ollama local model client."""
 
@@ -357,6 +473,14 @@ def create_llm_client(config: dict) -> LLMClient:
         if base_url:
             kwargs["base_url"] = base_url
         return OpenAIClient(**kwargs)
+
+    elif provider == "gemini":
+        kwargs = {}
+        if api_key:
+            kwargs["api_key"] = api_key
+        if model:
+            kwargs["model"] = model
+        return GeminiClient(**kwargs)
 
     elif provider == "ollama":
         kwargs = {}

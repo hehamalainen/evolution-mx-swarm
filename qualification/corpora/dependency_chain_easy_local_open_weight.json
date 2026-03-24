@@ -1,0 +1,32 @@
+{
+  "name": "dependency_chain_easy_local_open_weight",
+  "description": "Two-step dependency proof corpus using narrow admitted-style Python slices.",
+  "model_pool": "local_open_weight",
+  "default_runs": 1,
+  "default_workers": 2,
+  "timeout_seconds": 1200,
+  "thresholds": {
+    "min_format_compliance_rate": 1.0,
+    "min_deterministic_acceptance_rate": 1.0,
+    "max_false_success_rate": 0.0,
+    "max_duplicate_settlement_events": 0,
+    "max_duplicate_claim_events": 0,
+    "max_lifecycle_bug_events": 0
+  },
+  "slices": [
+    {
+      "key": "namecore",
+      "prd_path": "prds/golden_path_007_namecore.md",
+      "implementation_path": "tools/namecore.py",
+      "test_paths": ["tests/test_namecore.py"],
+      "prerequisite_keys": []
+    },
+    {
+      "key": "namecli",
+      "prd_path": "prds/golden_path_008_namecli.md",
+      "implementation_path": "tools/namecli.py",
+      "test_paths": ["tests/test_namecli.py"],
+      "prerequisite_keys": ["namecore"]
+    }
+  ]
+}

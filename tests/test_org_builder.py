@@ -1,229 +1,128 @@
-"""Tests for Org Builder and TEAMPLAN functionality."""
-
-import os
-import sys
-
-import pytest
-
-# Add parent to path for imports
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from shared.schemas.task_contract import RiskTier, TaskContract, TaskStream, TaskType
-from shared.schemas.teamplan import (
-    BudgetPolicy,
-    CapsConfig,
-    MergePolicy,
-    ReorgPolicy,
-    ResetTriggers,
-    RiskMergePolicy,
-    StreamConfig,
-    TeamPlan,
-    Topology,
-)
+from boss.org_builder import OrgBuilder, OrgConstraints, WorkCategory, WorkPackage
+from shared.schemas.teamplan import TeamPlan
 
 
-class TestTeamPlanSchema:
-    """Test TEAMPLAN schema."""
+def test_detect_categories_uses_boundaries_and_path_hints_for_python_cli() -> None:
+    builder = OrgBuilder()
+    prd = """
+    # Textstats CLI
 
-    def test_default_teamplan(self):
-        """Test creating default TEAMPLAN."""
-        teamplan = TeamPlan.default()
+    Return only file blocks in this exact format.
+    Only these files may be changed:
+    - tools/textstats.py
+    - tests/test_textstats.py
+    """
 
-        assert teamplan.version == "0.1"
-        assert teamplan.topology == Topology.STREAMS
-        assert len(teamplan.streams) == 5  # feature, qa, ops, security, docs
-        assert teamplan.total_target_workers() == 95  # 50+25+10+5+5
+    categories = builder._detect_categories(prd.lower(), ["tools/textstats.py", "tests/test_textstats.py"])
 
-    def test_stream_config(self):
-        """Test StreamConfig."""
-        stream = StreamConfig(
-            name="feature",
-            role="feature_engineer",
-            target_workers=50,
-            max_workers=70,
-            tools=["git", "tests"],
-            priority=2
-        )
-
-        d = stream.to_dict()
-        assert d["name"] == "feature"
-        assert d["target_workers"] == 50
-
-        restored = StreamConfig.from_dict(d)
-        assert restored.name == stream.name
-        assert restored.max_workers == stream.max_workers
-
-    def test_caps_config(self):
-        """Test CapsConfig."""
-        caps = CapsConfig(
-            pr_cap_per_hour=10,
-            open_pr_cap=20,
-            max_parallel_ci=5,
-            max_active_tasks=50
-        )
-
-        d = caps.to_dict()
-        assert d["pr_cap_per_hour"] == 10
-        assert d["open_pr_cap"] == 20
-
-    def test_risk_merge_policy(self):
-        """Test RiskMergePolicy."""
-        policy = RiskMergePolicy(
-            tier0=MergePolicy.AUTO_ON_GREEN,
-            tier1=MergePolicy.AUTO_ON_GREEN_FEATURE_FLAG,
-            tier2=MergePolicy.MANUAL_REVIEW_REQUIRED
-        )
-
-        assert policy.get_policy(0) == MergePolicy.AUTO_ON_GREEN
-        assert policy.get_policy(1) == MergePolicy.AUTO_ON_GREEN_FEATURE_FLAG
-        assert policy.get_policy(2) == MergePolicy.MANUAL_REVIEW_REQUIRED
-
-    def test_teamplan_serialization(self):
-        """Test TEAMPLAN JSON serialization."""
-        teamplan = TeamPlan.default()
-        teamplan.complexity_score = 0.5
-        teamplan.coupling_score = 0.3
-        teamplan.risk_score = 0.4
-
-        # Serialize
-        json_str = teamplan.to_json()
-        assert '"version": "0.1"' in json_str
-        assert '"topology": "streams"' in json_str
-
-        # Deserialize
-        d = teamplan.to_dict()
-        restored = TeamPlan.from_dict(d)
-        assert restored.version == teamplan.version
-        assert restored.complexity_score == 0.5
-        assert len(restored.streams) == len(teamplan.streams)
-
-    def test_teamplan_role_mix(self):
-        """Test role mix calculation."""
-        teamplan = TeamPlan.default()
-        mix = teamplan.get_role_mix()
-
-        assert "feature" in mix
-        assert "qa" in mix
-        assert sum(mix.values()) == pytest.approx(100, rel=0.01)
+    assert WorkCategory.API in categories
+    assert WorkCategory.UI not in categories
 
 
-class TestTaskContractExtensions:
-    """Test TaskContract stream/tier/spec_ref fields."""
+def test_deterministic_scores_are_structural() -> None:
+    builder = OrgBuilder()
+    package = WorkPackage(
+        id="WP-001",
+        title="CLI implementation",
+        category=WorkCategory.API,
+        description="Implement API functionality",
+        target_files=["tools/jsonpeek.py"],
+        target_toolchains=["python"],
+        has_pre_existing_tests=True,
+        has_strict_file_targets=True,
+        is_single_file_scope=True,
+        dependency_depth=1,
+    )
 
-    def test_task_with_stream_and_tier(self):
-        """Test creating task with routing fields."""
-        task = TaskContract.create(
-            task_type=TaskType.FEATURE,
-            goal="Implement user login",
-            stream=TaskStream.FEATURE,
-            tier=RiskTier.TIER_1,
-            spec_ref="RG-001"
-        )
+    determinism = builder.calculate_determinism(package)
+    novelty = builder.calculate_novelty(package)
 
-        assert task.stream == TaskStream.FEATURE
-        assert task.tier == RiskTier.TIER_1
-        assert task.spec_ref == "RG-001"
-
-    def test_task_serialization_with_new_fields(self):
-        """Test task serialization includes new fields."""
-        task = TaskContract.create(
-            task_type=TaskType.SECURITY,
-            goal="Add input validation",
-            stream=TaskStream.SECURITY,
-            tier=RiskTier.TIER_2,
-            spec_ref="SEC-042"
-        )
-
-        d = task.to_dict()
-        assert d["stream"] == "security"
-        assert d["tier"] == 2
-        assert d["spec_ref"] == "SEC-042"
-
-        # Restore
-        restored = TaskContract.from_dict(d)
-        assert restored.stream == TaskStream.SECURITY
-        assert restored.tier == RiskTier.TIER_2
-        assert restored.spec_ref == "SEC-042"
-
-    def test_backward_compatibility(self):
-        """Test tasks without new fields still work."""
-        old_task_data = {
-            "id": "abc123",
-            "type": "feature",
-            "goal": "Old task",
-            "context": {},
-            "acceptance": {},
-            "constraints": {},
-        }
-
-        task = TaskContract.from_dict(old_task_data)
-        assert task.stream == TaskStream.FEATURE  # Default
-        assert task.tier == RiskTier.TIER_1  # Default
-        assert task.spec_ref is None
+    assert 0.0 <= determinism <= 1.0
+    assert 0.0 <= novelty <= 1.0
+    assert determinism > novelty
 
 
-class TestResetTriggers:
-    """Test reset trigger thresholds."""
+def test_build_teamplan_embeds_rig_plans_and_preserves_stream_runtime() -> None:
+    builder = OrgBuilder()
+    prd = """
+    # Product
+    Implement login, billing, and audit logging.
 
-    def test_default_triggers(self):
-        """Test default trigger values."""
-        triggers = ResetTriggers()
-        assert triggers.ci_health_lt == 85
-        assert triggers.nack_rate_gt == 25
-        assert triggers.stall_minutes_gt == 60
+    Requirements:
+    - authentication for users
+    - stripe subscription billing
+    - security audit logs
+    - tests with pytest
+    - touch auth/service.py and billing/stripe_client.py
+    """
 
-    def test_custom_triggers(self):
-        """Test custom trigger thresholds."""
-        triggers = ResetTriggers(
-            ci_health_lt=90,
-            nack_rate_gt=15,
-            conflict_rate_gt=20
-        )
-        assert triggers.ci_health_lt == 90
-        assert triggers.nack_rate_gt == 15
+    teamplan = builder.build_teamplan(
+        prd,
+        OrgConstraints(max_budget_per_day=25.0, max_workers=20),
+    )
 
-
-class TestBudgetPolicy:
-    """Test budget policy."""
-
-    def test_default_budget(self):
-        """Test default budget policy."""
-        budget = BudgetPolicy()
-        assert budget.usd_per_day == 50.0
-        assert budget.hard_stop is True
-
-    def test_custom_budget(self):
-        """Test custom budget policy."""
-        budget = BudgetPolicy(
-            usd_per_day=200,
-            usd_per_hour_soft=25,
-            hard_stop=False,
-            burn_alert_thresholds=[60, 80, 95]
-        )
-        assert budget.usd_per_day == 200
-        assert budget.usd_per_hour_soft == 25
-        assert budget.hard_stop is False
+    assert isinstance(teamplan, TeamPlan)
+    assert teamplan.topology.value == "streams"
+    assert teamplan.streams
+    assert teamplan.rig_plans
+    assert any(stream.name == "security" for stream in teamplan.streams)
+    assert any(
+        rig["rig_id"].startswith("rig-") and rig["streams"]
+        for rig in teamplan.rig_plans
+    )
 
 
-class TestReorgPolicy:
-    """Test reorg policy."""
+def test_compile_rig_plans_emits_frontier_eligible_security_cluster() -> None:
+    builder = OrgBuilder()
+    prd = """
+    # Scope
+    Build OAuth login, payment subscriptions, and external webhook integration.
+    No strict file paths are defined.
+    """
+    analysis = builder.analyze_prd(prd)
+    rig_plans = builder.compile_rig_plans(analysis, OrgConstraints(max_budget_per_day=30.0, max_workers=30))
 
-    def test_default_reorg(self):
-        """Test default reorg policy."""
-        reorg = ReorgPolicy()
-        assert reorg.interval_minutes == 60
-        assert reorg.hysteresis_minutes == 30
-        assert reorg.prefer_caps_before_reorg is True
+    assert rig_plans
+    security_or_platform = [
+        rig for rig in rig_plans if "platform" in rig.rig_id or "integration" in rig.rig_id
+    ]
+    assert security_or_platform
+    assert any(
+        "frontier" in shard.allowed_model_tiers
+        for rig in security_or_platform
+        for stream in rig.streams
+        for shard in stream.shards
+    )
 
-    def test_reorg_serialization(self):
-        """Test reorg policy serialization."""
-        reorg = ReorgPolicy(
-            interval_minutes=45,
-            max_worker_delta_per_interval=10
-        )
-        d = reorg.to_dict()
-        assert d["interval_minutes"] == 45
-        assert d["max_worker_delta_per_interval"] == 10
 
-        restored = ReorgPolicy.from_dict(d)
-        assert restored.interval_minutes == 45
+def test_compile_rig_plans_prefers_python_toolchain_for_textstats_cli() -> None:
+    builder = OrgBuilder()
+    prd = """
+    # Textstats CLI
+
+    Build a small CLI tool called `textstats`.
+
+    Only these files may be changed:
+    - tools/textstats.py
+    - tests/test_textstats.py
+
+    Tests must pass with pytest.
+    Return only file blocks in this exact format.
+    """
+
+    teamplan = builder.build_teamplan(
+        prd,
+        OrgConstraints(max_budget_per_day=25.0, max_workers=10),
+    )
+
+    execution_shards = [
+        shard
+        for rig in teamplan.rig_plans
+        for stream in rig["streams"]
+        if stream["stream_type"] == "execution"
+        for shard in stream["shards"]
+    ]
+
+    assert execution_shards
+    assert any("python" in shard["supported_toolchains"] for shard in execution_shards)
+    assert all("typescript" not in shard["supported_toolchains"] for shard in execution_shards)

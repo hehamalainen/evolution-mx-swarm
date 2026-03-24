@@ -1,5 +1,11 @@
-"""MX Swarm CLI."""
+"""MX Swarm CLI package."""
 
-from .main import main
+
+def main() -> None:
+    """Entrypoint wrapper to avoid importing cli.main at package import time."""
+    from .main import main as _main
+
+    _main()
+
 
 __all__ = ["main"]

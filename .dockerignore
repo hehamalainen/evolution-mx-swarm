@@ -1,0 +1,15 @@
+.git
+.github
+.gemini
+__pycache__
+*.pyc
+.runtime
+.env
+tests
+dashboard
+cli
+*.md
+!AGENTS.md
+!requirements.txt
+Dockerfile*
+scripts

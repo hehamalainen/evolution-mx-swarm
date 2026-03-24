@@ -12,7 +12,7 @@ Triggers escalation when thresholds are breached:
 import json
 import os
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 
 
@@ -40,7 +40,7 @@ class Escalation:
     title: str
     description: str
     recommended_action: str
-    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    created_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
     acknowledged: bool = False
     resolved: bool = False
 
@@ -84,7 +84,7 @@ class EscalationEngine:
     def check_triggers(self, metrics: dict) -> list[Escalation]:
         """Check all escalation triggers and return new escalations."""
         new_escalations = []
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         # 1. CI Health Check
         ci_health = metrics.get("ci_health", 1.0)

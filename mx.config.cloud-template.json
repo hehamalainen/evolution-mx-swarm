@@ -1,0 +1,67 @@
+{
+    "version": "1.0.0",
+    "queue": {
+        "provider": "gcp",
+        "gcp": {
+            "project_id": "PROJECT_ID_HERE",
+            "topic_id": "mx-tasks",
+            "subscription_id": "mx-worker-sub"
+        }
+    },
+    "secrets": {
+        "provider": "gcp",
+        "gcp": {
+            "project_id": "PROJECT_ID_HERE"
+        }
+    },
+    "llm": {
+        "provider": "ollama",
+        "model": "mistral:7b",
+        "api_key": null,
+        "base_url": "http://localhost:11434",
+        "max_tokens": 4096,
+        "temperature": 0.0,
+        "input_cost_per_million_usd": 0.0,
+        "output_cost_per_million_usd": 0.0
+    },
+    "frontier_llm": {
+        "provider": "gemini",
+        "model": "gemini-2.5-flash",
+        "api_key": "secret:GEMINI_API_KEY",
+        "max_tokens": 8192,
+        "temperature": 0.2,
+        "input_cost_per_million_usd": 0.3,
+        "output_cost_per_million_usd": 2.5
+    },
+    "worker": {
+        "max_workers": 5,
+        "lease_heartbeat_enabled": true
+    },
+    "budget": {
+        "daily_usd_cap": 25.0,
+        "frontier_daily_usd_cap": 10.0,
+        "control_plane_daily_usd_cap": 5.0,
+        "bulk_lane_daily_usd_cap": 0.0,
+        "max_llm_calls_per_task": 50,
+        "max_tokens_per_task": 100000,
+        "enforcement": "on",
+        "throttle_threshold_pct": 85,
+        "freeze_threshold_pct": 100,
+        "freeze_mode": "frontier_only",
+        "freeze_new_claims_only": true,
+        "max_frontier_escalations_per_hour": 5,
+        "max_frontier_concurrency": 2,
+        "max_frontier_attempts_per_task_contract": 2,
+        "cost_per_success_ceiling_usd": 5.0
+    },
+    "github": {
+        "repo_owner": "OWNER_HERE",
+        "repo_name": "REPO_HERE",
+        "default_branch": "main",
+        "token": "secret:GITHUB_TOKEN"
+    },
+    "vcs": {
+        "provider": "github"
+    },
+    "paused": false
+}

@@ -38,4 +38,12 @@ reports/daily/
 
 # Runtime artifacts
 decisions/
+.runtime/
 
+# Frontend build/vendor artifacts
+dashboard_v2/node_modules/
+dashboard_v2/dist/
+
+# Local outputs
+.coverage
+nohup.out

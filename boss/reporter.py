@@ -14,7 +14,7 @@ import logging
 import os
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from enum import Enum
 
 logger = logging.getLogger(__name__)
@@ -145,7 +145,7 @@ class Reporter:
         while self._running:
             try:
                 # Wait until next hour boundary
-                now = datetime.now(timezone.utc)
+                now = datetime.now(UTC)
                 next_hour = (now + timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
                 wait_seconds = (next_hour - now).total_seconds()
                 await asyncio.sleep(wait_seconds)
@@ -164,7 +164,7 @@ class Reporter:
         while self._running:
             try:
                 # Wait until midnight
-                now = datetime.now(timezone.utc)
+                now = datetime.now(UTC)
                 tomorrow = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
                 wait_seconds = (tomorrow - now).total_seconds()
                 await asyncio.sleep(wait_seconds)
@@ -271,7 +271,7 @@ class Reporter:
         - Key deltas since last 15 min
         - Any violations and what it did about them
         """
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         timestamp = now.strftime("%Y-%m-%d-%H-%M")
 
         if metrics is None:
@@ -342,7 +342,7 @@ class Reporter:
 
         Human optional. The one you glance at during the day.
         """
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         timestamp = now.strftime("%Y-%m-%d-%H")
 
         if metrics is None:
@@ -431,7 +431,7 @@ class Reporter:
         5. Decisions required (max 3)
         6. Plan for next 24h (high-level)
         """
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         date_str = now.strftime("%Y-%m-%d")
 
         if metrics is None:

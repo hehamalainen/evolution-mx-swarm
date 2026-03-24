@@ -1,36 +1,46 @@
-# Worker service Dockerfile
+# Dockerfile for MX Swarm Remote Worker
 FROM python:3.11-slim
 
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1
+# Labels for Alpha Collective / TAP Verification
+LABEL org.mxswarm.node="alpha"
+LABEL org.mxswarm.gate="3"
+LABEL org.mxswarm.integrity="audited"
 
-# Install git (needed for repo operations)
+# Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
+    curl \
+    ssh-client \
     && rm -rf /var/lib/apt/lists/*
 
-# Create non-root user
-RUN groupadd --gid 1000 mx && \
-    useradd --uid 1000 --gid mx --shell /bin/bash --create-home mx
-
+# Set working directory
 WORKDIR /app
 
+# Copy requirements first to leverage Docker cache
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
 
-COPY . .
-RUN chown -R mx:mx /app
+# Install dependencies including cloud providers
+RUN pip install --no-cache-dir -r requirements.txt && \
+    pip install --no-cache-dir \
+    google-cloud-pubsub \
+    google-cloud-secret-manager \
+    azure-servicebus \
+    azure-keyvault-secrets \
+    azure-identity
 
-USER mx
+# Copy project source
+COPY shared/ ./shared/
+COPY worker/ ./worker/
+COPY AGENTS.md .
+COPY mx.config.cloud.json ./mx.config.json
 
-# Configure git for worker
-RUN git config --global user.name "MX Swarm Worker" && \
-    git config --global user.email "mx-worker@automated.local"
+# Create directory for logs/runtime state
+RUN mkdir -p .runtime && chmod 777 .runtime
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "import sys; sys.exit(0)"
+# Set environment variables
+ENV PYTHONPATH=/app
+ENV MX_CONFIG=mx.config.json
+ENV MX_FORCE_LOCAL_MODE=0
 
-# Run worker
-CMD ["python", "-m", "worker.service"]
+# Default to running as a worker
+ENTRYPOINT ["python", "worker/service.py"]

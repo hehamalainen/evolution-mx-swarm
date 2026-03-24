@@ -1,0 +1,32 @@
+{
+  "name": "dependency_chain_local_open_weight",
+  "description": "Two-step dependency proof corpus for local open-weight execution.",
+  "model_pool": "local_open_weight",
+  "default_runs": 1,
+  "default_workers": 2,
+  "timeout_seconds": 1200,
+  "thresholds": {
+    "min_format_compliance_rate": 1.0,
+    "min_deterministic_acceptance_rate": 1.0,
+    "max_false_success_rate": 0.0,
+    "max_duplicate_settlement_events": 0,
+    "max_duplicate_claim_events": 0,
+    "max_lifecycle_bug_events": 0
+  },
+  "slices": [
+    {
+      "key": "slugcore",
+      "prd_path": "prds/golden_path_005_slugcore.md",
+      "implementation_path": "tools/slugcore.py",
+      "test_paths": ["tests/test_slugcore.py"],
+      "prerequisite_keys": []
+    },
+    {
+      "key": "slugcli",
+      "prd_path": "prds/golden_path_006_slugcli.md",
+      "implementation_path": "tools/slugcli.py",
+      "test_paths": ["tests/test_slugcli.py"],
+      "prerequisite_keys": ["slugcore"]
+    }
+  ]
+}

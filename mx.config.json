@@ -32,14 +32,21 @@
     "api_key": null,
     "base_url": "http://localhost:11434",
     "max_tokens": 4096,
-    "temperature": 0.7
+    "temperature": 0.7,
+    "input_cost_per_million_usd": 0.0,
+    "output_cost_per_million_usd": 0.0
   },
+  "frontier_llm": null,
   "worker": {
-    "max_workers": 10,
+    "max_workers": 1,
     "timebox_minutes": 30,
     "retry_max": 2,
     "poll_interval_seconds": 5,
-    "visibility_timeout_seconds": 300
+    "visibility_timeout_seconds": 300,
+    "lease_heartbeat_enabled": true,
+    "lease_heartbeat_interval_seconds": 40,
+    "lease_extension_seconds": 120,
+    "lease_max_seconds": 900
   },
   "judge": {
     "interval_minutes": 5,
@@ -63,15 +70,45 @@
     "auto_merge_low_risk": false
   },
   "budget": {
-    "daily_usd_cap": 50.0,
+    "daily_usd_cap": 25.0,
+    "frontier_daily_usd_cap": 10.0,
+    "control_plane_daily_usd_cap": 5.0,
+    "bulk_lane_daily_usd_cap": 0.0,
     "max_llm_calls_per_task": 50,
-    "max_tokens_per_task": 100000
+    "max_tokens_per_task": 100000,
+    "enforcement": "on",
+    "throttle_threshold_pct": 85,
+    "freeze_threshold_pct": 100,
+    "freeze_mode": "frontier_only",
+    "freeze_new_claims_only": true,
+    "max_frontier_escalations_per_hour": 5,
+    "max_frontier_concurrency": 2,
+    "max_frontier_attempts_per_task_contract": 2,
+    "cost_per_success_ceiling_usd": 5.0,
+    "settlement_exempt_states": [
+      "submitted_pending_ledger",
+      "settled_ack",
+      "settled_nack",
+      "dead_letter"
+    ]
   },
   "vcs": {
-    "provider": "aether",
-    "aether_base_url": "http://localhost:8100",
-    "aether_repo_id": "repo_1061db119706",
-    "aether_agent_id": "mx-swarm"
+    "provider": "github",
+    "aether": {
+      "base_url": "http://localhost:8100",
+      "repo_id": "repo_cf1d9d736f2c",
+      "agent_id": "mx-swarm"
+    },
+    "canonical_enforcement": true,
+    "post_landing_verification_required": true,
+    "settlement_retry_max": 5,
+    "settlement_retry_backoff_seconds": 30,
+    "reconciliation_enabled": true,
+    "reconciliation_interval_seconds": 60
+  },
+  "guardrails": {
+    "mode": "disabled",
+    "deterministic_fp_threshold_pct": 1.0
   },
   "paused": false
 }

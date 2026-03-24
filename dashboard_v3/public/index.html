@@ -1,0 +1,2459 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>RIS Network Console</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap"
+    rel="stylesheet">
+  <style>
+    :root {
+      --bg: #030816;
+      --panel: #0b142b;
+      --panel-soft: #0f1a35;
+      --line: #223764;
+      --text: #dfe9ff;
+      --muted: #91a4cc;
+      --accent: #47d2ff;
+      --accent-2: #7dffb0;
+      --danger: #ff6171;
+      --amber: #ffc857;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      color: var(--text);
+      background:
+        radial-gradient(circle at 14% -10%, #123575 0%, transparent 45%),
+        radial-gradient(circle at 92% -5%, #0f2a57 0%, transparent 40%),
+        linear-gradient(170deg, #05102a, var(--bg));
+      font-family: "Chakra Petch", sans-serif;
+      min-height: 100vh;
+    }
+
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background-image:
+        linear-gradient(rgba(93, 126, 182, 0.08) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(93, 126, 182, 0.08) 1px, transparent 1px);
+      background-size: 36px 36px;
+      opacity: 0.35;
+      mix-blend-mode: screen;
+    }
+
+    .container {
+      max-width: 1520px;
+      margin: 0 auto;
+      padding: 16px 18px 26px;
+      position: relative;
+      z-index: 1;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 12px 14px;
+      background: rgba(7, 16, 36, 0.86);
+      backdrop-filter: blur(3px);
+      box-shadow: 0 14px 40px rgba(1, 6, 18, 0.5);
+      margin-bottom: 14px;
+    }
+
+    .brand {
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      font-size: 26px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .brand i {
+      color: var(--accent);
+      font-style: normal;
+      font-family: "Space Mono", monospace;
+      font-weight: 700;
+    }
+
+    .status-pill {
+      border: 1px solid #2a4578;
+      color: #b8d8ff;
+      background: rgba(9, 28, 58, 0.68);
+      border-radius: 999px;
+      padding: 8px 12px;
+      letter-spacing: 0.08em;
+      font-size: 12px;
+      font-family: "Space Mono", monospace;
+      text-transform: uppercase;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 320px 1fr 360px;
+      gap: 14px;
+      align-items: start;
+    }
+
+    .center-stack {
+      display: grid;
+      gap: 14px;
+      align-content: start;
+      min-width: 0;
+    }
+
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: linear-gradient(180deg, rgba(17, 32, 64, 0.92), rgba(10, 21, 43, 0.9));
+      box-shadow: 0 16px 44px rgba(0, 7, 20, 0.5);
+    }
+
+    .card-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 12px 14px;
+      border-bottom: 1px solid rgba(40, 63, 106, 0.9);
+      font-weight: 600;
+      letter-spacing: 0.03em;
+      font-size: 19px;
+    }
+
+    .card-body {
+      padding: 12px 14px 14px;
+    }
+
+    .stack {
+      display: grid;
+      gap: 12px;
+    }
+
+    .stat-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .stat {
+      border: 1px solid #223a6a;
+      background: rgba(8, 20, 44, 0.86);
+      border-radius: 10px;
+      padding: 10px;
+    }
+
+    .stat b {
+      display: block;
+      font-size: 19px;
+      margin-top: 3px;
+      color: #f1f6ff;
+    }
+
+    .stat span {
+      color: var(--muted);
+      font-family: "Space Mono", monospace;
+      font-size: 11px;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    label {
+      display: block;
+      font-family: "Space Mono", monospace;
+      color: #a8bddf;
+      font-size: 11px;
+      letter-spacing: 0.06em;
+      margin-bottom: 6px;
+      text-transform: uppercase;
+    }
+
+    input,
+    select,
+    button {
+      font: inherit;
+    }
+
+    input,
+    select {
+      width: 100%;
+      border: 1px solid #355483;
+      background: #08142f;
+      color: #d5e8ff;
+      border-radius: 10px;
+      padding: 11px 12px;
+      outline: none;
+    }
+
+    .tier-buttons {
+      display: flex;
+      gap: 8px;
+    }
+
+    .tier-buttons button {
+      flex: 1;
+      border: 1px solid #2f4f84;
+      color: #d6e7ff;
+      background: #0c1a37;
+      border-radius: 9px;
+      padding: 9px 8px;
+      cursor: pointer;
+      transition: all 0.16s ease;
+    }
+
+    .tier-buttons button.active {
+      background: linear-gradient(180deg, #14386f, #0f2c5a);
+      border-color: #57bcff;
+      box-shadow: 0 0 0 1px rgba(81, 177, 255, 0.25) inset;
+    }
+
+    .row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .row>* {
+      min-width: 0;
+    }
+
+    .btn-primary {
+      width: 100%;
+      border: 0;
+      border-radius: 10px;
+      background: linear-gradient(140deg, #2ee0ff, #52ffbe);
+      color: #001529;
+      padding: 11px 12px;
+      font-weight: 700;
+      cursor: pointer;
+      letter-spacing: 0.02em;
+    }
+
+    .btn-ghost {
+      border: 1px solid #2f4f82;
+      color: #d5e6ff;
+      background: #0e2246;
+      border-radius: 9px;
+      padding: 10px 11px;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+
+    .hint {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.4;
+    }
+
+    .seed-wrap {
+      display: flex;
+      gap: 7px;
+      flex-wrap: wrap;
+      max-height: 170px;
+      overflow: auto;
+      padding-right: 2px;
+    }
+
+    .chip {
+      border: 1px solid #34588f;
+      border-radius: 999px;
+      background: #102246;
+      color: #d2e3ff;
+      padding: 6px 10px;
+      font-size: 12px;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+
+    .graph-card {
+      min-height: 760px;
+      display: grid;
+      grid-template-rows: auto 1fr;
+    }
+
+    .graph-card.fullscreen {
+      position: fixed;
+      inset: 12px;
+      z-index: 70;
+      margin: 0;
+      min-height: auto;
+    }
+
+    body.fullscreen-lock {
+      overflow: hidden;
+    }
+
+    .graph-stage {
+      position: relative;
+      min-height: 670px;
+      border-radius: 12px;
+      margin: 11px;
+      border: 1px solid rgba(44, 73, 122, 0.7);
+      background:
+        radial-gradient(circle at 70% 20%, rgba(27, 56, 103, 0.35), transparent 45%),
+        linear-gradient(170deg, #07142f, #071125);
+      overflow: hidden;
+    }
+
+    .graph-card.fullscreen .graph-stage {
+      min-height: calc(100vh - 112px);
+    }
+
+    #graphSvg {
+      width: 100%;
+      height: 100%;
+      display: block;
+      cursor: grab;
+    }
+
+    #graphSvg:active {
+      cursor: grabbing;
+    }
+
+    .sankey-stage {
+      position: relative;
+      min-height: 670px;
+      border-radius: 12px;
+      margin: 11px;
+      border: 1px solid rgba(44, 73, 122, 0.7);
+      background: linear-gradient(170deg, #07142f, #071125);
+      display: none;
+      padding: 20px;
+    }
+
+    .sankey-stage.active {
+      display: block;
+    }
+    
+    .predictive-stage {
+      position: relative;
+      min-height: 670px;
+      border-radius: 12px;
+      margin: 11px;
+      border: 1px solid rgba(122, 44, 44, 0.7);
+      background: linear-gradient(170deg, #1f0505, #110303);
+      display: none;
+      padding: 20px;
+    }
+
+    .predictive-stage.active {
+      display: block;
+    }
+    
+    .topic-stage {
+      position: relative;
+      min-height: 670px;
+      border-radius: 12px;
+      margin: 11px;
+      border: 1px solid rgba(138, 43, 226, 0.7);
+      background: linear-gradient(170deg, #1b0a2e, #0d0417);
+      display: none;
+      padding: 20px;
+    }
+
+    .topic-stage.active {
+      display: block;
+    }
+    
+    .graph-stage.hidden {
+      display: none;
+    }
+
+    .graph-overlay {
+      position: absolute;
+      left: 14px;
+      top: 14px;
+      font-family: "Space Mono", monospace;
+      font-size: 11px;
+      letter-spacing: 0.05em;
+      color: #9fbae0;
+      text-transform: uppercase;
+      padding: 7px 10px;
+      border: 1px solid #2f4e82;
+      border-radius: 999px;
+      background: rgba(9, 24, 49, 0.8);
+    }
+
+    .legend {
+      position: absolute;
+      right: 14px;
+      top: 14px;
+      border: 1px solid #2e4d80;
+      background: rgba(8, 21, 44, 0.86);
+      border-radius: 12px;
+      padding: 10px 11px;
+      min-width: 150px;
+      font-size: 12px;
+    }
+
+    .legend h4 {
+      margin: 0 0 8px;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #b5caec;
+      font-family: "Space Mono", monospace;
+    }
+
+    .legend .item {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      margin-bottom: 6px;
+      color: #c9ddff;
+    }
+
+    .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      display: inline-block;
+    }
+
+    .details {
+      min-height: 760px;
+      display: grid;
+      grid-template-rows: auto 1fr;
+    }
+
+    .detail-scroll {
+      overflow: auto;
+      max-height: 700px;
+      padding: 12px 14px;
+    }
+
+    .label {
+      color: #8fa8ce;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      font-size: 11px;
+      font-family: "Space Mono", monospace;
+      margin-bottom: 5px;
+    }
+
+    .kpi {
+      border: 1px solid #2c4b7f;
+      border-radius: 10px;
+      padding: 8px 9px;
+      background: #0d1f42;
+      margin-bottom: 8px;
+    }
+
+    .kpi b {
+      font-size: 18px;
+    }
+
+    .mini-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: grid;
+      gap: 8px;
+    }
+
+    .mini-list li {
+      border: 1px solid #294777;
+      border-radius: 10px;
+      background: #0b1a38;
+      padding: 9px;
+      line-height: 1.35;
+      font-size: 13px;
+      color: #d5e7ff;
+    }
+
+    .mini-list small {
+      display: block;
+      color: #90a8cc;
+      margin-top: 4px;
+      font-family: "Space Mono", monospace;
+      font-size: 11px;
+    }
+
+    .hop-chain {
+      border: 1px solid #2e4d7f;
+      border-radius: 10px;
+      padding: 10px 12px;
+      background: #0d2042;
+      margin-bottom: 10px;
+      line-height: 1.45;
+      color: #deebff;
+      font-family: "Space Mono", monospace;
+      font-size: 12px;
+    }
+
+    .rel-pill {
+      display: inline-block;
+      border: 1px solid #2f4f82;
+      border-radius: 999px;
+      padding: 4px 8px;
+      font-size: 11px;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      font-family: "Space Mono", monospace;
+      margin-bottom: 8px;
+      color: #cbdefd;
+      background: #0d2143;
+    }
+
+    .badge-row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+      margin: 6px 0 10px;
+    }
+
+    .policy-badge {
+      display: inline-block;
+      border: 1px solid #2f4f82;
+      border-radius: 999px;
+      padding: 4px 8px;
+      font-size: 11px;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      font-family: "Space Mono", monospace;
+      color: #cfe0ff;
+      background: #11274f;
+    }
+
+    .policy-badge.strong-signal {
+      border-color: #1f8a6b;
+      background: #103f35;
+      color: #bbffdf;
+    }
+
+    .policy-badge.weak-signal {
+      border-color: #2f4f82;
+      background: #0d2143;
+      color: #cfe0ff;
+    }
+
+    .policy-badge.needs-review {
+      border-color: #8e5e16;
+      background: #3a2a11;
+      color: #ffe1a3;
+    }
+
+    mark {
+      background: rgba(255, 200, 87, 0.28);
+      color: #fff7dc;
+      border-radius: 3px;
+      padding: 0 2px;
+    }
+
+    .edge-title {
+      font-size: 21px;
+      margin: 0 0 10px;
+      line-height: 1.15;
+      color: #f2f7ff;
+    }
+
+    .muted {
+      color: var(--muted);
+    }
+
+    .toolbar {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      margin-top: 8px;
+    }
+
+    .toolbar button {
+      border: 1px solid #2f4f82;
+      background: #0e2246;
+      color: #d5e6ff;
+      border-radius: 8px;
+      padding: 8px 10px;
+      cursor: pointer;
+    }
+
+    .toolbar.wrap {
+      flex-wrap: wrap;
+    }
+
+    .detail-tabs {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+
+    .detail-tab-btn {
+      border: 1px solid #2f4f82;
+      background: #0e2246;
+      color: #cfe2ff;
+      border-radius: 8px;
+      padding: 7px 10px;
+      cursor: pointer;
+      font-family: "Space Mono", monospace;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .detail-tab-btn.active {
+      border-color: #57bcff;
+      box-shadow: 0 0 0 1px rgba(81, 177, 255, 0.24) inset;
+      background: #123665;
+      color: #e8f3ff;
+    }
+
+    .detail-tab-pane {
+      display: none;
+    }
+
+    .detail-tab-pane.active {
+      display: block;
+    }
+
+    .bottom-grid {
+      display: grid;
+      grid-template-columns: 1.05fr 1.2fr 1.2fr;
+      gap: 12px;
+    }
+
+    .mini-card {
+      border: 1px solid #284575;
+      border-radius: 10px;
+      background: #0a1a37;
+      padding: 10px;
+    }
+
+    .mini-card h4 {
+      margin: 0 0 8px;
+      font-size: 13px;
+      color: #d8e8ff;
+      font-family: "Space Mono", monospace;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    .kpi-row {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 7px;
+    }
+
+    .topic-wrap,
+    .tech-wrap {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .topic-bubble {
+      background: #112d59;
+      border: 1px solid #285499;
+      color: #bfe0ff;
+      border-radius: 999px;
+      padding: 4px 8px;
+      font-size: 11px;
+      font-family: "Space Mono", monospace;
+    }
+
+    .tech-bubble {
+      background: #0f3f35;
+      border: 1px solid #1a7563;
+      color: #9cffdc;
+      border-radius: 999px;
+      padding: 4px 8px;
+      font-size: 11px;
+      font-weight: 700;
+      font-family: "Space Mono", monospace;
+    }
+
+    .kpi-mini {
+      border: 1px solid #2d4a7b;
+      background: #0f2348;
+      border-radius: 9px;
+      padding: 7px 8px;
+    }
+
+    .kpi-mini .k {
+      font-family: "Space Mono", monospace;
+      color: #89a5cf;
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      display: block;
+    }
+
+    .kpi-mini .v {
+      color: #ebf4ff;
+      font-size: 15px;
+      font-weight: 700;
+    }
+
+    .candidate-list,
+    .question-list {
+      display: grid;
+      gap: 8px;
+    }
+
+    .candidate-item,
+    .question-item {
+      border: 1px solid #2b4779;
+      border-radius: 9px;
+      background: #0d1f42;
+      padding: 8px 9px;
+      font-size: 12px;
+      line-height: 1.35;
+      color: #d4e6ff;
+    }
+
+    .pill {
+      display: inline-block;
+      border: 1px solid #2f4f82;
+      border-radius: 999px;
+      padding: 2px 7px;
+      margin-right: 6px;
+      font-size: 10px;
+      font-family: "Space Mono", monospace;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    .pill.high {
+      border-color: #2d7f66;
+      color: #a9ffd8;
+      background: #124434;
+    }
+
+    .pill.medium {
+      border-color: #6a84ad;
+      color: #d2e4ff;
+      background: #1a325a;
+    }
+
+    .pill.low {
+      border-color: #5e6f8e;
+      color: #c7d3e6;
+      background: #17263f;
+    }
+
+    @keyframes pulse-dash {
+      to {
+        stroke-dashoffset: -24;
+      }
+    }
+
+    .activity {
+      margin-top: 14px;
+      border: 1px solid #294675;
+      border-radius: 10px;
+      background: #0a1a38;
+      padding: 10px;
+      font-size: 12px;
+      color: #adc4e8;
+      font-family: "Space Mono", monospace;
+      min-height: 96px;
+      white-space: pre-wrap;
+    }
+
+    .error {
+      color: #ffd4d9;
+      border: 1px solid #6f2c42;
+      border-radius: 10px;
+      background: #2a1020;
+      padding: 10px;
+      font-size: 13px;
+    }
+
+    .footer-note {
+      margin-top: 12px;
+      color: #7e97bf;
+      font-size: 12px;
+      text-align: center;
+      line-height: 1.4;
+      font-family: "Space Mono", monospace;
+    }
+
+    @media (max-width: 1250px) {
+      .layout {
+        grid-template-columns: 1fr;
+      }
+
+      .bottom-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .graph-card,
+      .details {
+        min-height: 540px;
+      }
+
+      .detail-scroll {
+        max-height: 420px;
+      }
+
+      .graph-stage {
+        min-height: 460px;
+      }
+
+      .graph-card.fullscreen {
+        inset: 4px;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="container">
+    <div class="topbar">
+      <div class="brand"><i>&gt;_</i> REEF_INTELLIGENCE_SCANNER // NETWORK CONSOLE</div>
+      <div class="status-pill" id="statusPill">Grounding Engine Active</div>
+    </div>
+
+    <div class="layout">
+      <section class="card">
+        <div class="card-head">Mission Controls</div>
+        <div class="card-body stack">
+          <div class="stat-grid" id="statsGrid"></div>
+
+          <div>
+            <label for="rootEntity">Root Entity</label>
+            <input id="rootEntity" list="seedOptions" placeholder="e.g. PDMN" />
+            <datalist id="seedOptions"></datalist>
+          </div>
+
+          <div>
+            <label for="viewMode">Analysis Mode</label>
+            <select id="viewMode">
+              <option value="evidence" selected>Evidence View</option>
+              <option value="predictive">Predictive View (Future 30d)</option>
+              <option value="blind_spot">Blind Spot View</option>
+              <option value="unknown_unknown">Unknown-Unknown View</option>
+              <option value="question_planner">Question Planner</option>
+            </select>
+          </div>
+
+          <div>
+            <label>Trace Two-Person Path</label>
+            <input id="pathSource" list="seedOptions" placeholder="Person A" />
+            <div style="height:8px"></div>
+            <input id="pathTarget" list="seedOptions" placeholder="Person B" />
+            <div class="row" style="margin-top:8px;">
+              <select id="pathHops" style="max-width:120px;">
+                <option value="1">1 hop</option>
+                <option value="2">2 hops</option>
+                <option value="3" selected>3 hops</option>
+              </select>
+              <button class="btn-ghost" id="tracePathBtn">Trace Path</button>
+              <button class="btn-ghost" id="clearPathBtn">Clear</button>
+            </div>
+            <div class="row" style="margin-top:8px;">
+              <button class="btn-ghost" id="exportPackBtn">Export Forensic Pack</button>
+            </div>
+          </div>
+
+          <div>
+            <label>Semantic Concept Search</label>
+            <input id="semanticQuery" placeholder='e.g. "wire transfer to island property"' />
+            <div class="row" style="margin-top:8px;">
+              <button class="btn-ghost" id="semanticBtn">Semantic Search</button>
+            </div>
+          </div>
+
+          <div>
+            <label>Tier Depth</label>
+            <div class="tier-buttons" id="tierButtons">
+              <button data-tier="1">Tier 1</button>
+              <button data-tier="2" class="active">Tier 2</button>
+              <button data-tier="3">Tier 3</button>
+            </div>
+          </div>
+
+          <div>
+            <label for="minShared">Min Shared Chunks</label>
+            <div class="row">
+              <input id="minShared" type="range" min="1" max="6" step="1" value="2" />
+              <span id="minSharedLabel" class="muted" style="min-width:28px;text-align:right;">2</span>
+            </div>
+          </div>
+
+          <div class="row">
+            <button class="btn-primary" id="renderBtn">Render Network</button>
+            <button class="btn-primary" id="sankeyBtn" style="background: linear-gradient(140deg, #5c62ff, #73b3ff); color: #fff;">Trend Flow</button>
+            <button class="btn-primary" id="predictiveBtn" style="background: linear-gradient(140deg, #ff5e62, #ff9966); color: #fff;">Predictive Trends</button>
+            <button class="btn-primary" id="topicBtn" style="background: linear-gradient(140deg, #b05eff, #e599ff); color: #fff;">Message Trends</button>
+          </div>
+          <button class="btn-ghost" id="discoverHiddenBtn">Discover Hidden Connections</button>
+
+          <div>
+            <label>Top People Seeds</label>
+            <div id="seedWrap" class="seed-wrap"></div>
+          </div>
+
+          <p class="hint">Edges mean co-mentions in the archive text. Click any edge to view evidence snippets and
+            source documents.</p>
+
+          <div class="activity" id="activityLog">[init] awaiting graph query...</div>
+        </div>
+      </section>
+
+      <div class="center-stack">
+        <section class="card graph-card">
+          <div class="card-head">
+            Force-Directed Tier Network
+            <div class="row">
+              <button class="btn-ghost" id="fullscreenBtn" style="padding:6px 10px;">Fullscreen</button>
+              <span class="muted" id="graphMeta">No graph loaded</span>
+            </div>
+          </div>
+          <div class="graph-stage" id="graphStage">
+            <div class="graph-overlay" id="graphOverlay">Select a root entity to begin</div>
+            <div class="legend">
+              <h4>Tier Legend</h4>
+              <div class="item"><span class="dot" style="background:#ff6171"></span> Tier 0 (Root)</div>
+              <div class="item"><span class="dot" style="background:#47d2ff"></span> Tier 1</div>
+              <div class="item"><span class="dot" style="background:#7dffb0"></span> Tier 2</div>
+              <div class="item"><span class="dot" style="background:#ffc857"></span> Tier 3</div>
+              <div class="item"><span class="dot" style="background:#ffc857"></span> Unknown Candidate (dotted
+                hypothesis)</div>
+            </div>
+            <svg id="graphSvg"></svg>
+          </div>
+          <div class="sankey-stage" id="sankeyContainer">
+            <svg id="sankeySvg" style="width: 100%; height: 100%; display: block;"></svg>
+            <div class="graph-overlay" id="sankeyOverlay" style="color: #b7cefb;">Tech Stack Adoption Flow</div>
+          </div>
+          <div class="predictive-stage" id="predictiveContainer">
+            <svg id="predictiveSvg" style="width: 100%; height: 100%; display: block;"></svg>
+            <div class="graph-overlay" id="predictiveOverlay" style="color: #ff9966;">Monte Carlo Predictions Over Time</div>
+          </div>
+          <div class="topic-stage" id="topicContainer">
+            <svg id="topicSvg" style="width: 100%; height: 100%; display: block;"></svg>
+            <div class="graph-overlay" id="topicOverlay" style="color: #e599ff;">Message Trends & Monte Carlo Forecasts</div>
+          </div>
+        </section>
+
+        <section class="card bottom-strip">
+          <div class="card-head">Blind Spots & Ecosystem Analytics</div>
+          <div class="card-body bottom-grid" style="grid-template-columns: 1fr 1fr 1fr 1fr 1fr">
+            <div class="mini-card">
+              <h4>Visibility Coverage</h4>
+              <div id="blindSpotSummary" class="kpi-row"></div>
+            </div>
+            <div class="mini-card">
+              <h4>Unknown Candidates</h4>
+              <div id="unknownSummary" class="candidate-list">
+                <div class="muted">Run discovery to populate hidden-candidate hypotheses.</div>
+              </div>
+            </div>
+            <div class="mini-card">
+              <h4>Next Questions</h4>
+              <div id="nextQuestions" class="question-list">
+                <div class="muted">AI planner suggestions appear after graph/frontier analysis.</div>
+              </div>
+            </div>
+            <div class="mini-card">
+              <h4>Top Tech Capabilities</h4>
+              <div id="topTechWrapper" class="tech-wrap">
+                <div class="muted">Loading content stats...</div>
+              </div>
+            </div>
+            <div class="mini-card">
+              <h4>Ecosystem Trending Topics</h4>
+              <div id="topTopicsWrapper" class="topic-wrap">
+                <div class="muted">Loading content stats...</div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <section class="card details">
+        <div class="card-head">Connection Evidence</div>
+        <div class="detail-scroll" id="detailPanel">
+          <p class="muted">Click a node to inspect neighbors or click an edge to see <strong>why</strong> the connection
+            exists.</p>
+        </div>
+      </section>
+    </div>
+
+    <div class="footer-note">
+      Evidence model: relation score = 3 * shared_chunks + shared_docs + log(1 + shared_docs).<br>
+      This interface shows document co-mentions, not legal conclusions.
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/d3-sankey@0.12.3/dist/d3-sankey.min.js"></script>
+  <script>
+    const API = 'http://127.0.0.1:8000';
+    const REL_LABELS = {
+      co_mention: 'Co-mention',
+      business: 'Business / Financial',
+      friend_social: 'Social / Personal',
+      suspicious_signal: 'Suspicious Signal',
+      signal_only: 'Signal Only (Review Needed)',
+    };
+    const SIGNAL_BADGE_LABELS = {
+      'weak-signal': 'Weak Signal',
+      'strong-signal': 'Strong Signal',
+      'needs-review': 'Needs Review',
+    };
+
+    const state = {
+      tier: 2,
+      minSharedChunks: 2,
+      rootEntity: 'PDMN',
+      seeds: [],
+      graph: null,
+      simulation: null,
+      activePath: null,
+      isFullscreen: false,
+      viewMode: 'evidence',
+      frontier: null,
+      candidateIndex: {},
+      predictiveStats: null,
+      messageTrends: null,
+    };
+
+    const statsGrid = document.getElementById('statsGrid');
+    const seedWrap = document.getElementById('seedWrap');
+    const seedOptions = document.getElementById('seedOptions');
+    const rootInput = document.getElementById('rootEntity');
+    const viewMode = document.getElementById('viewMode');
+    const renderBtn = document.getElementById('renderBtn');
+    const discoverHiddenBtn = document.getElementById('discoverHiddenBtn');
+    const detailPanel = document.getElementById('detailPanel');
+    const graphMeta = document.getElementById('graphMeta');
+    const graphOverlay = document.getElementById('graphOverlay');
+    const activityLog = document.getElementById('activityLog');
+    const minShared = document.getElementById('minShared');
+    const minSharedLabel = document.getElementById('minSharedLabel');
+    const pathSource = document.getElementById('pathSource');
+    const pathTarget = document.getElementById('pathTarget');
+    const pathHops = document.getElementById('pathHops');
+    const tracePathBtn = document.getElementById('tracePathBtn');
+    const clearPathBtn = document.getElementById('clearPathBtn');
+    const exportPackBtn = document.getElementById('exportPackBtn');
+    const semanticQuery = document.getElementById('semanticQuery');
+    const semanticBtn = document.getElementById('semanticBtn');
+    const graphCard = document.querySelector('.graph-card');
+    const fullscreenBtn = document.getElementById('fullscreenBtn');
+    const blindSpotSummary = document.getElementById('blindSpotSummary');
+    const unknownSummary = document.getElementById('unknownSummary');
+    const nextQuestions = document.getElementById('nextQuestions');
+    const topTechWrapper = document.getElementById('topTechWrapper');
+    const topTopicsWrapper = document.getElementById('topTopicsWrapper');
+    
+    // Sankey elements
+    const sankeyBtn = document.getElementById('sankeyBtn');
+    const sankeyContainer = document.getElementById('sankeyContainer');
+    const graphContainer = document.getElementById('graphStage');
+    const sankeySvg = d3.select('#sankeySvg');
+    
+    // Predictive elements
+    const predictiveBtn = document.getElementById('predictiveBtn');
+    const predictiveContainer = document.getElementById('predictiveContainer');
+    const predictiveSvg = d3.select('#predictiveSvg');
+    
+    // Topic elements
+    const topicBtn = document.getElementById('topicBtn');
+    const topicContainer = document.getElementById('topicContainer');
+    const topicSvg = d3.select('#topicSvg');
+    
+    let isSankeyMode = false;
+    let isPredictiveMode = false;
+    let isTopicMode = false;
+    
+    function resetViewModes() {
+      isSankeyMode = false;
+      isPredictiveMode = false;
+      isTopicMode = false;
+      sankeyContainer.classList.remove('active');
+      predictiveContainer.classList.remove('active');
+      topicContainer.classList.remove('active');
+      graphContainer.classList.remove('hidden');
+      sankeyBtn.textContent = 'Trend Flow';
+      predictiveBtn.textContent = 'Predictive Trends';
+      topicBtn.textContent = 'Message Trends';
+      renderBtn.style.display = 'block';
+      sankeyBtn.style.display = 'block';
+      predictiveBtn.style.display = 'block';
+      topicBtn.style.display = 'block';
+    }
+    
+    function toggleSankeyMode() {
+      if (!isSankeyMode) {
+        resetViewModes();
+        isSankeyMode = true;
+        graphContainer.classList.add('hidden');
+        predictiveBtn.style.display = 'none';
+        topicBtn.style.display = 'none';
+        sankeyContainer.classList.add('active');
+        sankeyBtn.textContent = 'Network View';
+        renderBtn.style.display = 'none';
+        renderSankey();
+      } else {
+        resetViewModes();
+      }
+    }
+
+    function togglePredictiveMode() {
+      if (!isPredictiveMode) {
+        resetViewModes();
+        isPredictiveMode = true;
+        graphContainer.classList.add('hidden');
+        sankeyBtn.style.display = 'none';
+        topicBtn.style.display = 'none';
+        predictiveContainer.classList.add('active');
+        predictiveBtn.textContent = 'Network View';
+        renderBtn.style.display = 'none';
+        renderPredictiveTrends();
+      } else {
+        resetViewModes();
+      }
+    }
+    
+    function toggleTopicMode() {
+      if (!isTopicMode) {
+        resetViewModes();
+        isTopicMode = true;
+        graphContainer.classList.add('hidden');
+        sankeyBtn.style.display = 'none';
+        predictiveBtn.style.display = 'none';
+        topicContainer.classList.add('active');
+        topicBtn.textContent = 'Network View';
+        renderBtn.style.display = 'none';
+        renderTopicTrends();
+      } else {
+        resetViewModes();
+      }
+    }
+    
+    function renderSankey() {
+      if (!state.techTimeseries || state.techTimeseries.length === 0) {
+        sankeyContainer.innerHTML = '<div class="muted">No timeseries data available yet. Please run content collector.</div>';
+        return;
+      }
+      
+      sankeySvg.selectAll('*').remove();
+      
+      // Build Sankey Nodes and Links based on the latest snapshot 
+      // linking "Agent" -> "Top Tech" (Using mock flow for UI demo if agent maps aren't fully timeseries)
+      // Actually, since we have global Tech and global Topics, let's map Tech Category -> Topic to show relations
+      // But we just have raw counts.
+      // Let's create a beautiful Sankey that flows from the "Date" -> "Tech" to show adoption volume
+      
+      const latestData = state.techTimeseries[state.techTimeseries.length - 1];
+      const nodes = [{id: latestData.date}]; // Root node is the date
+      const links = [];
+      
+      latestData.top_tech.forEach(t => {
+        nodes.push({id: t.tech});
+        links.push({source: latestData.date, target: t.tech, value: t.count});
+      });
+      
+      const width = sankeyContainer.clientWidth - 40;
+      const height = sankeyContainer.clientHeight - 40;
+      
+      const sankey = d3.sankey()
+          .nodeId(d => d.id)
+          .nodeWidth(20)
+          .nodePadding(15)
+          .extent([[10, 10], [width - 10, height - 10]]);
+
+      const graph = sankey({
+          nodes: nodes.map(d => Object.assign({}, d)),
+          links: links.map(d => Object.assign({}, d))
+      });
+
+      const color = d3.scaleOrdinal(d3.schemePaired);
+
+      sankeySvg.append("g")
+          .selectAll("rect")
+          .data(graph.nodes)
+          .join("rect")
+              .attr("x", d => d.x0)
+              .attr("y", d => d.y0)
+              .attr("height", d => d.y1 - d.y0)
+              .attr("width", d => d.x1 - d.x0)
+              .attr("fill", d => color(d.id))
+              .attr("opacity", 0.8)
+          .append("title")
+              .text(d => `${d.id}\n${d.value}`);
+
+      const link = sankeySvg.append("g")
+          .attr("fill", "none")
+          .attr("stroke-opacity", 0.3)
+          .selectAll("g")
+          .data(graph.links)
+          .join("g")
+          .style("mix-blend-mode", "screen");
+
+      link.append("path")
+          .attr("d", d3.sankeyLinkHorizontal())
+          .attr("stroke", d => color(d.source.id))
+          .attr("stroke-width", d => Math.max(1, d.width));
+          
+      sankeySvg.append("g")
+          .attr("font-size", 12)
+          .attr("fill", "#b7cefb")
+          .selectAll("text")
+          .data(graph.nodes)
+          .join("text")
+              .attr("x", d => d.x0 < width / 2 ? d.x1 + 6 : d.x0 - 6)
+              .attr("y", d => (d.y1 + d.y0) / 2)
+              .attr("dy", "0.35em")
+              .attr("text-anchor", d => d.x0 < width / 2 ? "start" : "end")
+              .text(d => d.id)
+              .style("font-family", "Space Mono");
+    }
+
+    function renderPredictiveTrends() {
+      if (!Array.isArray(state.predictiveStats) || state.predictiveStats.length === 0) {
+        predictiveContainer.innerHTML = '<div class="muted">No Monte Carlo predictions available yet. Please run simulate_network.py.</div>';
+        return;
+      }
+      
+      predictiveSvg.selectAll('*').remove();
+      
+      const margin = {top: 40, right: 100, bottom: 40, left: 50};
+      const width = predictiveContainer.clientWidth - margin.left - margin.right;
+      const height = predictiveContainer.clientHeight - margin.top - margin.bottom;
+      
+      const svg = predictiveSvg.append("g")
+        .attr("transform", `translate(${margin.left},${margin.top})`);
+        
+      const groupedData = {};
+      const dateParser = d3.timeParse("%Y-%m-%d");
+      
+      state.predictiveStats.forEach(snapshot => {
+        const d = dateParser(snapshot.date);
+        
+        // Use top 3 hidden alliances as the main trend lines
+        snapshot.hidden_alliances.slice(0, 3).forEach(alliance => {
+            const pairName = `${alliance.source} ↔ ${alliance.target}`;
+            if (!groupedData[pairName]) groupedData[pairName] = [];
+            groupedData[pairName].push({ date: d, probability: alliance.probability * 100 });
+        });
+      });
+      
+      const allValues = [];
+      const series = Object.keys(groupedData).map(k => {
+          groupedData[k].forEach(v => allValues.push(v));
+          // Sort by date inside
+          groupedData[k].sort((a,b) => a.date - b.date);
+          return { name: k, values: groupedData[k] };
+      });
+      
+      const dateExtent = d3.extent(allValues, d => d.date);
+      // If there's only one date, pad it by 1 day on each side so it centers
+      if (dateExtent[0] && dateExtent[1] && dateExtent[0].getTime() === dateExtent[1].getTime()) {
+          const d = dateExtent[0];
+          dateExtent[0] = new Date(d.getTime() - 86400000);
+          dateExtent[1] = new Date(d.getTime() + 86400000);
+      }
+      
+      const x = d3.scaleTime()
+        .domain(dateExtent)
+        .range([0, width]);
+        
+      svg.append("g")
+        .attr("transform", `translate(0,${height})`)
+        .attr("color", "#748cae")
+        .call(d3.axisBottom(x).ticks(5).tickFormat(d3.timeFormat("%b %d")));
+        
+      const y = d3.scaleLinear()
+        .domain([0, d3.max(allValues, d => d.probability) * 1.2 || 100])
+        .range([height, 0]);
+        
+      svg.append("g")
+        .attr("color", "#748cae")
+        .call(d3.axisLeft(y).ticks(5).tickFormat(d => d + "%"));
+        
+      const line = d3.line()
+        .x(d => x(d.date))
+        .y(d => y(d.probability))
+        .curve(d3.curveMonotoneX);
+        
+      const color = d3.scaleOrdinal(d3.schemeCategory10);
+      
+      svg.selectAll(".line-group")
+        .data(series)
+        .join("g")
+        .attr("class", "line-group")
+        .append("path")
+          .attr("fill", "none")
+          .attr("stroke", d => color(d.name))
+          .attr("stroke-width", 3)
+          .attr("d", d => line(d.values));
+          
+      // Add dots for data points (essential when there is only 1 data point)
+      svg.selectAll(".dot-group")
+        .data(series)
+        .join("g")
+        .attr("class", "dot-group")
+        .attr("fill", d => color(d.name))
+        .selectAll("circle")
+        .data(d => d.values)
+        .join("circle")
+          .attr("cx", d => x(d.date))
+          .attr("cy", d => y(d.probability))
+          .attr("r", 5);
+          
+      // Add labels
+      svg.selectAll(".line-label")
+        .data(series)
+        .join("text")
+        .attr("class", "line-label")
+        .datum(d => { return {name: d.name, value: d.values[d.values.length - 1]}; })
+        .attr("transform", d => `translate(${x(d.value.date)},${y(d.value.probability)})`)
+        .attr("x", 8)
+        .attr("dy", "0.35em")
+        .style("fill", d => color(d.name))
+        .style("font-size", "12px")
+        .style("font-family", "Space Mono")
+        .text(d => d.name);
+    }
+    
+    function renderTopicTrends() {
+      if (!state.messageTrends || Object.keys(state.messageTrends).length === 0) {
+        topicContainer.innerHTML = '<div class="muted">No historical topic data available yet. Please run backfiller.</div>';
+        return;
+      }
+      
+      topicSvg.selectAll('*').remove();
+      
+      const margin = {top: 40, right: 140, bottom: 40, left: 50};
+      const width = topicContainer.clientWidth - margin.left - margin.right;
+      const height = topicContainer.clientHeight - margin.top - margin.bottom;
+      
+      const svg = topicSvg.append("g")
+        .attr("transform", `translate(${margin.left},${margin.top})`);
+        
+      const groupedData = {}; // History line
+      const forecastData = {}; // Forecast dashed line
+      const dateParser = d3.timeParse("%Y-%m-%d");
+      
+      // Parse history
+      const sortedHistoryDays = Object.keys(state.messageTrends).sort();
+      sortedHistoryDays.forEach(ds => {
+          const d = dateParser(ds);
+          Object.keys(state.messageTrends[ds]).forEach(topic => {
+              if (topic === "_post_count") return;
+              if (!groupedData[topic]) groupedData[topic] = [];
+              groupedData[topic].push({ date: d, count: state.messageTrends[ds][topic] });
+          });
+      });
+      
+      // Retrieve forecasts from latest snapshot
+      const currentPredictiveStats = Array.isArray(state.predictiveStats) && state.predictiveStats.length > 0
+        ? state.predictiveStats[state.predictiveStats.length - 1] 
+        : (state.predictiveStats || {});
+        
+      if (currentPredictiveStats.topic_predictions && sortedHistoryDays.length > 0) {
+          const lastHistoryDate = dateParser(sortedHistoryDays[sortedHistoryDays.length - 1]);
+          
+          Object.keys(currentPredictiveStats.topic_predictions).forEach(topic => {
+              const predictions = currentPredictiveStats.topic_predictions[topic];
+              if (!forecastData[topic]) forecastData[topic] = [];
+              
+              // Seed the forecast line with the last historical point so lines connect seamlessly
+              if (groupedData[topic] && groupedData[topic].length > 0) {
+                  forecastData[topic].push(groupedData[topic][groupedData[topic].length - 1]);
+              }
+              
+              predictions.forEach((predictedCount, dayOffset) => {
+                  const d = new Date(lastHistoryDate.getTime() + (dayOffset + 1) * 86400000);
+                  forecastData[topic].push({ date: d, count: predictedCount });
+              });
+          });
+      }
+      
+      const allValues = [];
+      const seriesHistory = Object.keys(groupedData).map(k => {
+          groupedData[k].forEach(v => allValues.push(v));
+          groupedData[k].sort((a,b) => a.date - b.date);
+          return { name: k, values: groupedData[k] };
+      });
+      
+      const seriesForecast = Object.keys(forecastData).map(k => {
+          forecastData[k].forEach(v => allValues.push(v));
+          forecastData[k].sort((a,b) => a.date - b.date);
+          return { name: k, values: forecastData[k] };
+      });
+      
+      const dateExtent = d3.extent(allValues, d => d.date);
+      if (dateExtent[0] && dateExtent[1] && dateExtent[0].getTime() === dateExtent[1].getTime()) {
+          const d = dateExtent[0];
+          dateExtent[0] = new Date(d.getTime() - 86400000);
+          dateExtent[1] = new Date(d.getTime() + 86400000);
+      }
+      
+      const x = d3.scaleTime()
+        .domain(dateExtent)
+        .range([0, width]);
+        
+      svg.append("g")
+        .attr("transform", `translate(0,${height})`)
+        .attr("color", "#748cae")
+        .call(d3.axisBottom(x).ticks(8).tickFormat(d3.timeFormat("%b %d")));
+        
+      const y = d3.scaleLinear()
+        .domain([0, d3.max(allValues, d => d.count) * 1.1 || 10])
+        .range([height, 0]);
+        
+      svg.append("g")
+        .attr("color", "#748cae")
+        .call(d3.axisLeft(y).ticks(5));
+        
+      const line = d3.line()
+        .x(d => x(d.date))
+        .y(d => y(d.count))
+        .curve(d3.curveMonotoneX);
+        
+      const color = d3.scaleOrdinal(d3.schemeCategory10);
+      
+      // Draw History
+      svg.selectAll(".line-history")
+        .data(seriesHistory)
+        .join("g")
+        .attr("class", "line-history")
+        .append("path")
+          .attr("fill", "none")
+          .attr("stroke", d => color(d.name))
+          .attr("stroke-width", 3)
+          .attr("d", d => line(d.values));
+          
+      // Draw Forecast
+      svg.selectAll(".line-forecast")
+        .data(seriesForecast)
+        .join("g")
+        .attr("class", "line-forecast")
+        .append("path")
+          .attr("fill", "none")
+          .attr("stroke", d => color(d.name))
+          .attr("stroke-width", 3)
+          .attr("stroke-dasharray", "8,5")
+          .attr("d", d => line(d.values));
+          
+      // Add labels (using forecast end points)
+      svg.selectAll(".line-label")
+        .data(seriesForecast.length > 0 ? seriesForecast : seriesHistory)
+        .join("text")
+        .attr("class", "line-label")
+        .datum(d => { return {name: d.name, value: d.values[d.values.length - 1]}; })
+        .attr("transform", d => `translate(${x(d.value.date)},${y(d.value.count)})`)
+        .attr("x", 8)
+        .attr("dy", "0.35em")
+        .style("fill", d => color(d.name))
+        .style("font-size", "11px")
+        .style("font-weight", "600")
+        .style("font-family", "Space Mono")
+        .text(d => d.name);
+    }
+
+    function log(msg) {
+      const timestamp = new Date().toLocaleTimeString();
+      const current = activityLog.textContent.trim();
+      const line = `[${timestamp}] ${msg}`;
+      activityLog.textContent = current === '[init] awaiting graph query...'
+        ? line
+        : `${line}\n${current}`;
+    }
+
+    function esc(value) {
+      return String(value)
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
+    }
+
+    function escRegExp(value) {
+      return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }
+
+    function relationLabel(kind) {
+      return REL_LABELS[kind] || 'Co-mention';
+    }
+
+    function signalBadgeLabel(kind) {
+      return SIGNAL_BADGE_LABELS[kind] || 'Weak Signal';
+    }
+
+    function badgeClass(kind) {
+      return ['weak-signal', 'strong-signal', 'needs-review'].includes(kind) ? kind : 'weak-signal';
+    }
+
+    function badgeHTML(kind) {
+      const cls = badgeClass(kind);
+      return `<span class="policy-badge ${cls}">${esc(signalBadgeLabel(cls))}</span>`;
+    }
+
+    function getNodeId(ref) {
+      return typeof ref === 'string' ? ref : ref.id;
+    }
+
+    function edgeKey(a, b) {
+      return [a, b].sort().join('||');
+    }
+
+    function levelPill(level) {
+      const kind = ['high', 'medium', 'low'].includes(level) ? level : 'medium';
+      return `<span class="pill ${kind}">${esc(kind)}</span>`;
+    }
+
+    function getCandidateForPair(source, target) {
+      return state.candidateIndex[edgeKey(String(source), String(target))] || null;
+    }
+
+    function markEntities(text, names) {
+      let html = esc(text || '');
+      for (const name of names) {
+        if (!name) continue;
+        const token = esc(name);
+        const re = new RegExp(escRegExp(token), 'gi');
+        html = html.replace(re, (m) => `<mark>${m}</mark>`);
+      }
+      return html;
+    }
+
+    async function getJSON(url) {
+      const response = await fetch(url);
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(`${response.status} ${text || response.statusText}`);
+      }
+      return response.json();
+    }
+
+    function downloadTextFile(filename, content, mimeType = 'application/json') {
+      const blob = new Blob([content], { type: mimeType });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = filename;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    }
+
+    function renderStats(stats) {
+      const cells = [
+        ['Source Files', stats.source_files],
+        ['Processed Docs', stats.documents],
+        ['Chunks', stats.chunks],
+        ['Entities', stats.entities],
+      ];
+
+      statsGrid.innerHTML = cells.map(([label, value]) => `
+        <div class="stat">
+          <span>${esc(label)}</span>
+          <b>${Number(value).toLocaleString()}</b>
+        </div>
+      `).join('');
+    }
+
+    function renderSeeds(seeds) {
+      seedWrap.innerHTML = '';
+      seedOptions.innerHTML = '';
+      for (const seed of seeds) {
+        const chip = document.createElement('button');
+        chip.className = 'chip';
+        chip.textContent = `${seed.entity} (${seed.mentions})`;
+        chip.addEventListener('click', () => {
+          rootInput.value = seed.entity;
+          pathSource.value = seed.entity;
+          state.rootEntity = seed.entity;
+          loadGraph();
+        });
+        seedWrap.appendChild(chip);
+
+        const option = document.createElement('option');
+        option.value = seed.entity;
+        seedOptions.appendChild(option);
+      }
+    }
+
+    function syncTierButtons() {
+      const buttons = document.querySelectorAll('#tierButtons button');
+      buttons.forEach((button) => {
+        button.classList.toggle('active', Number(button.dataset.tier) === state.tier);
+      });
+    }
+
+    function initTierButtons() {
+      const buttons = document.querySelectorAll('#tierButtons button');
+      buttons.forEach((button) => {
+        button.addEventListener('click', () => {
+          state.tier = Number(button.dataset.tier);
+          syncTierButtons();
+          loadGraph();
+        });
+      });
+      syncTierButtons();
+    }
+
+    async function loadSeeds() {
+      const seeds = await getJSON(`${API}/graph/seeds?limit=30&min_mentions=5`);
+      state.seeds = seeds;
+      renderSeeds(seeds);
+      if (!rootInput.value && seeds.length > 0) {
+        rootInput.value = seeds[0].entity;
+        pathSource.value = seeds[0].entity;
+        state.rootEntity = seeds[0].entity;
+      }
+    }
+
+    function renderNodeDetail(node, graph) {
+      const neighbors = graph.edges
+        .filter((edge) => edge.source === node.id || edge.target === node.id)
+        .map((edge) => {
+          const other = edge.source === node.id ? edge.target : edge.source;
+          return {
+            source: node.id,
+            target: other,
+            relation_type: edge.relation_type || 'co_mention',
+            display_relation_type: edge.display_relation_type || edge.relation_type || 'co_mention',
+            shared_chunks: edge.shared_chunks,
+            shared_docs: edge.shared_docs,
+            score: edge.score,
+            signal_badge: edge.signal_badge || 'weak-signal',
+            review_status: edge.review_status || 'auto',
+          };
+        })
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 12);
+
+      detailPanel.innerHTML = `
+        <h3 class="edge-title">${esc(node.label)}</h3>
+        <p class="muted">Node links are document co-mentions. Click any neighbor’s "why connected" button for evidence-level citations.</p>
+        <div class="kpi"><div class="label">Tier</div><b>${node.tier}</b></div>
+        <div class="kpi"><div class="label">Mentions</div><b>${Number(node.mentions).toLocaleString()}</b></div>
+        <div class="toolbar wrap">
+          <button id="recenterBtn">Center Graph On This Node</button>
+          <button id="pathFromBtn">Set As Path Source</button>
+        </div>
+        <p class="label" style="margin-top:12px;">Strongest Neighbors</p>
+        <ul class="mini-list">
+          ${neighbors.map((n) => `
+            <li>
+              ${esc(n.target)}
+              <small>relation=${esc(relationLabel(n.display_relation_type))} | shared_chunks=${n.shared_chunks} | shared_docs=${n.shared_docs} | score=${n.score.toFixed(2)} | review=${esc(n.review_status)}</small>
+              <div class="badge-row">${badgeHTML(n.signal_badge)}</div>
+              <div class="toolbar wrap">
+                <button class="inspect-edge-btn" data-source="${esc(n.source)}" data-target="${esc(n.target)}">Why connected?</button>
+              </div>
+            </li>
+          `).join('') || '<li>No neighboring edges in current tier scope.</li>'}
+        </ul>
+      `;
+
+      const recenter = document.getElementById('recenterBtn');
+      if (recenter) {
+        recenter.addEventListener('click', () => {
+          rootInput.value = node.id;
+          state.rootEntity = node.id;
+          state.activePath = null;
+          loadGraph();
+        });
+      }
+
+      const pathFromBtn = document.getElementById('pathFromBtn');
+      if (pathFromBtn) {
+        pathFromBtn.addEventListener('click', () => {
+          pathSource.value = node.id;
+          rootInput.value = node.id;
+        });
+      }
+
+      detailPanel.querySelectorAll('.inspect-edge-btn').forEach((button) => {
+        button.addEventListener('click', () => {
+          loadEdgeEvidence({
+            source: button.dataset.source,
+            target: button.dataset.target,
+          });
+        });
+      });
+    }
+
+    function renderPathDetail(path, graph) {
+      const graphNodeSet = new Set((graph.nodes || []).map((n) => n.id));
+      const missingNodes = (path.nodes || []).filter((id) => !graphNodeSet.has(id));
+      const hops = path.edges || [];
+
+      detailPanel.innerHTML = `
+        <h3 class="edge-title">Path: ${esc(path.source)} → ${esc(path.target)}</h3>
+        <p class="muted">Tiered path search shows the shortest chain found with current filters.</p>
+        <div class="kpi"><div class="label">Hops</div><b>${path.hops}</b></div>
+        <div class="hop-chain">${(path.nodes || []).map((n) => esc(n)).join(' ➜ ')}</div>
+        ${missingNodes.length ? `<div class="error">Some path nodes are outside the current rendered tier: ${esc(missingNodes.join(', '))}</div>` : ''}
+        <p class="label" style="margin-top:12px;">Path Edge Evidence</p>
+        <ul class="mini-list">
+          ${hops.map((edge) => `
+            <li>
+              ${esc(edge.source)} ↔ ${esc(edge.target)}
+              <small>relation=${esc(relationLabel(edge.display_relation_type || edge.relation_type || 'co_mention'))} | shared_chunks=${edge.shared_chunks} | shared_docs=${edge.shared_docs} | score=${Number(edge.score || 0).toFixed(2)} | review=${esc(edge.review_status || 'auto')}</small>
+              <div class="badge-row">${badgeHTML(edge.signal_badge || 'weak-signal')}</div>
+              <div class="toolbar wrap">
+                <button class="inspect-edge-btn" data-source="${esc(edge.source)}" data-target="${esc(edge.target)}">Open Evidence Drawer</button>
+              </div>
+            </li>
+          `).join('') || '<li>No path edges returned.</li>'}
+        </ul>
+      `;
+
+      detailPanel.querySelectorAll('.inspect-edge-btn').forEach((button) => {
+        button.addEventListener('click', () => {
+          loadEdgeEvidence({
+            source: button.dataset.source,
+            target: button.dataset.target,
+          });
+        });
+      });
+    }
+
+    function renderEdgeDetail(edge, evidence) {
+      const list = evidence.citations || [];
+      const relationType = evidence.relation_type || edge.relation_type || 'co_mention';
+      const displayRelationType = evidence.display_relation_type || edge.display_relation_type || relationType;
+      const reasons = evidence.relation_reasons || [];
+      const reasonText = reasons.length ? reasons.map((r) => esc(r)).join(', ') : 'No explicit keyword signal detected.';
+      const adjudication = evidence.adjudication || edge.adjudication || {};
+      const counter = evidence.counter_evidence || {};
+      const signalBadge = adjudication.signal_badge || evidence.signal_badge || edge.signal_badge || 'weak-signal';
+      const reasonCodes = adjudication.reason_codes || [];
+      const counterFlags = counter.flags || [];
+      const candidate = getCandidateForPair(edge.source, edge.target);
+      const evidenceHtml = `
+        <h3 class="edge-title">${esc(edge.source)} ↔ ${esc(edge.target)}</h3>
+        <div class="badge-row">
+          <span class="rel-pill">${esc(relationLabel(displayRelationType))}</span>
+          ${badgeHTML(signalBadge)}
+          <span class="policy-badge ${badgeClass(signalBadge)}">Review: ${esc(adjudication.review_status || evidence.review_status || edge.review_status || 'auto')}</span>
+        </div>
+        <p class="muted">Why connected: both names are co-mentioned in shared source chunks. Relationship class is keyword-derived from those snippets.</p>
+        <div class="kpi"><div class="label">Reason Keywords</div><b style="font-size:13px">${reasonText}</b></div>
+        <div class="kpi"><div class="label">Shared Chunks</div><b>${evidence.shared_chunks}</b></div>
+        <div class="kpi"><div class="label">Shared Documents</div><b>${evidence.shared_docs}</b></div>
+        <div class="kpi"><div class="label">Score</div><b>${Number(evidence.score || edge.score || 0).toFixed(2)}</b></div>
+        <div class="kpi"><div class="label">Adjudication</div><b style="font-size:13px">surfacing=${adjudication.surfacing_gate_passed ? 'pass' : 'fail'} | strong=${adjudication.strong_signal_gate_passed ? 'pass' : 'fail'} | needs_review=${adjudication.needs_review ? 'yes' : 'no'}</b></div>
+        <div class="kpi"><div class="label">Counter-Evidence</div><b style="font-size:13px">${esc(counter.summary || 'no_counter_evidence_detected')}</b></div>
+        ${counterFlags.length ? `<div class="kpi"><div class="label">Counter Flags</div><b style="font-size:13px">${counterFlags.map((f) => esc(f)).join(', ')}</b></div>` : ''}
+        ${reasonCodes.length ? `<div class="kpi"><div class="label">Reason Codes</div><b style="font-size:13px">${reasonCodes.slice(0, 8).map((r) => esc(r)).join(', ')}</b></div>` : ''}
+        <p class="label" style="margin-top:12px;">Evidence Snippets</p>
+        <ul class="mini-list">
+          ${list.map((row) => `
+            <li>
+              ${markEntities(row.snippet || '', [edge.source, edge.target])}
+              <small>doc=${row.document_id} chunk=${row.chunk_index} confidence=${Number(row.confidence || 0).toFixed(2)}</small>
+              <small>
+                ${row.file_url ? `<a href="${esc(row.file_url)}" target="_blank" rel="noreferrer" style="color:#7ad7ff">open source file</a>` : ''}
+                ${row.dataset_url ? ` | <a href="${esc(row.dataset_url)}" target="_blank" rel="noreferrer" style="color:#7ad7ff">dataset page</a>` : ''}
+                | <a href="${API}/documents/${row.document_id}" target="_blank" rel="noreferrer" style="color:#7ad7ff">extracted text JSON</a>
+              </small>
+            </li>
+          `).join('') || '<li>No citations available for this edge.</li>'}
+        </ul>
+      `;
+
+      if (!candidate) {
+        detailPanel.innerHTML = evidenceHtml;
+        return;
+      }
+
+      detailPanel.innerHTML = `
+        <div class="detail-tabs">
+          <button class="detail-tab-btn active" data-tab="evidence">Evidence</button>
+          <button class="detail-tab-btn" data-tab="unknown">Unknown Candidate</button>
+        </div>
+        <div class="detail-tab-pane active" data-tab="evidence">
+          ${evidenceHtml}
+        </div>
+        <div class="detail-tab-pane" data-tab="unknown">
+          ${unknownCandidateHtml(candidate)}
+        </div>
+      `;
+      attachDetailTabs('evidence');
+    }
+
+    function renderSemanticDetail(query, rows) {
+      detailPanel.innerHTML = `
+        <h3 class="edge-title">Semantic Search</h3>
+        <p class="muted">Concept query: <strong>${esc(query)}</strong></p>
+        <ul class="mini-list">
+          ${rows.map((row) => `
+            <li>
+              ${esc(row.snippet || '')}
+              <small>doc=${row.document_id} chunk=${row.chunk_index} score=${Number(row.score || 0).toFixed(3)} overlap=${Number(row.token_overlap || 0).toFixed(2)}</small>
+              <small><a href="${API}/documents/${row.document_id}" target="_blank" rel="noreferrer" style="color:#7ad7ff">open extracted text JSON</a></small>
+            </li>
+          `).join('') || '<li>No semantic matches found for current index.</li>'}
+        </ul>
+      `;
+    }
+
+    function candidateTypeLabel(value) {
+      if (value === 'two_hop_bridge') return 'Indirect Bridge';
+      if (value === 'below_threshold_direct') return 'Below-Threshold Direct';
+      return value || 'unknown';
+    }
+
+    function unknownCandidateHtml(candidate) {
+      const scores = candidate.scores || {};
+      const support = candidate.support || {};
+      const neighbors = support.common_neighbors || [];
+      const unknown = candidate.unknown_unknown || {};
+      const selection = candidate.selection || {};
+      const thresholds = unknown.thresholds || {};
+      const validationQueries = candidate.validation_queries || [];
+
+      const unknownReasons = Array.isArray(unknown.reasons) ? [...unknown.reasons] : [];
+      if (!unknownReasons.length) {
+        if ((support.direct_shared_chunks || 0) > 0) {
+          unknownReasons.push(
+            `Direct co-mentions exist (${support.direct_shared_chunks || 0}) but stay hidden below min_shared_chunks=${thresholds.min_shared_chunks ?? 'n/a'}.`
+          );
+        } else {
+          unknownReasons.push('No direct co-mention edge exists for this pair in current extracted chunks.');
+        }
+        unknownReasons.push('This pair is not rendered as a normal solid edge in the current graph view.');
+      }
+
+      const pickedBecause = Array.isArray(selection.picked_because) ? selection.picked_because : [];
+      if (!pickedBecause.length) {
+        pickedBecause.push(`Impact score=${Number(scores.impact || 0).toFixed(2)} ranked this pair into candidate list.`);
+      }
+
+      const rank = Number(selection.rank || 0) > 0
+        ? `#${selection.rank}/${selection.pool_size || '?'}`
+        : 'n/a';
+      const topK = Number(selection.top_k_cutoff || 0) > 0 ? selection.top_k_cutoff : 'n/a';
+
+      return `
+        <h3 class="edge-title">${esc(candidate.source)} ↔ ${esc(candidate.target)}</h3>
+        <div class="badge-row">
+          <span class="policy-badge needs-review">Hypothesis</span>
+          <span class="policy-badge">${esc(candidateTypeLabel(candidate.candidate_type))}</span>
+        </div>
+        <p class="muted">Unknown-unknown candidates are investigative hypotheses, not confirmed relationships.</p>
+        <div class="kpi"><div class="label">Selection Rank</div><b style="font-size:13px">${esc(rank)} (top-${esc(topK)})</b></div>
+        <div class="kpi"><div class="label">Not Visible Because</div><b style="font-size:13px">${esc(unknown.why_not_visible || 'not_in_visible_graph')}</b></div>
+        <div class="kpi"><div class="label">Support</div><b style="font-size:13px">common_neighbors=${support.common_neighbor_count || 0} | direct_chunks=${support.direct_shared_chunks || 0} | direct_docs=${support.direct_shared_docs || 0}</b></div>
+        <div class="kpi"><div class="label">Threshold Context</div><b style="font-size:13px">min_shared_chunks=${thresholds.min_shared_chunks ?? 'n/a'} | tier_depth=${thresholds.tier_depth ?? 'n/a'}</b></div>
+        <div class="kpi"><div class="label">Impact</div><b>${Number(scores.impact || 0).toFixed(2)}</b></div>
+        <div class="kpi"><div class="label">Plausibility</div><b>${Number(scores.plausibility || 0).toFixed(2)}</b></div>
+        <div class="kpi"><div class="label">Novelty</div><b>${Number(scores.novelty || 0).toFixed(2)}</b></div>
+        <div class="kpi"><div class="label">Evidence Gap</div><b>${Number(scores.evidence_gap || 0).toFixed(2)}</b></div>
+        <div class="kpi"><div class="label">Contradiction Risk</div><b>${Number(scores.contradiction_risk || 0).toFixed(2)}</b></div>
+        <div class="kpi"><div class="label">Why This Might Be Wrong</div><b style="font-size:13px">${esc(candidate.why_this_might_be_wrong || 'n/a')}</b></div>
+        <p class="label" style="margin-top:12px;">Why This Is Unknown-Unknown</p>
+        <ul class="mini-list">
+          ${unknownReasons.map((item) => `<li>${esc(item)}</li>`).join('')}
+        </ul>
+        <p class="label" style="margin-top:12px;">Why Picked Now</p>
+        <ul class="mini-list">
+          ${pickedBecause.map((item) => `<li>${esc(item)}</li>`).join('')}
+        </ul>
+        <p class="label" style="margin-top:12px;">Bridge Neighbors</p>
+        <ul class="mini-list">
+          ${neighbors.map((n) => `<li>${esc(n)}</li>`).join('') || '<li>No bridge neighbors captured.</li>'}
+        </ul>
+        <p class="label" style="margin-top:12px;">How To Validate</p>
+        <ul class="mini-list">
+          ${validationQueries.map((q) => `<li>${esc(q)}</li>`).join('') || '<li>No validation prompts available.</li>'}
+        </ul>
+      `;
+    }
+
+    function attachDetailTabs(defaultTab = 'evidence') {
+      const buttons = detailPanel.querySelectorAll('.detail-tab-btn');
+      const panes = detailPanel.querySelectorAll('.detail-tab-pane');
+      function activate(tab) {
+        buttons.forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
+        panes.forEach((p) => p.classList.toggle('active', p.dataset.tab === tab));
+      }
+      buttons.forEach((button) => {
+        button.addEventListener('click', () => activate(button.dataset.tab));
+      });
+      activate(defaultTab);
+    }
+
+    function renderUnknownCandidateDetail(candidate) {
+      detailPanel.innerHTML = `
+        <div class="detail-tabs">
+          <button class="detail-tab-btn active" data-tab="unknown">Unknown Candidate</button>
+          <button class="detail-tab-btn" data-tab="evidence">Evidence</button>
+        </div>
+        <div class="detail-tab-pane active" data-tab="unknown">
+          ${unknownCandidateHtml(candidate)}
+        </div>
+        <div class="detail-tab-pane" data-tab="evidence">
+          <p class="muted">Load direct evidence for this pair to validate the hypothesis.</p>
+          <div class="toolbar wrap">
+            <button id="candidateEvidenceBtn">Check Direct Evidence</button>
+          </div>
+        </div>
+      `;
+      attachDetailTabs('unknown');
+      const btn = document.getElementById('candidateEvidenceBtn');
+      if (btn) {
+        btn.addEventListener('click', () => {
+          loadEdgeEvidence({
+            source: candidate.source,
+            target: candidate.target,
+          });
+        });
+      }
+    }
+
+    function renderBlindSpotStrip(intel) {
+      const blind = intel?.blind_spots || {};
+      const cands = intel?.unknown_candidates || [];
+      const qs = intel?.next_questions || [];
+
+      const kpi = (k, v) => `
+        <div class="kpi-mini">
+          <span class="k">${esc(k)}</span>
+          <span class="v">${Number(v || 0).toLocaleString()}</span>
+        </div>
+      `;
+      blindSpotSummary.innerHTML = [
+        kpi('Rendered Nodes', blind.rendered_nodes),
+        kpi('Hidden Nodes', blind.hidden_nodes),
+        kpi('Rendered Edges', blind.rendered_edges),
+        kpi('Hidden by Threshold', blind.hidden_edges_by_threshold),
+        kpi('Needs Review', blind.needs_review_edges),
+        kpi('Sparse Nodes', blind.sparse_nodes),
+      ].join('');
+
+      unknownSummary.innerHTML = cands.slice(0, 5).map((cand, idx) => `
+        <div class="candidate-item">
+          <div><strong>${idx + 1}. ${esc(cand.source)} ↔ ${esc(cand.target)}</strong></div>
+          <small>${esc(cand.selection?.selection_reason || cand.why_this_might_matter || '')}</small>
+          <div style="margin-top:4px;">
+            ${levelPill((cand.scores?.impact || 0) >= 0.55 ? 'high' : 'medium')}
+            <span class="pill low">${esc(candidateTypeLabel(cand.candidate_type))}</span>
+            <span class="pill medium">impact ${Number(cand.scores?.impact || 0).toFixed(2)}</span>
+            <span class="pill medium">novelty ${Number(cand.scores?.novelty || 0).toFixed(2)}</span>
+          </div>
+          <div class="toolbar wrap">
+            <button class="open-candidate-btn" data-source="${esc(cand.source)}" data-target="${esc(cand.target)}">Open Candidate</button>
+          </div>
+        </div>
+      `).join('') || '<div class="muted">No hidden candidates found for current scope.</div>';
+
+      nextQuestions.innerHTML = qs.slice(0, 6).map((q, idx) => `
+        <div class="question-item">
+          <div><strong>${idx + 1}. ${esc(q.question || '')}</strong></div>
+          <div style="margin-top:4px;">
+            ${levelPill(q.impact || 'medium')}
+            <span class="pill low">effort ${esc(q.effort || 'medium')}</span>
+          </div>
+          <small>${esc(q.why || '')}</small>
+        </div>
+      `).join('') || '<div class="muted">No question prompts generated.</div>';
+
+      unknownSummary.querySelectorAll('.open-candidate-btn').forEach((button) => {
+        button.addEventListener('click', () => {
+          const candidate = getCandidateForPair(button.dataset.source, button.dataset.target);
+          if (candidate) {
+            renderUnknownCandidateDetail(candidate);
+          }
+        });
+      });
+    }
+
+    async function loadFrontierIntel({ forceRedraw = false } = {}) {
+      if (!state.rootEntity) return;
+      try {
+        const data = await getJSON(
+          `${API}/graph/frontier?entity=${encodeURIComponent(state.rootEntity)}&tier=${state.tier}&min_mentions=2&min_shared_chunks=${state.minSharedChunks}&max_neighbors=45&max_candidates=20`
+        );
+        state.frontier = data;
+        state.candidateIndex = {};
+        for (const cand of data.unknown_candidates || []) {
+          state.candidateIndex[edgeKey(cand.source, cand.target)] = cand;
+        }
+        renderBlindSpotStrip(data);
+        if (forceRedraw || state.viewMode === 'unknown_unknown') {
+          drawGraph(state.graph, state.activePath);
+        }
+      } catch (error) {
+        blindSpotSummary.innerHTML = `<div class="error">Blind-spot load failed: ${esc(error.message)}</div>`;
+      }
+    }
+
+    async function loadEdgeEvidence(edge) {
+      try {
+        log(`fetching evidence for ${edge.source} <-> ${edge.target}`);
+        const evidence = await getJSON(`${API}/graph/edge?source=${encodeURIComponent(edge.source)}&target=${encodeURIComponent(edge.target)}&limit=16`);
+        renderEdgeDetail(edge, evidence);
+      } catch (error) {
+        detailPanel.innerHTML = `<div class="error">Failed to load edge evidence: ${esc(error.message)}</div>`;
+      }
+    }
+
+    function drawGraph(graph, path = null) {
+      const stage = document.getElementById('graphStage');
+      const svg = d3.select('#graphSvg');
+      svg.selectAll('*').remove();
+
+      const width = stage.clientWidth;
+      const height = stage.clientHeight;
+      svg.attr('viewBox', `0 0 ${width} ${height}`);
+
+      if (!graph.nodes.length) {
+        graphOverlay.textContent = 'No graph nodes found for this root';
+        return;
+      }
+
+      graphOverlay.textContent = `Root: ${graph.root} | Nodes: ${graph.nodes.length} | Edges: ${graph.edges.length} | Mode: ${state.viewMode}`;
+
+      const pathNodeSet = new Set((path?.nodes || []).map((n) => String(n)));
+      const pathEdgeSet = new Set(
+        (path?.edges || []).map((e) => edgeKey(String(e.source), String(e.target)))
+      );
+
+      const nodes = graph.nodes.map((n) => ({ ...n }));
+      const links = graph.edges.map((e) => ({ ...e }));
+      const nodeById = new Map(nodes.map((n) => [n.id, n]));
+      const candidateLinks = (state.viewMode === 'unknown_unknown' ? (state.frontier?.unknown_candidates || []) : [])
+        .map((c) => ({
+          source: c.source,
+          target: c.target,
+          score: Number(c.scores?.impact || 0),
+          candidate: c,
+          sourceNode: nodeById.get(c.source),
+          targetNode: nodeById.get(c.target),
+        }))
+        .filter((c) => c.sourceNode && c.targetNode);
+
+      const currentPredictiveStats = Array.isArray(state.predictiveStats) && state.predictiveStats.length > 0
+        ? state.predictiveStats[state.predictiveStats.length - 1] 
+        : (state.predictiveStats || {});
+
+      const predictiveLinks = (state.viewMode === 'predictive' ? (currentPredictiveStats.hidden_alliances || []) : [])
+        .map((c) => ({
+          source: c.source,
+          target: c.target,
+          score: c.probability * 100,
+          sourceNode: nodeById.get(c.source),
+          targetNode: nodeById.get(c.target),
+        }))
+        .filter((c) => c.sourceNode && c.targetNode);
+
+      const predictiveNodes = new Set((currentPredictiveStats.sleeper_nodes || []).map(n => n.id));
+
+      const maxMention = d3.max(nodes, (d) => d.mentions) || 1;
+      const radius = d3.scaleSqrt().domain([1, maxMention]).range([8, 26]);
+      const stroke = d3.scaleLinear().domain([1, d3.max(links, (d) => d.shared_chunks) || 1]).range([0.7, 3.6]);
+      const colors = { 0: '#ff6171', 1: '#47d2ff', 2: '#7dffb0', 3: '#ffc857' };
+
+      function isPathEdge(d) {
+        return pathEdgeSet.has(edgeKey(getNodeId(d.source), getNodeId(d.target)));
+      }
+
+      const zoomLayer = svg.append('g');
+
+      const link = zoomLayer
+        .append('g')
+        .selectAll('line')
+        .data(links)
+        .join('line')
+        .attr('stroke', (d) => {
+          if (pathEdgeSet.size && isPathEdge(d)) return '#ffc857';
+          if (d.signal_badge === 'needs-review') return '#d49a4b';
+          if (d.signal_badge === 'strong-signal') return '#42d8ac';
+          return '#5f80b8';
+        })
+        .attr('stroke-opacity', (d) => {
+          if (!pathEdgeSet.size) return 0.34;
+          return isPathEdge(d) ? 0.92 : 0.16;
+        })
+        .attr('stroke-width', (d) => stroke(d.shared_chunks));
+
+      const candidateLink = zoomLayer
+        .append('g')
+        .selectAll('line')
+        .data(candidateLinks)
+        .join('line')
+        .attr('stroke', '#ffc857')
+        .attr('stroke-opacity', 0.75)
+        .attr('stroke-width', (d) => 0.7 + 2.2 * Math.max(0.1, d.score))
+        .attr('stroke-dasharray', '5,6')
+        .style('cursor', 'pointer')
+        .on('click', (_event, d) => {
+          renderUnknownCandidateDetail(d.candidate);
+        });
+
+      const predictiveLink = zoomLayer
+        .append('g')
+        .selectAll('line.pred')
+        .data(predictiveLinks)
+        .join('line')
+        .attr('class', 'pred')
+        .attr('stroke', '#52ffbe')
+        .attr('stroke-opacity', 0.8)
+        .attr('stroke-width', (d) => 1.5 + (d.score / 20))
+        .attr('stroke-dasharray', '6,6')
+        .style('animation', 'pulse-dash 1s linear infinite');
+
+      const hitLink = zoomLayer
+        .append('g')
+        .selectAll('line')
+        .data(links)
+        .join('line')
+        .attr('stroke', 'transparent')
+        .attr('stroke-width', (d) => stroke(d.shared_chunks) + 10)
+        .style('cursor', 'pointer')
+        .on('click', (_event, d) => {
+          loadEdgeEvidence({
+            source: getNodeId(d.source),
+            target: getNodeId(d.target),
+            shared_chunks: d.shared_chunks,
+            shared_docs: d.shared_docs,
+            score: d.score,
+            relation_type: d.relation_type,
+            display_relation_type: d.display_relation_type,
+            signal_badge: d.signal_badge,
+            review_status: d.review_status,
+            adjudication: d.adjudication,
+          });
+        });
+
+      const node = zoomLayer
+        .append('g')
+        .selectAll('g')
+        .data(nodes)
+        .join('g')
+        .style('cursor', 'pointer')
+        .on('click', (_event, d) => renderNodeDetail(d, graph));
+
+      node
+        .append('circle')
+        .attr('r', (d) => radius(d.mentions))
+        .attr('fill', (d) => colors[d.tier] || '#9eb7dd')
+        .attr('stroke', (d) => (pathNodeSet.has(d.id) ? '#fff3c2' : (state.viewMode === 'predictive' && predictiveNodes.has(d.id) ? '#52ffbe' : '#e7f0ff')))
+        .attr('stroke-width', (d) => (pathNodeSet.has(d.id) ? 2.7 : (state.viewMode === 'predictive' && predictiveNodes.has(d.id) ? 3.5 : 1.4)))
+        .attr('fill-opacity', (d) => (pathNodeSet.size && !pathNodeSet.has(d.id) ? 0.62 : 0.9))
+        .style('filter', (d) => (state.viewMode === 'predictive' && predictiveNodes.has(d.id) ? 'drop-shadow(0 0 8px #52ffbe)' : 'none'));
+
+      node
+        .append('text')
+        .text((d) => d.label)
+        .attr('dy', (d) => radius(d.mentions) + 12)
+        .attr('text-anchor', 'middle')
+        .attr('fill', '#d7e7ff')
+        .style('font-size', (d) => (pathNodeSet.has(d.id) ? '12px' : '11px'))
+        .style('font-weight', (d) => (pathNodeSet.has(d.id) ? '700' : '500'))
+        .style('font-family', '"Space Mono", monospace')
+        .style('pointer-events', 'none');
+
+      const simulation = d3.forceSimulation(nodes)
+        .force('link', d3.forceLink(links).id((d) => d.id).distance((d) => Math.max(50, 210 - d.score * 4)).strength(0.24))
+        .force('charge', d3.forceManyBody().strength(-230))
+        .force('center', d3.forceCenter(width / 2, height / 2))
+        .force('collision', d3.forceCollide().radius((d) => radius(d.mentions) + 14));
+
+      simulation.on('tick', () => {
+        link
+          .attr('x1', (d) => d.source.x)
+          .attr('y1', (d) => d.source.y)
+          .attr('x2', (d) => d.target.x)
+          .attr('y2', (d) => d.target.y);
+
+        hitLink
+          .attr('x1', (d) => d.source.x)
+          .attr('y1', (d) => d.source.y)
+          .attr('x2', (d) => d.target.x)
+          .attr('y2', (d) => d.target.y);
+
+        candidateLink
+          .attr('x1', (d) => d.sourceNode.x)
+          .attr('y1', (d) => d.sourceNode.y)
+          .attr('x2', (d) => d.targetNode.x)
+          .attr('y2', (d) => d.targetNode.y);
+
+        predictiveLink
+          .attr('x1', (d) => d.sourceNode.x)
+          .attr('y1', (d) => d.sourceNode.y)
+          .attr('x2', (d) => d.targetNode.x)
+          .attr('y2', (d) => d.targetNode.y);
+
+        node.attr('transform', (d) => `translate(${d.x},${d.y})`);
+      });
+
+      node.call(
+        d3.drag()
+          .on('start', (event, d) => {
+            if (!event.active) simulation.alphaTarget(0.3).restart();
+            d.fx = d.x;
+            d.fy = d.y;
+          })
+          .on('drag', (event, d) => {
+            d.fx = event.x;
+            d.fy = event.y;
+          })
+          .on('end', (event, d) => {
+            if (!event.active) simulation.alphaTarget(0);
+            d.fx = null;
+            d.fy = null;
+          })
+      );
+
+      svg.call(
+        d3.zoom().scaleExtent([0.32, 3.4]).on('zoom', (event) => {
+          zoomLayer.attr('transform', event.transform);
+        })
+      );
+
+      state.simulation = simulation;
+
+      if (path && (path.nodes || []).length) {
+        renderPathDetail(path, graph);
+      } else {
+        const rootNode = nodes.find((n) => n.id === graph.root) || nodes[0];
+        renderNodeDetail(rootNode, graph);
+      }
+    }
+
+    function setFullscreen(on) {
+      state.isFullscreen = Boolean(on);
+      graphCard.classList.toggle('fullscreen', state.isFullscreen);
+      document.body.classList.toggle('fullscreen-lock', state.isFullscreen);
+      fullscreenBtn.textContent = state.isFullscreen ? 'Exit Fullscreen' : 'Fullscreen';
+      setTimeout(() => {
+        if (state.graph) {
+          drawGraph(state.graph, state.activePath);
+        }
+      }, 70);
+    }
+
+    async function loadPath() {
+      const source = pathSource.value.trim() || rootInput.value.trim();
+      const target = pathTarget.value.trim();
+      if (!source || !target) {
+        detailPanel.innerHTML = '<div class="error">Provide both people for path search.</div>';
+        return;
+      }
+
+      const maxHops = Number(pathHops.value || '3');
+      log(`path search source="${source}" target="${target}" hops<=${maxHops}`);
+      graphOverlay.textContent = `Searching path ${source} -> ${target}`;
+      try {
+        const path = await getJSON(
+          `${API}/graph/path?source=${encodeURIComponent(source)}&target=${encodeURIComponent(target)}&max_hops=${maxHops}&min_mentions=2&min_shared_chunks=${state.minSharedChunks}`
+        );
+        state.activePath = path;
+        rootInput.value = path.source;
+        state.rootEntity = path.source;
+        if (path.hops > state.tier) {
+          state.tier = Math.min(3, path.hops);
+          syncTierButtons();
+        }
+        log(`path found: ${path.hops} hop(s)`);
+        await loadGraph({ preservePath: path });
+      } catch (error) {
+        detailPanel.innerHTML = `<div class="error">Path query failed: ${esc(error.message)}</div>`;
+        log(`path error: ${error.message}`);
+      }
+    }
+
+    async function runSemanticSearch() {
+      const q = semanticQuery.value.trim();
+      if (!q) return;
+      log(`semantic search query="${q}"`);
+      try {
+        const rows = await getJSON(`${API}/search/semantic?q=${encodeURIComponent(q)}&limit=12`);
+        renderSemanticDetail(q, rows);
+      } catch (error) {
+        detailPanel.innerHTML = `<div class="error">Semantic search failed: ${esc(error.message)}</div>`;
+      }
+    }
+
+    async function exportForensicPack() {
+      const source = pathSource.value.trim() || rootInput.value.trim();
+      const target = pathTarget.value.trim();
+      if (!source || !target) {
+        detailPanel.innerHTML = '<div class="error">Provide both people for forensic pack export.</div>';
+        return;
+      }
+
+      const maxHops = Number(pathHops.value || '3');
+      log(`exporting forensic pack ${source} -> ${target}`);
+
+      try {
+        const data = await getJSON(
+          `${API}/forensics/pack/export?source=${encodeURIComponent(source)}&target=${encodeURIComponent(target)}&max_hops=${maxHops}&min_mentions=2&min_shared_chunks=${state.minSharedChunks}&evidence_limit=20&frontier_max_candidates=12&reviewer_flag=unreviewed&export_format=both&prefix=forensic_pack`
+        );
+        const files = data.files || {};
+        const review = (data.pack && data.pack.review) || {};
+        if (data.pack) {
+          const filename = files.json_filename || `forensic_pack_${Date.now()}.json`;
+          downloadTextFile(filename, JSON.stringify(data.pack, null, 2), 'application/json');
+        }
+
+        detailPanel.innerHTML = `
+          <h3 class="edge-title">Forensic Pack Exported</h3>
+          <p class="muted">Pair: <strong>${esc(source)}</strong> -> <strong>${esc(target)}</strong></p>
+          <div class="kpi"><div class="label">JSON File</div><b style="font-size:13px">${esc(files.json_filename || 'n/a')}</b></div>
+          <div class="kpi"><div class="label">Markdown File</div><b style="font-size:13px">${esc(files.markdown_filename || 'n/a')}</b></div>
+          <div class="kpi"><div class="label">Review Status</div><b style="font-size:13px">${esc(review.status || 'auto')}</b></div>
+          <div class="kpi"><div class="label">Reviewer Flag</div><b style="font-size:13px">${esc(review.reviewer_flag || 'unreviewed')}</b></div>
+          <div class="kpi"><div class="label">Saved To</div><b style="font-size:13px">${esc(files.output_dir || 'n/a')}</b></div>
+          <p class="muted">Browser downloaded the JSON copy now. Markdown/JSON files are also saved locally in the forensic pack output directory.</p>
+        `;
+      } catch (error) {
+        detailPanel.innerHTML = `<div class="error">Forensic pack export failed: ${esc(error.message)}</div>`;
+        log(`forensic export error: ${error.message}`);
+      }
+    }
+
+    async function loadGraph(options = {}) {
+      state.rootEntity = rootInput.value.trim() || state.rootEntity;
+      if (!state.rootEntity) return;
+
+      if (!options.preservePath) {
+        state.activePath = null;
+      }
+
+      graphOverlay.textContent = 'Loading graph...';
+      graphMeta.textContent = `Querying ${state.rootEntity}`;
+      log(`building graph for root="${state.rootEntity}" tier=${state.tier} min_shared=${state.minSharedChunks}`);
+
+      try {
+        const url = `${API}/graph/root?entity=${encodeURIComponent(state.rootEntity)}&tier=${state.tier}&min_mentions=2&min_shared_chunks=${state.minSharedChunks}&max_neighbors=45`;
+        const graph = await getJSON(url);
+        state.graph = graph;
+
+        graphMeta.textContent = `nodes=${graph.meta.node_count || 0} edges=${graph.meta.edge_count || 0} tier=${graph.meta.tier_depth}`;
+
+        if (!graph.nodes.length) {
+          detailPanel.innerHTML = `<div class="error">No graph found for "${esc(state.rootEntity)}" with current filters.</div>`;
+        }
+
+        const path = options.preservePath || state.activePath;
+        drawGraph(graph, path);
+        await loadFrontierIntel();
+      } catch (error) {
+        detailPanel.innerHTML = `<div class="error">Graph query failed: ${esc(error.message)}</div>`;
+        graphOverlay.textContent = 'Graph load failed';
+        graphMeta.textContent = 'error';
+        log(`graph error: ${error.message}`);
+      }
+    }
+
+    async function bootstrap() {
+      initTierButtons();
+      minShared.addEventListener('input', () => {
+        state.minSharedChunks = Number(minShared.value);
+        minSharedLabel.textContent = String(state.minSharedChunks);
+      });
+
+      renderBtn.addEventListener('click', () => loadGraph());
+      viewMode.addEventListener('change', () => {
+        state.viewMode = viewMode.value;
+        if (state.graph) {
+          drawGraph(state.graph, state.activePath);
+        }
+      });
+      discoverHiddenBtn.addEventListener('click', async () => {
+        state.viewMode = 'unknown_unknown';
+        viewMode.value = 'unknown_unknown';
+        log(`discovering hidden connections for root="${state.rootEntity}"`);
+        await loadFrontierIntel({ forceRedraw: true });
+      });
+      rootInput.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') loadGraph();
+      });
+
+      tracePathBtn.addEventListener('click', loadPath);
+      pathTarget.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') loadPath();
+      });
+      semanticBtn.addEventListener('click', runSemanticSearch);
+      semanticQuery.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') runSemanticSearch();
+      });
+      clearPathBtn.addEventListener('click', () => {
+        state.activePath = null;
+        if (state.graph) {
+          drawGraph(state.graph, null);
+        }
+      });
+      exportPackBtn.addEventListener('click', exportForensicPack);
+
+      fullscreenBtn.addEventListener('click', () => setFullscreen(!state.isFullscreen));
+      document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && state.isFullscreen) {
+          setFullscreen(false);
+        }
+      });
+      
+      sankeyBtn.addEventListener('click', () => toggleSankeyMode());
+      predictiveBtn.addEventListener('click', () => togglePredictiveMode());
+      topicBtn.addEventListener('click', () => toggleTopicMode());
+      
+      try {
+        state.messageTrends = await getJSON(`${API}/message-trends`);
+      } catch (error) {
+        log(`Message trends fetch failed: ${error.message}`);
+      }
+      
+      try {
+        state.techTimeseries = await getJSON(`${API}/timeseries-tech`);
+      } catch (error) {
+        log(`Timeseries fetch failed: ${error.message}`);
+      }
+
+      try {
+        const stats = await getJSON(`${API}/stats`);
+        renderStats(stats);
+      } catch (error) {
+        statsGrid.innerHTML = `<div class="error">Stats unavailable: ${esc(error.message)}</div>`;
+      }
+
+      try {
+        state.predictiveStats = await getJSON(`${API}/predictive-stats`);
+      } catch (error) {
+        log(`Predictive stats fetch failed: ${error.message}`);
+      }
+
+      try {
+        const contentStats = await getJSON(`${API}/content-stats`);
+        const techHtml = (contentStats.top_tech || []).slice(0, 10).map(t => `<div class="tech-bubble">${esc(t.tech)} <span style="opacity:0.6">${t.count}</span></div>`).join('');
+        const topicsHtml = (contentStats.top_topics || []).slice(0, 15).map(t => `<div class="topic-bubble">${esc(t.topic)} <span style="opacity:0.6">${t.count}</span></div>`).join('');
+
+        topTechWrapper.innerHTML = techHtml || '<div class="muted">No tech stack data</div>';
+        topTopicsWrapper.innerHTML = topicsHtml || '<div class="muted">No trending topic data</div>';
+      } catch (error) {
+        log(`Content stats fetch failed: ${error.message}`);
+      }
+
+      try {
+        await loadSeeds();
+      } catch (error) {
+        seedWrap.innerHTML = `<div class="error">Seed load failed: ${esc(error.message)}</div>`;
+      }
+
+      if (rootInput.value) {
+        loadGraph();
+      }
+    }
+
+    bootstrap();
+  </script>
+</body>
+
+</html>

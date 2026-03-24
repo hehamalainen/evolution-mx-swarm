@@ -1,7 +1,7 @@
 import os
 
-from worker.service import Worker
 from shared.utils.config import MXConfig
+from worker.service import Worker
 
 
 class _StubQueue:
@@ -64,3 +64,19 @@ def test_repo_url_github_mode_without_token(monkeypatch) -> None:
 
     worker = _make_worker(config)
     assert worker._get_repo_url() == os.getcwd()
+
+
+def test_force_local_mode_ignores_all_github_tokens(monkeypatch) -> None:
+    config = MXConfig()
+    config.vcs.provider = "github"
+    config.github.repo_owner = "owner"
+    config.github.repo_name = "repo"
+    config.github.token = "config-token"
+    monkeypatch.setenv("GITHUB_TOKEN", "env-token")
+    monkeypatch.setenv("MX_FORCE_LOCAL_MODE", "1")
+    monkeypatch.chdir(os.getcwd())
+
+    worker = _make_worker(config)
+
+    assert worker._get_repo_url() == os.getcwd()
+    assert worker._is_local_submission_mode() is True

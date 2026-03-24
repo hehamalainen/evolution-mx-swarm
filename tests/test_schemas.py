@@ -74,6 +74,8 @@ class TestTaskContract:
             task_type=TaskType.BUGFIX,
             goal="Fix login validation bug",
             priority=9,
+            prerequisite_requirement_ids=["REQ-001"],
+            prerequisite_task_ids=["abc12345"],
         )
 
         # Serialize
@@ -90,6 +92,8 @@ class TestTaskContract:
         assert restored.id == task.id
         assert restored.type == task.type
         assert restored.goal == task.goal
+        assert restored.prerequisite_requirement_ids == ["REQ-001"]
+        assert restored.prerequisite_task_ids == ["abc12345"]
 
     def test_branch_name_generation(self):
         """Test branch name generation from task."""

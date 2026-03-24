@@ -6,7 +6,8 @@ GitHub PRs using the existing GitHubAPI class.
 
 from typing import Any
 
-from shared.adapters.vcs_adapter import SubmitResult, VCSAdapter
+from shared.adapters.vcs_adapter import LandingVerificationResult, SubmitResult, VCSAdapter
+from shared.utils import MockGitHubAPI
 from shared.utils.git import GitHubAPI
 
 
@@ -32,7 +33,10 @@ class GitHubVCS(VCSAdapter):
             repo: Repository name
             default_branch: Base branch for PRs
         """
-        self.github = GitHubAPI(token=token, owner=owner, repo=repo)
+        self.github = GitHubAPI(token=token, owner=owner, repo=repo) if token else MockGitHubAPI(
+            owner=owner or "local",
+            repo=repo or "swarm",
+        )
         self.owner = owner
         self.repo = repo
         self.default_branch = default_branch
@@ -49,6 +53,12 @@ class GitHubVCS(VCSAdapter):
         model_id: str | None = None,
         risk_tier: int = 0,
         draft: bool = False,
+        source: str | None = None,
+        source_run_id: str | None = None,
+        source_task_id: str | None = None,
+        source_agent_id: str | None = None,
+        source_attempt_id: str | None = None,
+        intent_type: str | None = None,
     ) -> SubmitResult:
         """Create a GitHub pull request.
 
@@ -140,6 +150,65 @@ class GitHubVCS(VCSAdapter):
                 "number": submission_id,
                 "error": str(e),
             }
+
+    async def verify_landed_change(
+        self,
+        submission_id: str,
+        *,
+        expected_paths: list[str],
+        expected_diff: str | None = None,
+    ) -> LandingVerificationResult:
+        """Verify landing against GitHub PR state.
+
+        This is intentionally weaker than Aether verification. In local/mock mode a
+        closed mock PR is treated as the landed representation for proof runs.
+        """
+        status = await self.get_status(submission_id)
+        if status.get("error"):
+            return LandingVerificationResult(
+                supported=True,
+                verified=False,
+                canonical_status="error",
+                provider="github",
+                detail=str(status.get("error")),
+                verified_paths=list(expected_paths),
+                raw_response=status,
+            )
+
+        state = str(status.get("state") or "").strip().lower()
+        merged = bool(status.get("merged"))
+        checks_passed = status.get("checks_passed")
+
+        if merged or state == "closed":
+            if checks_passed is False:
+                return LandingVerificationResult(
+                    supported=True,
+                    verified=False,
+                    canonical_status="closed",
+                    provider="github",
+                    detail="PR landed but checks are reported failing.",
+                    verified_paths=list(expected_paths),
+                    raw_response=status,
+                )
+            return LandingVerificationResult(
+                supported=True,
+                verified=True,
+                canonical_status="merged" if merged else "closed",
+                provider="github",
+                detail="GitHub landed representation verified from PR state.",
+                verified_paths=list(expected_paths),
+                raw_response=status,
+            )
+
+        return LandingVerificationResult(
+            supported=True,
+            verified=False,
+            canonical_status=state or "unknown",
+            provider="github",
+            detail=f"PR is not landed yet: {state or 'unknown'}",
+            verified_paths=list(expected_paths),
+            raw_response=status,
+        )
 
     async def health_check(self) -> bool:
         """Check if GitHub API is reachable."""

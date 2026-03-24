@@ -3,7 +3,7 @@
 import json
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 
 
@@ -114,7 +114,7 @@ class Spec:
         return cls(
             version="1.0.0",
             prd_hash=prd_hash,
-            generated_at=datetime.now(timezone.utc).isoformat(),
+            generated_at=datetime.now(UTC).isoformat(),
             requirements=[],
         )
 

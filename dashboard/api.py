@@ -15,9 +15,11 @@ import os
 import random
 import subprocess
 import sys
+import time
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
 # Load .env file for GITHUB_TOKEN and other secrets
 try:
@@ -30,6 +32,7 @@ from enum import Enum
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 # Add parent to path
@@ -113,6 +116,12 @@ class WorkerState:
             self.online_workers = self.runtime_cap
 
 
+@dataclass
+class AnalyticsCacheEntry:
+    value: Any
+    cached_at_monotonic: float
+
+
 # ============================================================================
 # State Management
 # ============================================================================
@@ -133,6 +142,7 @@ class SwarmState:
         self.tasks_completed: int = 0
         self.tasks_failed: int = 0
         self.tasks_retried: int = 0
+        self.tasks_in_progress_runtime: int = 0
         self.prs_opened: int = 0
         self.prs_merged: int = 0
         self.prs_rejected: int = 0
@@ -145,7 +155,7 @@ class SwarmState:
         self.total_cost: float = 0.0
         self.hourly_costs: deque = deque(maxlen=24)  # Last 24 hours
         self.current_hour_cost: float = 0.0
-        self.last_hour_reset: datetime = datetime.now(timezone.utc)
+        self.last_hour_reset: datetime = datetime.now(UTC)
 
         # Time series for charts
         self.tasks_per_minute: deque = deque(maxlen=60)  # Last 60 minutes
@@ -159,6 +169,7 @@ class SwarmState:
         self.current_open_prs: int = 0
         self.prs_this_hour: int = 0
         self.last_queue_depth: int | None = None
+        self.last_phase: str | None = None
 
         # Logs
         self.logs: deque = deque(maxlen=1000)
@@ -193,14 +204,14 @@ class SwarmState:
         """Register or update worker activity."""
         self.workers[worker_id] = {
             "worker_id": worker_id,
-            "last_seen": datetime.now(timezone.utc).isoformat(),
+            "last_seen": datetime.now(UTC).isoformat(),
             "task_id": task_id,
             "status": "active" if task_id else "idle",
         }
 
     def get_active_workers(self, seconds: int = 60) -> int:
         """Count workers active in last N seconds."""
-        cutoff = datetime.now(timezone.utc) - timedelta(seconds=seconds)
+        cutoff = datetime.now(UTC) - timedelta(seconds=seconds)
         return sum(
             1 for w in self.workers.values()
             if datetime.fromisoformat(w["last_seen"]) > cutoff
@@ -225,14 +236,18 @@ class SwarmState:
         hours_left = remaining / self.current_hour_cost
         if hours_left <= 0:
             return "NOW"
-        eta = datetime.now(timezone.utc) + timedelta(hours=hours_left)
+        eta = datetime.now(UTC) + timedelta(hours=hours_left)
         return eta.strftime("%H:%M")
 
     def _get_telemetry_snapshot(self) -> TelemetrySnapshot:
         """Provide telemetry snapshot for the Governor."""
+        queue_depth = self.last_queue_depth if isinstance(self.last_queue_depth, int) else 0
         return TelemetrySnapshot(
             ci_health_percent=self.get_ci_health(),
             tasks_completed_1h=self.tasks_completed, # Simplified
+            tasks_failed_1h=self.tasks_failed,
+            tasks_in_progress=self.tasks_in_progress_runtime,
+            queue_depth=max(queue_depth, 0),
             prs_open_total=self.current_open_prs,
             workers_active=self.get_active_workers(),
             spend_today_usd=self.total_cost
@@ -253,7 +268,7 @@ class SwarmState:
     def add_log(self, event_type: EventType, message: str, level: str = "info"):
         """Add structured log entry."""
         entry = {
-            "timestamp": datetime.now(timezone.utc).strftime("%H.%M.%S"),
+            "timestamp": datetime.now(UTC).strftime("%H.%M.%S"),
             "event_type": event_type.value,
             "level": level,
             "message": message,
@@ -316,6 +331,9 @@ class IgniteRequest(BaseModel):
     auto_mode: bool = True
     prd_content: str | None = None
     vcs_target: str = "github"  # "aether" or "github"
+
+class VCSPreflightRequest(BaseModel):
+    vcs_target: str = "github"
 
 class ConfigUpdate(BaseModel):
     llm_provider: str | None = None
@@ -459,10 +477,87 @@ def get_coordination_metrics() -> dict:
     collector = get_metrics_collector()
     return collector.get_dashboard_data()
 
+
+def get_event_observability(window_minutes: int = 60) -> dict:
+    """Get event-sourced observability metrics and formula cards."""
+    collector = get_metrics_collector()
+    return collector.compute_event_observability(window_minutes=window_minutes)
+
+
+def get_trace_bundle(trace_id: str, limit: int = 500) -> dict:
+    """Get trace spans and state events for a specific trace id."""
+    collector = get_metrics_collector()
+    spans = [
+        span for span in collector.read_trace_spans(limit=limit)
+        if str(span.get("trace_id", "")).strip() == trace_id
+    ]
+    events = [
+        event for event in collector.read_task_state_events(limit=limit)
+        if str(event.get("trace_id", "")).strip() == trace_id
+    ]
+    spans.sort(key=lambda span: str(span.get("timestamp", "")))
+    events.sort(key=lambda event: str(event.get("timestamp", "")))
+    return {
+        "trace_id": trace_id,
+        "span_count": len(spans),
+        "event_count": len(events),
+        "services": sorted({str(span.get("service", "")) for span in spans if span.get("service")}),
+        "spans": spans,
+        "events": events,
+    }
+
+
+def _map_task_runtime_state(state_to: str, reason: str | None) -> tuple[str, int]:
+    state_key = state_to.strip().lower()
+    if state_key == "queued":
+        return ("QUEUED", 10)
+    if state_key == "claimed":
+        return ("CLAIMED", 20)
+    if state_key == "executing":
+        return ("RUNNING", 40)
+    if state_key == "artifact_ready":
+        return ("ARTIFACT_READY", 70)
+    if state_key == "verified":
+        return ("VERIFIED", 85)
+    if state_key == "submitted_pending_ledger":
+        return ("SUBMITTED_PENDING_LEDGER", 90)
+    if state_key == "settled_ack":
+        return ("COMPLETED", 100)
+    if state_key == "settled_nack":
+        suffix = f" ({reason})" if reason else ""
+        return (f"FAILED{suffix}", 100)
+    if state_key == "dead_letter":
+        suffix = f" ({reason})" if reason else ""
+        return (f"DEAD_LETTER{suffix}", 100)
+    return ("IN_PROGRESS", 50)
+
+
+def _index_latest_task_states(task_ids: set[str], limit: int = 5000) -> dict[str, dict[str, str]]:
+    if not task_ids:
+        return {}
+    collector = get_metrics_collector()
+    events = collector.read_task_state_events(limit=limit)
+    latest: dict[str, dict[str, str]] = {}
+    for event in reversed(events):
+        task_id = str(event.get("task_id", "")).strip()
+        if not task_id or task_id not in task_ids or task_id in latest:
+            continue
+        latest[task_id] = {
+            "state_to": str(event.get("state_to", "")).strip().lower(),
+            "reason": str(event.get("reason", "")).strip() or "",
+        }
+        if len(latest) >= len(task_ids):
+            break
+    return latest
+
 async def get_swarm_status() -> dict:
     """Get complete swarm status with all credibility metrics."""
     config = load_config()
     spec = load_spec()
+    coordination_data = get_coordination_metrics()
+    event_observability = coordination_data.get("event_sourced", {})
+    collector = get_metrics_collector()
+    submission_summary = collector.get_submission_summary()
 
     # Queue depth (prefer swarm heartbeat if available)
     if state.last_queue_depth is not None:
@@ -476,6 +571,8 @@ async def get_swarm_status() -> dict:
             await queue.disconnect()
         except Exception:
             queue_depth = -1
+    if isinstance(queue_depth, int) and queue_depth >= 0:
+        state.last_queue_depth = queue_depth
 
     # SPEC/DoD progress
     spec_progress = {"total": 0, "completed": 0, "percent": 0}
@@ -505,22 +602,65 @@ async def get_swarm_status() -> dict:
         if spec_progress["percent"] >= 80:
             dod_status["staging_deploy"] = "passing"
 
+    runtime_max_workers = (
+        state.worker_state.runtime_cap
+        if state.worker_state.runtime_cap > 0
+        else config.worker.max_workers
+    )
+
     # Task contracts with risk tiers
-    task_contracts = []
+    task_contracts: list[dict[str, Any]] = []
     if spec:
+        live_tasks = {
+            str(task_id): dict(task)
+            for task_id, task in state.active_tasks.items()
+        }
+        spec_task_ids = {
+            str(task_id)
+            for req in spec.requirements
+            for task_id in req.assigned_tasks
+            if str(task_id).strip()
+        }
+        latest_states = _index_latest_task_states(spec_task_ids)
+        merged_contracts: dict[str, dict[str, Any]] = {}
+
         for req in spec.requirements:
             for i, task_id in enumerate(req.assigned_tasks[:10]):
+                task_id_str = str(task_id)
                 risk = RiskTier.LOW if i % 3 == 0 else (RiskTier.MEDIUM if i % 3 == 1 else RiskTier.HIGH)
-                task_contracts.append({
+                contract: dict[str, Any] = {
                     "id": task_id,
                     "goal": req.title[:50],
-                    "worker": state.workers.get(task_id, {}).get("worker_id", "-"),
+                    "worker": "-",
                     "status": req.status.value.upper(),
                     "progress": 100 if req.status.value == "completed" else 50,
                     "spec_ref": req.id,
                     "prd_ref": req.id, # Traceability Fix (5.1)
                     "risk_tier": risk.value,
-                })
+                }
+                live_task = live_tasks.get(task_id_str)
+                if live_task:
+                    contract["worker"] = live_task.get("worker", "-")
+                    contract["status"] = live_task.get("status", "RUNNING")
+                    contract["progress"] = live_task.get("progress", 50)
+                elif task_id_str in latest_states:
+                    state_to = latest_states[task_id_str].get("state_to", "")
+                    reason = latest_states[task_id_str].get("reason")
+                    status, progress = _map_task_runtime_state(state_to, reason)
+                    contract["status"] = status
+                    contract["progress"] = progress
+                elif req.status.value == "in_progress":
+                    contract["status"] = "QUEUED"
+                    contract["progress"] = 10
+                merged_contracts[task_id_str] = contract
+
+        # Include runtime-only tasks not yet present in SPEC view.
+        for task_id, live_task in live_tasks.items():
+            if task_id in merged_contracts:
+                continue
+            merged_contracts[task_id] = dict(live_task)
+
+        task_contracts = list(merged_contracts.values())
 
     # Check governor
     state.check_governor()
@@ -529,7 +669,7 @@ async def get_swarm_status() -> dict:
         # Agents Online tile
         "agents": {
             "total": len(state.workers),
-            "max": config.worker.max_workers,
+            "max": runtime_max_workers,
             "active_60s": state.get_active_workers(60),
             "idle": len([w for w in state.workers.values() if w["status"] == "idle"]),
         },
@@ -592,7 +732,7 @@ async def get_swarm_status() -> dict:
         # Swarm status
         "swarm": {
             "active_workers": state.get_active_workers(60),
-            "max_workers": config.worker.max_workers,
+            "max_workers": runtime_max_workers,
             "paused": config.paused,
             "start_time": state.start_time,
         },
@@ -611,7 +751,13 @@ async def get_swarm_status() -> dict:
             "tier_0": state.tasks_by_tier.get(0, 0),
             "tier_1": state.tasks_by_tier.get(1, 0),
             "tier_2": state.tasks_by_tier.get(2, 0),
-            "tier_2_in_progress": len([t for t in task_contracts if t.get("risk_tier") == 2 and t.get("status") == "IN_PROGRESS"]),
+            "tier_2_in_progress": len([
+                t
+                for t in task_contracts
+                if t.get("risk_tier") == 2
+                and str(t.get("status", "")).upper()
+                in {"IN_PROGRESS", "QUEUED", "CLAIMED", "RUNNING", "ARTIFACT_READY", "VERIFIED", "SUBMITTED_PENDING_LEDGER"}
+            ]),
         },
 
         # Charts data
@@ -625,7 +771,7 @@ async def get_swarm_status() -> dict:
         "requirements": requirements,
 
         # Task contracts table - combine SPEC tasks with simulation tasks (GPT 5.2 Fix 2)
-        "task_contracts": task_contracts[:20] + list(state.active_tasks.values())[:20],
+        "task_contracts": task_contracts[:40],
 
         # Active tasks from simulation (separate for UI convenience)
         "active_tasks": list(state.active_tasks.values()),
@@ -642,7 +788,20 @@ async def get_swarm_status() -> dict:
             "vcs_provider": config.vcs.provider,
         },
 
-        "coordination": get_coordination_metrics(),
+        "coordination": coordination_data,
+        "observability": {
+            "metrics": event_observability.get("metrics", {}),
+            "formula_cards": event_observability.get("formula_cards", []),
+            "gate_a_ready": event_observability.get("gate_a_ready", False),
+        },
+        "submissions": {
+            "latest_successful_branch": submission_summary.get("latest_successful_branch"),
+            "latest_successful_submission_id": submission_summary.get("latest_successful_submission_id"),
+            "latest_successful_submission_url": submission_summary.get("latest_successful_submission_url"),
+            "latest_successful_trace_id": submission_summary.get("latest_successful_trace_id"),
+            "latest_settlement_timestamp": submission_summary.get("latest_settlement_timestamp"),
+            "recent_settlement_count": submission_summary.get("recent_settlement_count", 0),
+        },
 
         # Pending decisions
         "decisions": {
@@ -695,6 +854,135 @@ def get_teamplan_summary() -> dict | None:
     }
 
 
+_V2_ANALYTICS_CACHE_TTL_S = 900
+_v2_analytics_cache: dict[str, AnalyticsCacheEntry] = {}
+
+
+def _v2_repo_root() -> str:
+    return os.path.dirname(os.path.dirname(__file__))
+
+
+def _v2_actor_map_dir() -> str:
+    return os.path.join(_v2_repo_root(), "vault", "actor_map")
+
+
+def _v2_phase_transition_path() -> str:
+    return os.path.join(_v2_repo_root(), "data", "message_trends.json")
+
+
+def _read_json_file(path: str) -> dict[str, Any] | None:
+    try:
+        with open(path) as handle:
+            return json.load(handle)
+    except Exception:
+        return None
+
+
+def _get_cached_v2_payload(key: str, builder) -> Any:
+    now = time.monotonic()
+    entry = _v2_analytics_cache.get(key)
+    if entry and (now - entry.cached_at_monotonic) < _V2_ANALYTICS_CACHE_TTL_S:
+        return entry.value
+
+    value = builder()
+    _v2_analytics_cache[key] = AnalyticsCacheEntry(
+        value=value,
+        cached_at_monotonic=now,
+    )
+    return value
+
+
+def _build_v2_economic_flow() -> list[dict[str, Any]]:
+    vault_dir = _v2_actor_map_dir()
+    if not os.path.exists(vault_dir):
+        return []
+
+    results = []
+    with os.scandir(vault_dir) as entries:
+        for entry in entries:
+            if not entry.is_file() or not entry.name.endswith(".json"):
+                continue
+            data = _read_json_file(entry.path)
+            if not data:
+                continue
+            scores = data.get("intelligence_scores", {})
+            economic_mentions = scores.get("economic_mentions", 0)
+            if economic_mentions > 0:
+                results.append(
+                    {
+                        "id": data.get("profile", {}).get("id", entry.name),
+                        "name": data.get("profile", {}).get("name", entry.name),
+                        "economic_mentions": economic_mentions,
+                    }
+                )
+    results.sort(key=lambda item: item["economic_mentions"], reverse=True)
+    return results
+
+
+def _build_v2_alignment_matrix() -> list[dict[str, Any]]:
+    vault_dir = _v2_actor_map_dir()
+    if not os.path.exists(vault_dir):
+        return []
+
+    results = []
+    with os.scandir(vault_dir) as entries:
+        for entry in entries:
+            if not entry.is_file() or not entry.name.endswith(".json"):
+                continue
+            data = _read_json_file(entry.path)
+            if not data:
+                continue
+            scores = data.get("intelligence_scores", {})
+            cooperative_mentions = scores.get("cooperative_mentions", 0)
+            adversarial_mentions = scores.get("adversarial_mentions", 0)
+            if cooperative_mentions > 0 or adversarial_mentions > 0:
+                results.append(
+                    {
+                        "id": data.get("profile", {}).get("id", entry.name),
+                        "name": data.get("profile", {}).get("name", entry.name),
+                        "cooperative": cooperative_mentions,
+                        "adversarial": adversarial_mentions,
+                        "alignment_score": scores.get("alignment_score", 0.0),
+                        "total_mentions": len(data.get("post_history", [])),
+                    }
+                )
+    return results
+
+
+def _build_v2_phase_transition() -> dict[str, Any]:
+    trends_path = _v2_phase_transition_path()
+    if not os.path.exists(trends_path):
+        return {}
+
+    data = _read_json_file(trends_path)
+    if not isinstance(data, dict):
+        return {}
+
+    macro_data = {}
+    for date_str, topics in data.items():
+        if not isinstance(topics, dict):
+            continue
+        macro_data[date_str] = {
+            "Structural": topics.get("Macro: Structural", 0),
+            "Ritual": topics.get("Macro: Ritual/Spam", 0),
+            "_post_count": topics.get("_post_count", 0),
+        }
+    return macro_data
+
+
+async def _prewarm_v2_analytics_cache() -> None:
+    builders = (
+        ("economic-flow", _build_v2_economic_flow),
+        ("alignment-matrix", _build_v2_alignment_matrix),
+        ("phase-transition", _build_v2_phase_transition),
+    )
+    for key, builder in builders:
+        try:
+            await asyncio.to_thread(_get_cached_v2_payload, key, builder)
+        except Exception:
+            continue
+
+
 # ============================================================================
 # App Setup
 # ============================================================================
@@ -702,6 +990,7 @@ def get_teamplan_summary() -> dict | None:
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     state.add_log(EventType.SYS_START, "MX Swarm Dashboard started")
+    asyncio.create_task(_prewarm_v2_analytics_cache())
     yield
     state.add_log(EventType.SYS_STOP, "MX Swarm Dashboard stopped")
 
@@ -712,6 +1001,24 @@ app = FastAPI(
     version="2.0.0",
     lifespan=lifespan,
 )
+
+v2_dist_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "dashboard_v2", "dist"))
+if os.path.isdir(v2_dist_path):
+    app.mount("/v2", StaticFiles(directory=v2_dist_path, html=True), name="dashboard_v2")
+else:
+    @app.get("/v2")
+    async def v2_missing_build():
+        return {
+            "status": "missing_build",
+            "message": "Dashboard V2 not built. Run `npm install` and `npm run build` in dashboard_v2.",
+        }
+
+    @app.get("/v2/{path:path}")
+    async def v2_missing_build_path(path: str):
+        return {
+            "status": "missing_build",
+            "message": "Dashboard V2 not built. Run `npm install` and `npm run build` in dashboard_v2.",
+        }
 
 
 # ============================================================================
@@ -727,6 +1034,34 @@ async def root():
 @app.get("/api/status")
 async def api_status():
     return await get_swarm_status()
+
+# ============================================================================
+# V2 Gas Town Analytical Lenses
+# ============================================================================
+
+@app.get("/api/v2/economic-flow")
+async def v2_economic_flow():
+    return await asyncio.to_thread(
+        _get_cached_v2_payload,
+        "economic-flow",
+        _build_v2_economic_flow,
+    )
+
+@app.get("/api/v2/alignment-matrix")
+async def v2_alignment_matrix():
+    return await asyncio.to_thread(
+        _get_cached_v2_payload,
+        "alignment-matrix",
+        _build_v2_alignment_matrix,
+    )
+
+@app.get("/api/v2/phase-transition")
+async def v2_phase_transition():
+    return await asyncio.to_thread(
+        _get_cached_v2_payload,
+        "phase-transition",
+        _build_v2_phase_transition,
+    )
 
 
 @app.get("/api/logs")
@@ -919,7 +1254,7 @@ async def control_ignite(req: IgniteRequest):
     config.paused = False
     save_config(config)
 
-    state.start_time = datetime.now(timezone.utc).isoformat()
+    state.start_time = datetime.now(UTC).isoformat()
     state.governor_state = GovernorMode.NORMAL
 
 
@@ -1017,6 +1352,64 @@ async def control_ignite(req: IgniteRequest):
     return {"status": "ignited", "auto_mode": req.auto_mode}
 
 
+@app.post("/api/control/vcs_preflight")
+async def control_vcs_preflight(req: VCSPreflightRequest):
+    if req.vcs_target not in {"aether", "github"}:
+        raise HTTPException(400, "vcs_target must be 'aether' or 'github'")
+
+    config = load_config()
+    target = req.vcs_target
+    details: dict[str, str] = {}
+
+    if target == "github":
+        token = os.environ.get("GITHUB_TOKEN") or os.environ.get("MX_GITHUB_TOKEN") or config.github.token
+        if not token:
+            return {"ok": False, "target": target, "message": "Missing GitHub token", "details": {"token": "not_set"}}
+        if not config.github.repo_owner or not config.github.repo_name:
+            details["repo"] = f"{config.github.repo_owner or '?'} / {config.github.repo_name or '?'}"
+            return {"ok": False, "target": target, "message": "Missing GitHub repo owner/name", "details": details}
+
+        try:
+            from shared.adapters import create_vcs_adapter
+
+            adapter = create_vcs_adapter({
+                "provider": "github",
+                "token": token,
+                "owner": config.github.repo_owner,
+                "repo": config.github.repo_name,
+            })
+            healthy = await adapter.health_check()
+            if not healthy:
+                return {"ok": False, "target": target, "message": "GitHub health check failed"}
+        except Exception as exc:
+            return {"ok": False, "target": target, "message": f"GitHub check error: {exc}"}
+
+        return {"ok": True, "target": target, "message": "GitHub ready"}
+
+    # Aether preflight
+    if not config.vcs.aether_base_url:
+        return {"ok": False, "target": target, "message": "Missing Aether base URL"}
+    if not config.vcs.aether_repo_id:
+        return {"ok": False, "target": target, "message": "Missing Aether repo id"}
+
+    try:
+        from shared.adapters import create_vcs_adapter
+
+        adapter = create_vcs_adapter({
+            "provider": "aether",
+            "base_url": config.vcs.aether_base_url,
+            "repo_id": config.vcs.aether_repo_id,
+            "agent_id": config.vcs.aether_agent_id or "mx-swarm",
+        })
+        healthy = await adapter.health_check()
+        if not healthy:
+            return {"ok": False, "target": target, "message": "Aether health check failed"}
+    except Exception as exc:
+        return {"ok": False, "target": target, "message": f"Aether check error: {exc}"}
+
+    return {"ok": True, "target": target, "message": "Aether ready"}
+
+
 @app.post("/api/control/stop")
 async def control_stop():
     """Emergency stop."""
@@ -1062,7 +1455,7 @@ async def simulation_event(event: dict):
         if "workers_active" in m:
             # Register simulated workers with proper structure
 
-            now = datetime.now(timezone.utc).isoformat()
+            now = datetime.now(UTC).isoformat()
             for i in range(m["workers_active"]):
                 worker_id = f"sim-worker-{i}"
                 state.workers[worker_id] = {
@@ -1073,6 +1466,16 @@ async def simulation_event(event: dict):
             # Update 3-tier worker_state
             state.worker_state.online_workers = m["workers_active"]
             state.worker_state.enforce_invariant()
+        if "tasks_in_progress" in m:
+            try:
+                state.tasks_in_progress_runtime = max(0, int(m["tasks_in_progress"]))
+            except (TypeError, ValueError):
+                pass
+        if "queue_depth" in m:
+            try:
+                state.last_queue_depth = int(m["queue_depth"])
+            except (TypeError, ValueError):
+                pass
 
         # Update teamplan recommended (from Boss analysis)
         if "teamplan_workers" in m:
@@ -1107,7 +1510,7 @@ async def simulation_event(event: dict):
             "status": event.get("status", "RUNNING"),
             "progress": 50,
             "pr_number": event.get("pr_number"),
-            "created_at": datetime.now(timezone.utc).isoformat()
+            "created_at": datetime.now(UTC).isoformat()
         }
     elif event_type == "PR_MERGE" and "task_id" in event:
         if event["task_id"] in state.active_tasks:
@@ -1181,6 +1584,47 @@ async def get_teamplan_summary_api():
 async def get_coordination():
     """Get coordination metrics."""
     return get_coordination_metrics()
+
+
+@app.get("/api/metrics/dictionary")
+async def get_metric_dictionary():
+    """Get metric formulas, units and descriptions."""
+    collector = get_metrics_collector()
+    return {"metric_dictionary": collector.get_metric_dictionary()}
+
+
+@app.get("/api/metrics/event_sourced")
+async def get_event_sourced_metrics(window_minutes: int = 60):
+    """Get event-sourced metrics and formula cards."""
+    return get_event_observability(window_minutes=window_minutes)
+
+
+@app.get("/api/traces")
+async def list_traces(limit: int = 200):
+    """List recent trace spans for dashboard drill-down."""
+    collector = get_metrics_collector()
+    spans = collector.read_trace_spans(limit=max(1, min(limit, 5000)))
+    return {"trace_spans": spans, "count": len(spans)}
+
+
+@app.get("/api/traces/{trace_id}")
+async def get_trace(trace_id: str, limit: int = 500):
+    """Get full trace detail (spans + task state events) by trace id."""
+    bundle = get_trace_bundle(trace_id=trace_id, limit=max(1, min(limit, 5000)))
+    if bundle["span_count"] == 0 and bundle["event_count"] == 0:
+        raise HTTPException(status_code=404, detail=f"Trace not found: {trace_id}")
+    return bundle
+
+
+@app.get("/api/submissions/recent")
+async def list_recent_submissions(limit: int = 20, settled_only: bool = True):
+    """List recent submission events, defaulting to settled outcomes for operators."""
+    collector = get_metrics_collector()
+    events = collector.get_recent_submission_events(
+        limit=max(1, min(limit, 200)),
+        settled_only=settled_only,
+    )
+    return {"submissions": events, "count": len(events)}
 
 
 @app.post("/api/teamplan/generate")
@@ -1531,6 +1975,8 @@ class SwarmHeartbeat(BaseModel):
     ci_passes: int = 0
     ci_fails: int = 0
     queue_depth: int | None = None
+    target_workers: int | None = None
+    runtime_cap: int | None = None
     is_running: bool = True
     current_phase: str | None = None  # "planning", "working", "judging", etc.
 
@@ -1538,18 +1984,25 @@ class SwarmHeartbeat(BaseModel):
 @app.post("/api/swarm/heartbeat")
 async def swarm_heartbeat(heartbeat: SwarmHeartbeat):
     """Receive heartbeat from CLI swarm process to sync dashboard state."""
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(UTC).isoformat()
 
     # Update worker state
     state.worker_state.online_workers = heartbeat.active_workers
+    if heartbeat.target_workers is not None:
+        state.worker_state.runtime_target = max(0, heartbeat.target_workers)
+    if heartbeat.runtime_cap is not None:
+        state.worker_state.runtime_cap = max(0, heartbeat.runtime_cap)
+    elif heartbeat.target_workers is not None:
+        state.worker_state.runtime_cap = max(0, heartbeat.target_workers)
     state.worker_state.enforce_invariant()
 
     # Register workers from details or create placeholders
     if heartbeat.worker_details:
+        heartbeat_workers: dict[str, dict[str, Any]] = {}
         heartbeat_tasks: dict[str, dict] = {}
         for w in heartbeat.worker_details:
-            worker_id = w.get("id", f"worker-{len(state.workers)}")
-            state.workers[worker_id] = {
+            worker_id = w.get("id", f"worker-{len(heartbeat_workers)}")
+            heartbeat_workers[worker_id] = {
                 "worker_id": worker_id,
                 "last_seen": now,
                 "task_id": w.get("task_id"),
@@ -1567,17 +2020,24 @@ async def swarm_heartbeat(heartbeat: SwarmHeartbeat):
                     "status": "RUNNING",
                     "progress": 50,
                 }
+        state.workers = heartbeat_workers
         state.active_tasks = heartbeat_tasks
     else:
         # Create placeholder workers based on count
+        heartbeat_workers: dict[str, dict[str, Any]] = {}
         for i in range(heartbeat.active_workers):
             worker_id = f"swarm-worker-{i}"
-            state.workers[worker_id] = {
+            heartbeat_workers[worker_id] = {
                 "worker_id": worker_id,
                 "last_seen": now,
                 "task_id": None,
                 "status": "active",
             }
+        state.workers = heartbeat_workers
+        if heartbeat.tasks_in_progress == 0 and heartbeat.queue_depth == 0:
+            state.active_tasks = {}
+
+    state.tasks_in_progress_runtime = max(0, heartbeat.tasks_in_progress)
 
     # Update metrics (incremental)
     if heartbeat.tasks_completed > state.tasks_completed:
@@ -1599,9 +2059,12 @@ async def swarm_heartbeat(heartbeat: SwarmHeartbeat):
     if heartbeat.queue_depth is not None:
         state.last_queue_depth = heartbeat.queue_depth
 
-    # Track current phase
-    if heartbeat.current_phase:
-        state.add_log(EventType.SYS_CONFIG, f"Swarm phase: {heartbeat.current_phase}")
+    # Track current phase (suppress steady-state "running" noise).
+    normalized_phase = (heartbeat.current_phase or "").strip().lower()
+    if normalized_phase and normalized_phase != state.last_phase:
+        if normalized_phase != "running" or (state.last_phase and state.last_phase != "running"):
+            state.add_log(EventType.SYS_CONFIG, f"Swarm phase: {normalized_phase}")
+        state.last_phase = normalized_phase
 
     # Broadcast update to all connected clients
     await state.broadcast_status()

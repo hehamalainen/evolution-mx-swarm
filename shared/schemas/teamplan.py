@@ -8,7 +8,7 @@ machine-readable, and the runtime MUST obey it.
 
 import json
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 
 
@@ -351,6 +351,7 @@ class TeamPlan:
     # Organization structure
     streams: list[StreamConfig] = field(default_factory=list)
     pods: list[PodConfig] = field(default_factory=list)
+    rig_plans: list[dict] = field(default_factory=list)
 
     # Governance
     caps: CapsConfig = field(default_factory=CapsConfig)
@@ -379,7 +380,7 @@ class TeamPlan:
 
     def __post_init__(self):
         if self.created_at is None:
-            self.created_at = datetime.now(timezone.utc).isoformat()
+            self.created_at = datetime.now(UTC).isoformat()
 
     def total_target_workers(self) -> int:
         """Total target workers across all streams/pods."""
@@ -413,6 +414,7 @@ class TeamPlan:
             "topology": self.topology.value,
             "streams": [s.to_dict() for s in self.streams],
             "pods": [p.to_dict() for p in self.pods],
+            "rig_plans": self.rig_plans,
             "caps": self.caps.to_dict(),
             "risk_merge_policy": self.risk_merge_policy.to_dict(),
             "task_policy": self.task_policy.to_dict(),
@@ -445,6 +447,7 @@ class TeamPlan:
             topology=Topology(data.get("topology", "streams")),
             streams=[StreamConfig.from_dict(s) for s in data.get("streams", [])],
             pods=[PodConfig.from_dict(p) for p in data.get("pods", [])],
+            rig_plans=list(data.get("rig_plans", [])),
             caps=CapsConfig.from_dict(data.get("caps", {})),
             risk_merge_policy=RiskMergePolicy.from_dict(data.get("risk_merge_policy", {})),
             task_policy=TaskPolicy.from_dict(data.get("task_policy", {})),

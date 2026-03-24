@@ -5,6 +5,7 @@ import os
 import shutil
 import tempfile
 from dataclasses import dataclass
+from typing import Any, cast
 
 
 @dataclass
@@ -19,7 +20,7 @@ class GitResult:
 async def run_git(
     args: list[str],
     cwd: str | None = None,
-    env: dict | None = None,
+    env: dict[str, str] | None = None,
 ) -> GitResult:
     """
     Run a git command asynchronously.
@@ -49,11 +50,12 @@ async def run_git(
 
     stdout, stderr = await proc.communicate()
 
+    return_code = proc.returncode if proc.returncode is not None else 1
     return GitResult(
-        success=proc.returncode == 0,
+        success=return_code == 0,
         stdout=stdout.decode("utf-8", errors="replace"),
         stderr=stderr.decode("utf-8", errors="replace"),
-        return_code=proc.returncode,
+        return_code=return_code,
     )
 
 
@@ -104,12 +106,27 @@ class GitRepo:
         Returns:
             GitResult
         """
-        args = ["clone", "--depth", str(depth)]
+        repo_is_dir = os.path.isdir(self.repo_url)
+        print(
+            "[git.clone] "
+            f"repo_url={self.repo_url!r} "
+            f"is_dir={repo_is_dir} "
+            f"branch={branch!r}"
+        )
 
-        if branch:
-            args.extend(["--branch", branch])
+        if repo_is_dir:
+            # Local-mode clones should preserve the source repo's current HEAD.
+            # Using `--branch` here targets remote refs and breaks isolated
+            # filesystem clones where the checked-out working branch is not
+            # exposed as an upstream branch.
+            args = ["clone", self.repo_url, self.local_path]
+        else:
+            args = ["clone", "--depth", str(depth)]
 
-        args.extend([self.authenticated_url, self.local_path])
+            if branch:
+                args.extend(["--branch", branch])
+
+            args.extend([self.authenticated_url, self.local_path])
 
         result = await run_git(args)
         self._cloned = result.success
@@ -147,7 +164,7 @@ class GitRepo:
             args.append(branch)
         return await run_git(args, cwd=self.local_path)
 
-    async def add(self, paths: list[str] = None) -> GitResult:
+    async def add(self, paths: list[str] | None = None) -> GitResult:
         """
         Stage files.
 
@@ -253,6 +270,18 @@ class GitRepo:
 class GitHubAPI:
     """GitHub API helper for MX Swarm."""
 
+    @staticmethod
+    def _as_dict(value: Any) -> dict[str, Any]:
+        if isinstance(value, dict):
+            return cast(dict[str, Any], value)
+        return {}
+
+    @staticmethod
+    def _as_list_of_dicts(value: Any) -> list[dict[str, Any]]:
+        if not isinstance(value, list):
+            return []
+        return [cast(dict[str, Any], item) for item in value if isinstance(item, dict)]
+
     def __init__(self, token: str, owner: str, repo: str):
         """
         Initialize GitHub API helper.
@@ -271,8 +300,8 @@ class GitHubAPI:
         self,
         method: str,
         endpoint: str,
-        data: dict | None = None,
-    ) -> dict:
+        data: dict[str, Any] | None = None,
+    ) -> Any:
         """Make authenticated API request."""
         try:
             import httpx
@@ -304,7 +333,7 @@ class GitHubAPI:
         head: str,
         base: str = "main",
         draft: bool = False,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """
         Create a pull request.
 
@@ -318,7 +347,7 @@ class GitHubAPI:
         Returns:
             PR data from GitHub API
         """
-        return await self._request(
+        return self._as_dict(await self._request(
             "POST",
             "/pulls",
             data={
@@ -328,37 +357,37 @@ class GitHubAPI:
                 "base": base,
                 "draft": draft,
             },
-        )
+        ))
 
-    async def get_pull_request(self, number: int) -> dict:
+    async def get_pull_request(self, number: int) -> dict[str, Any]:
         """Get pull request details."""
-        return await self._request("GET", f"/pulls/{number}")
+        return self._as_dict(await self._request("GET", f"/pulls/{number}"))
 
     async def list_pull_requests(
         self,
         state: str = "open",
         head: str | None = None,
-    ) -> list[dict]:
+    ) -> list[dict[str, Any]]:
         """List pull requests."""
         params = f"?state={state}"
         if head:
             params += f"&head={self.owner}:{head}"
-        return await self._request("GET", f"/pulls{params}")
+        return self._as_list_of_dicts(await self._request("GET", f"/pulls{params}"))
 
-    async def add_pr_comment(self, number: int, body: str) -> dict:
+    async def add_pr_comment(self, number: int, body: str) -> dict[str, Any]:
         """Add comment to pull request."""
-        return await self._request(
+        return self._as_dict(await self._request(
             "POST",
             f"/issues/{number}/comments",
             data={"body": body},
-        )
+        ))
 
     async def merge_pull_request(
         self,
         number: int,
         merge_method: str = "squash",
         commit_message: str | None = None,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """
         Merge a pull request.
 
@@ -374,16 +403,16 @@ class GitHubAPI:
         if commit_message:
             data["commit_message"] = commit_message
 
-        return await self._request("PUT", f"/pulls/{number}/merge", data=data)
+        return self._as_dict(await self._request("PUT", f"/pulls/{number}/merge", data=data))
 
-    async def get_check_runs(self, ref: str) -> list[dict]:
+    async def get_check_runs(self, ref: str) -> list[dict[str, Any]]:
         """Get check runs for a ref (branch/commit)."""
-        result = await self._request("GET", f"/commits/{ref}/check-runs")
-        return result.get("check_runs", [])
+        result = self._as_dict(await self._request("GET", f"/commits/{ref}/check-runs"))
+        return self._as_list_of_dicts(result.get("check_runs"))
 
-    async def get_combined_status(self, ref: str) -> dict:
+    async def get_combined_status(self, ref: str) -> dict[str, Any]:
         """Get combined status for a ref."""
-        return await self._request("GET", f"/commits/{ref}/status")
+        return self._as_dict(await self._request("GET", f"/commits/{ref}/status"))
 
     async def all_checks_passed(self, ref: str) -> bool:
         """Check if all CI checks have passed."""
