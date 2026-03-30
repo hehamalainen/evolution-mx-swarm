@@ -293,6 +293,150 @@ async def test_cmd_proof_delegates_to_runner(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_cmd_scale_worker_load_passes_sink_mode(monkeypatch) -> None:
+    calls: list[tuple[str, list[str]]] = []
+
+    async def fake_run_python_tool(script_name: str, extra_args: list[str]) -> None:
+        calls.append((script_name, extra_args))
+
+    monkeypatch.setattr(cli_main, "_run_python_tool", fake_run_python_tool)
+
+    args = SimpleNamespace(
+        logical_workers=100,
+        active_concurrency=4,
+        slice="jsonpeek",
+        timeout_seconds=1200,
+        sink_mode="mock_github",
+        report_root="reports/scale_worker_load",
+    )
+
+    await cli_main.cmd_scale_worker_load(args)
+
+    assert calls == [
+        (
+            "run_scale_worker_load.py",
+            [
+                "--logical-workers",
+                "100",
+                "--active-concurrency",
+                "4",
+                "--slice",
+                "jsonpeek",
+                "--timeout-seconds",
+                "1200",
+                "--sink-mode",
+                "mock_github",
+                "--report-root",
+                "reports/scale_worker_load",
+            ],
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_cmd_scale_control_plane_delegates_to_runner(monkeypatch) -> None:
+    calls: list[tuple[str, list[str]]] = []
+
+    async def fake_run_python_tool(script_name: str, extra_args: list[str]) -> None:
+        calls.append((script_name, extra_args))
+
+    monkeypatch.setattr(cli_main, "_run_python_tool", fake_run_python_tool)
+
+    args = SimpleNamespace(
+        logical_lanes=1000,
+        logical_tasks=2000,
+        seed=7,
+        report_root="reports/scale_control_plane",
+    )
+
+    await cli_main.cmd_scale_control_plane(args)
+
+    assert calls == [
+        (
+            "run_scale_control_plane.py",
+            [
+                "--logical-lanes",
+                "1000",
+                "--seed",
+                "7",
+                "--report-root",
+                "reports/scale_control_plane",
+                "--logical-tasks",
+                "2000",
+            ],
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_cmd_scale_worker_load_delegates_to_runner(monkeypatch) -> None:
+    calls: list[tuple[str, list[str]]] = []
+
+    async def fake_run_python_tool(script_name: str, extra_args: list[str]) -> None:
+        calls.append((script_name, extra_args))
+
+    monkeypatch.setattr(cli_main, "_run_python_tool", fake_run_python_tool)
+
+    args = SimpleNamespace(
+        logical_workers=100,
+        active_concurrency=10,
+        slice="jsonpeek",
+        timeout_seconds=1200,
+        report_root="reports/scale_worker_load",
+    )
+
+    await cli_main.cmd_scale_worker_load(args)
+
+    assert calls == [
+        (
+            "run_scale_worker_load.py",
+            [
+                "--logical-workers",
+                "100",
+                "--active-concurrency",
+                "10",
+                "--slice",
+                "jsonpeek",
+                "--timeout-seconds",
+                "1200",
+                "--sink-mode",
+                "mock_github",
+                "--report-root",
+                "reports/scale_worker_load",
+            ],
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_cmd_quarantine_audit_delegates_to_runner(monkeypatch) -> None:
+    calls: list[tuple[str, list[str]]] = []
+
+    async def fake_run_python_tool(script_name: str, extra_args: list[str]) -> None:
+        calls.append((script_name, extra_args))
+
+    monkeypatch.setattr(cli_main, "_run_python_tool", fake_run_python_tool)
+
+    args = SimpleNamespace(
+        report_root="reports/quarantine_audit",
+        fail_on_secrets=True,
+    )
+
+    await cli_main.cmd_quarantine_audit(args)
+
+    assert calls == [
+        (
+            "run_quarantine_audit.py",
+            [
+                "--report-root",
+                "reports/quarantine_audit",
+                "--fail-on-secrets",
+            ],
+        )
+    ]
+
+
+@pytest.mark.asyncio
 async def test_cmd_aether_adapter_proof_delegates_to_runner(monkeypatch) -> None:
     calls: list[tuple[str, list[str]]] = []
 

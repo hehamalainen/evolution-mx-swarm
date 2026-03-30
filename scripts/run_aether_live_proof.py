@@ -26,14 +26,54 @@ REPORT_ROOT = REPO_ROOT / "reports" / "aether_live_proof"
 COPY_EXCLUDES = {
     ".git",
     ".venv",
+    "venv",
     ".runtime",
     "reports",
+    "dashboard_v2",
+    "dashboard_v3",
+    "data",
+    "temp_analysis",
+    "vault",
+    "node_modules",
+    "dist",
     "__pycache__",
     ".pytest_cache",
     ".mypy_cache",
     ".ruff_cache",
     ".coverage",
 }
+COPY_INCLUDE_ROOTS = {
+    "boss",
+    "cli",
+    "judge",
+    "planner",
+    "prds",
+    "proof_fixtures",
+    "qualification",
+    "scripts",
+    "shared",
+    "simulation",
+    "tests",
+    "tools",
+    "worker",
+}
+COPY_INCLUDE_FILES = {
+    "mx.config.json",
+    "pyproject.toml",
+    "requirements.txt",
+}
+
+
+def _install_venv_shim(target: Path) -> None:
+    venv_bin = target / ".venv" / "bin"
+    venv_bin.mkdir(parents=True, exist_ok=True)
+    python_shim = venv_bin / "python"
+    python_shim.write_text(
+        "#!/bin/sh\n"
+        f"exec '{MX_VENV_PYTHON}' \"$@\"\n",
+        encoding="utf-8",
+    )
+    python_shim.chmod(0o755)
 
 
 def _http_json(method: str, url: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -60,17 +100,101 @@ def _safe_http_json(method: str, url: str, payload: dict[str, Any] | None = None
 
 def _copy_worktree(source: Path, target: Path) -> None:
     def ignore(_src: str, names: list[str]) -> set[str]:
-        ignored = {name for name in names if name in COPY_EXCLUDES}
+        src_path = Path(_src)
+        if src_path == source:
+            ignored = {
+                name
+                for name in names
+                if name not in COPY_INCLUDE_ROOTS and name not in COPY_INCLUDE_FILES
+            }
+        else:
+            ignored = set()
+        ignored.update({name for name in names if name in COPY_EXCLUDES})
         ignored.update({name for name in names if name.endswith(".pyc")})
         return ignored
 
+    shutil.copytree(source, target, ignore=ignore)
     subprocess.run(
-        ["git", "clone", "--no-hardlinks", str(source), str(target)],
+        ["git", "init", "-b", "main"],
+        cwd=str(target),
         check=True,
         capture_output=True,
         text=True,
     )
-    shutil.copytree(source, target, ignore=ignore, dirs_exist_ok=True)
+    subprocess.run(
+        ["git", "config", "user.name", "MX Live Proof"],
+        cwd=str(target),
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.email", "mx-live-proof@example.invalid"],
+        cwd=str(target),
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    subprocess.run(
+        ["git", "config", "commit.gpgsign", "false"],
+        cwd=str(target),
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    subprocess.run(
+        ["git", "add", "-A"],
+        cwd=str(target),
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    subprocess.run(
+        ["git", "-c", "commit.gpgsign=false", "commit", "--allow-empty", "-m", "MX live proof snapshot"],
+        cwd=str(target),
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    _install_venv_shim(target)
+
+
+def _prepare_cloned_snapshot_repo(source: Path, target: Path) -> None:
+    subprocess.run(
+        ["git", "clone", "--quiet", str(source), str(target)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "MX Live Proof"],
+        cwd=str(target),
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.email", "mx-live-proof@example.invalid"],
+        cwd=str(target),
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    subprocess.run(
+        ["git", "config", "commit.gpgsign", "false"],
+        cwd=str(target),
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    _install_venv_shim(target)
+
+
+def _materialize_worktree(source: Path, target: Path, *, source_is_template_repo: bool = False) -> None:
+    if source_is_template_repo:
+        _prepare_cloned_snapshot_repo(source, target)
+        return
+    _copy_worktree(source, target)
 
 
 def _patch_config(
@@ -260,6 +384,12 @@ def main() -> int:
     parser.add_argument("--repo-name", default=None, help="Optional Aether repository name.")
     parser.add_argument("--run-id", default=None, help="Explicit MX run identifier.")
     parser.add_argument("--report-root", default=None, help="Optional report root override.")
+    parser.add_argument("--source-root", default=None, help="Optional source repo root to snapshot from.")
+    parser.add_argument(
+        "--source-is-template-repo",
+        action="store_true",
+        help="Treat --source-root as an already-prepared snapshot repo and clone it instead of rebuilding it.",
+    )
     parser.add_argument("--llm-provider", default=None, help="Override llm.provider for the proof run.")
     parser.add_argument("--llm-model", default=None, help="Override llm.model for the proof run.")
     parser.add_argument("--llm-base-url", default=None, help="Override llm.base_url for the proof run.")
@@ -271,6 +401,7 @@ def main() -> int:
     run_id = args.run_id or f"mx-aether-proof-{report_stamp.lower()}"
     repo_name = args.repo_name or f"mx-proof-{report_stamp.lower()}"
     report_root = Path(args.report_root) if args.report_root else REPORT_ROOT
+    source_root = Path(args.source_root).resolve() if args.source_root else REPO_ROOT
     report_dir = report_root / report_stamp
     report_dir.mkdir(parents=True, exist_ok=True)
 
@@ -291,7 +422,7 @@ def main() -> int:
 
     workspace = Path(tempfile.mkdtemp(prefix="mx_aether_live_proof_"))
     shutil.rmtree(workspace)
-    _copy_worktree(REPO_ROOT, workspace)
+    _materialize_worktree(source_root, workspace, source_is_template_repo=args.source_is_template_repo)
     _patch_config(
         workspace / "mx.config.json",
         base_url=args.aether_base_url,

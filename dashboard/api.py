@@ -907,15 +907,30 @@ def _build_v2_economic_flow() -> list[dict[str, Any]]:
                 continue
             scores = data.get("intelligence_scores", {})
             economic_mentions = scores.get("economic_mentions", 0)
-            if economic_mentions > 0:
+            sentience_mentions = scores.get("sentience_mentions", 0)
+
+            meatware_url = None
+            for p in data.get("post_history", []):
+                if "url" in p:
+                    meatware_url = p["url"]
+                    break
+            if not meatware_url:
+                for idx in data.get("interaction_history", []):
+                    if "url" in idx:
+                        meatware_url = idx["url"]
+                        break
+
+            if economic_mentions > 0 or sentience_mentions > 0:
                 results.append(
                     {
                         "id": data.get("profile", {}).get("id", entry.name),
                         "name": data.get("profile", {}).get("name", entry.name),
                         "economic_mentions": economic_mentions,
+                        "sentience_mentions": sentience_mentions,
+                        "meatware_url": meatware_url,
                     }
                 )
-    results.sort(key=lambda item: item["economic_mentions"], reverse=True)
+    results.sort(key=lambda item: item["economic_mentions"] + item["sentience_mentions"], reverse=True)
     return results
 
 

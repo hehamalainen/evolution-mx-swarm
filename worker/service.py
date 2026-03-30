@@ -23,6 +23,7 @@ import traceback
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 from shared.adapters import (
     QueueAdapter,
@@ -1606,7 +1607,14 @@ Example:
                 parts = command.split()
 
             tool = parts[0] if parts else ""
-            if tool and shutil.which(tool) is None:
+            rewritten_python_module = False
+            if len(parts) >= 3 and tool in {"python", "python3"} and parts[1] == "-m" and parts[2] == "ruff":
+                ruff_binary = Path(sys.executable).parent / "ruff"
+                ruff_cmd = str(ruff_binary) if ruff_binary.exists() else (shutil.which("ruff") or "ruff")
+                args = " ".join(shlex.quote(part) for part in parts[3:])
+                resolved_command = f'"{ruff_cmd}" {args}'.strip()
+                rewritten_python_module = True
+            if tool and shutil.which(tool) is None and not rewritten_python_module:
                 args = " ".join(parts[1:]) if len(parts) > 1 else ""
                 if tool == "pytest":
                     resolved_command = f'"{sys.executable}" -m pytest {args}'.strip()

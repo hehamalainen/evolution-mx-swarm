@@ -226,6 +226,8 @@ export interface EconomicNode {
   id: string;
   name: string;
   economic_mentions: number;
+  sentience_mentions?: number;
+  meatware_url?: string;
 }
 
 export interface AlignmentNode {

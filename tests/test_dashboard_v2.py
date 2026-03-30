@@ -55,6 +55,8 @@ def test_v2_analytics_endpoints_use_cached_payloads(monkeypatch, tmp_path) -> No
                 "id": "actor-1",
                 "name": "Actor One",
                 "economic_mentions": 7,
+                "sentience_mentions": 0,
+                "meatware_url": None,
             }
         ]
 

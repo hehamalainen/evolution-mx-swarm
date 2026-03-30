@@ -789,6 +789,49 @@ async def cmd_aether_live_proof(args):
     await _run_python_tool("run_aether_live_proof.py", cmd)
 
 
+async def cmd_scale_control_plane(args):
+    """Run the hybrid control-plane scale harness."""
+    cmd = [
+        "--logical-lanes",
+        str(args.logical_lanes),
+        "--seed",
+        str(args.seed),
+        "--report-root",
+        args.report_root,
+    ]
+    if args.logical_tasks is not None:
+        cmd.extend(["--logical-tasks", str(args.logical_tasks)])
+    await _run_python_tool("run_scale_control_plane.py", cmd)
+
+
+async def cmd_scale_worker_load(args):
+    """Run the canned worker-load scale harness."""
+    sink_mode = getattr(args, "sink_mode", "mock_github")
+    cmd = [
+        "--logical-workers",
+        str(args.logical_workers),
+        "--active-concurrency",
+        str(args.active_concurrency),
+        "--slice",
+        args.slice,
+        "--timeout-seconds",
+        str(args.timeout_seconds),
+        "--sink-mode",
+        sink_mode,
+        "--report-root",
+        args.report_root,
+    ]
+    await _run_python_tool("run_scale_worker_load.py", cmd)
+
+
+async def cmd_quarantine_audit(args):
+    """Inventory Moltbook-linked boundary surface and secret hits."""
+    cmd = ["--report-root", args.report_root]
+    if args.fail_on_secrets:
+        cmd.append("--fail-on-secrets")
+    await _run_python_tool("run_quarantine_audit.py", cmd)
+
+
 async def cmd_gcp_stage(args):
     """Prepare GCP Gate A/B staging artifacts from the CLI."""
     cmd = [
@@ -1366,6 +1409,59 @@ def main():
         help="Optional canned completion fixture JSON",
     )
 
+    scale_control_plane_parser = subparsers.add_parser(
+        "scale-control-plane",
+        help="Run the hybrid 1000-lane control-plane scale harness",
+    )
+    scale_control_plane_parser.add_argument("--logical-lanes", type=int, default=1000, help="Logical lane count")
+    scale_control_plane_parser.add_argument("--logical-tasks", type=int, default=None, help="Optional task count")
+    scale_control_plane_parser.add_argument("--seed", type=int, default=7, help="Deterministic RNG seed")
+    scale_control_plane_parser.add_argument(
+        "--report-root",
+        default="reports/scale_control_plane",
+        help="Report root directory",
+    )
+
+    scale_worker_load_parser = subparsers.add_parser(
+        "scale-worker-load",
+        help="Run the canned worker-load scale harness",
+    )
+    scale_worker_load_parser.add_argument("--logical-workers", type=int, default=100, help="Logical worker count")
+    scale_worker_load_parser.add_argument(
+        "--active-concurrency",
+        type=int,
+        default=10,
+        help="Maximum concurrent isolated worker proofs",
+    )
+    scale_worker_load_parser.add_argument("--slice", default="jsonpeek", help="Qualification slice to run")
+    scale_worker_load_parser.add_argument("--timeout-seconds", type=int, default=1200, help="Per-proof timeout")
+    scale_worker_load_parser.add_argument(
+        "--sink-mode",
+        choices=("mock_github", "aether"),
+        default="mock_github",
+        help="Sink mode for isolated proofs",
+    )
+    scale_worker_load_parser.add_argument(
+        "--report-root",
+        default="reports/scale_worker_load",
+        help="Report root directory",
+    )
+
+    quarantine_audit_parser = subparsers.add_parser(
+        "quarantine-audit",
+        help="Inventory MX vs Moltbook boundary surface and secret hits",
+    )
+    quarantine_audit_parser.add_argument(
+        "--report-root",
+        default="reports/quarantine_audit",
+        help="Report root directory",
+    )
+    quarantine_audit_parser.add_argument(
+        "--fail-on-secrets",
+        action="store_true",
+        help="Exit non-zero if live Moltbook credentials are detected",
+    )
+
     # judge
     subparsers.add_parser("judge", help="Run judge evaluation")
 
@@ -1490,6 +1586,9 @@ def main():
         "aether-adapter-proof": cmd_aether_adapter_proof,
         "aether-worker-proof": cmd_aether_worker_proof,
         "aether-live-proof": cmd_aether_live_proof,
+        "scale-control-plane": cmd_scale_control_plane,
+        "scale-worker-load": cmd_scale_worker_load,
+        "quarantine-audit": cmd_quarantine_audit,
         "judge": cmd_judge,
         "budget": cmd_budget,
         "top": cmd_top,

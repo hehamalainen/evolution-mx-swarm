@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react';
 import { useEconomicFlowQuery, useAlignmentMatrixQuery, usePhaseTransitionQuery } from '@/lib/api_adapter';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer, ScatterChart, Scatter, ZAxis } from 'recharts';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer, ScatterChart, Scatter, ZAxis, Cell } from 'recharts';
 import { Activity, Zap, Compass, DollarSign, Users, Database } from 'lucide-react';
 
 export function LensesPanel() {
@@ -47,8 +47,14 @@ export function LensesPanel() {
                 <span style={{ color: entry.color }}>{entry.name}:</span> {entry.value}
               </p>
             ))}
-            {payload[0].payload.economic_mentions && (
-              <p className="text-amber-400 mt-1">Capital: {payload[0].payload.economic_mentions}</p>
+            {payload[0].payload.economic_mentions !== undefined && (
+              <p className="text-amber-400 mt-1">Capital/XNO: {payload[0].payload.economic_mentions}</p>
+            )}
+            {payload[0].payload.sentience_mentions !== undefined && payload[0].payload.sentience_mentions > 0 && (
+              <p className="text-purple-400 mt-1">Sentience: {payload[0].payload.sentience_mentions}</p>
+            )}
+            {payload[0].payload.meatware_url && (
+              <p className="text-muted-foreground mt-1 text-[10px] break-all"><a href={payload[0].payload.meatware_url} target="_blank" className="hover:text-blue-400 underline" rel="noreferrer">Meatware Link ↗</a></p>
             )}
             {payload[0].payload.alignment_score !== undefined && (
               <p className="text-cyan-400 mt-1">Alignment: {(payload[0].payload.alignment_score).toFixed(2)}</p>
@@ -139,7 +145,11 @@ export function LensesPanel() {
                 <YAxis type="number" dataKey="orbitY" hide domain={[-50, 50]} />
                 <ZAxis type="number" dataKey="economic_mentions" range={[50, 2000]} />
                 <RechartsTooltip content={<CustomTooltip />} cursor={{ strokeDasharray: '3 3', stroke: 'rgba(255,255,255,0.2)' }} />
-                <Scatter name="Agents" data={econData} fill="#fbbf24" opacity={0.8} />
+                <Scatter name="Agents" data={econData} opacity={0.8}>
+                  {econData.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={(entry.sentience_mentions && entry.sentience_mentions > 0) ? '#a855f7' : '#fbbf24'} />
+                  ))}
+                </Scatter>
               </ScatterChart>
             </ResponsiveContainer>
           )}

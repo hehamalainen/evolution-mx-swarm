@@ -491,10 +491,17 @@ def route_task_shadow(
     if not rig_plan_payloads:
         return None
 
+    lanes = build_shadow_lanes(rig_plan_payloads, capability_snapshot)
+    return route_task_shadow_with_lanes(task, lanes)
+
+
+def route_task_shadow_with_lanes(
+    task: TaskContract,
+    lanes: list[WorkerLane],
+) -> ShadowRoutingDecision:
     actual_stream = _normalize_stream_name(task.stream.value if hasattr(task.stream, "value") else str(task.stream))
     actual_model_tier = task.model_tier.value if hasattr(task.model_tier, "value") else str(task.model_tier)
     actual_lane_key = _build_actual_lane_key(task)
-    lanes = build_shadow_lanes(rig_plan_payloads, capability_snapshot)
     candidates, hold_reason = _filter_candidate_lanes(task, lanes)
 
     if not candidates:

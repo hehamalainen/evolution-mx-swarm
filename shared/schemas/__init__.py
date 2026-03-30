@@ -19,6 +19,15 @@ from .spec import (
     RequirementType,
     Spec,
 )
+from .scale import (
+    ScaleCapabilityDelta,
+    ScaleFailureVerdict,
+    ScaleLaneMix,
+    ScaleMetricsSummary,
+    ScaleRunManifest,
+    ScaleRunReport,
+    ScaleScenarioConfig,
+)
 from .task_contract import (
     AcceptanceCriteria,
     MergePolicy,
@@ -64,4 +73,11 @@ __all__ = [
     "Requirement",
     "RequirementType",
     "RequirementStatus",
+    "ScaleCapabilityDelta",
+    "ScaleFailureVerdict",
+    "ScaleLaneMix",
+    "ScaleMetricsSummary",
+    "ScaleRunManifest",
+    "ScaleRunReport",
+    "ScaleScenarioConfig",
 ]

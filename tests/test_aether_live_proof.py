@@ -1,4 +1,15 @@
-from scripts.run_aether_live_proof import _classify_live_failure, _landed_paths_source
+import subprocess
+from pathlib import Path
+
+from scripts.run_aether_live_proof import (
+    COPY_EXCLUDES,
+    COPY_INCLUDE_FILES,
+    COPY_INCLUDE_ROOTS,
+    _classify_live_failure,
+    _copy_worktree,
+    _landed_paths_source,
+    _materialize_worktree,
+)
 
 
 def _checkpoint(reached: bool) -> dict[str, object]:
@@ -116,3 +127,83 @@ def test_landed_paths_source_reports_derived_from_diff() -> None:
 
 def test_landed_paths_source_reports_missing() -> None:
     assert _landed_paths_source({}) == "missing"
+
+
+def test_copy_excludes_omit_non_runtime_bulk() -> None:
+    for name in ("dashboard_v2", "dashboard_v3", "data", "temp_analysis", "vault", "venv"):
+        assert name in COPY_EXCLUDES
+
+
+def test_copy_includes_cover_proof_roots() -> None:
+    for name in ("scripts", "shared", "tests", "tools", "worker", "qualification"):
+        assert name in COPY_INCLUDE_ROOTS
+    for name in ("mx.config.json", "pyproject.toml"):
+        assert name in COPY_INCLUDE_FILES
+
+
+def test_copy_worktree_creates_lightweight_snapshot_repo(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "mx.config.json").write_text("{}", encoding="utf-8")
+    (source / "notes.txt").write_text("hello\n", encoding="utf-8")
+    scripts_dir = source / "scripts"
+    scripts_dir.mkdir()
+    (scripts_dir / "mini.py").write_text("print('ok')\n", encoding="utf-8")
+    excluded = source / "vault"
+    excluded.mkdir()
+    (excluded / "secret.txt").write_text("nope\n", encoding="utf-8")
+
+    target = tmp_path / "target"
+    _copy_worktree(source, target)
+
+    assert (target / "mx.config.json").exists()
+    assert (target / "scripts" / "mini.py").exists()
+    assert not (target / "notes.txt").exists()
+    assert not (target / "vault").exists()
+    assert (target / ".git").exists()
+    assert (target / ".venv" / "bin" / "python").exists()
+
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=str(target),
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert head.stdout.strip()
+    branch = subprocess.run(
+        ["git", "branch", "--show-current"],
+        cwd=str(target),
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert branch.stdout.strip() == "main"
+
+
+def test_materialize_worktree_can_clone_prepared_snapshot_repo(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "mx.config.json").write_text("{}", encoding="utf-8")
+    (source / "scripts").mkdir()
+    (source / "scripts" / "mini.py").write_text("print('ok')\n", encoding="utf-8")
+
+    template_repo = tmp_path / "template"
+    _copy_worktree(source, template_repo)
+
+    target = tmp_path / "target"
+    _materialize_worktree(template_repo, target, source_is_template_repo=True)
+
+    assert (target / "mx.config.json").exists()
+    assert (target / "scripts" / "mini.py").exists()
+    assert (target / ".git").exists()
+    assert (target / ".venv" / "bin" / "python").exists()
+
+    branch = subprocess.run(
+        ["git", "branch", "--show-current"],
+        cwd=str(target),
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert branch.stdout.strip() == "main"

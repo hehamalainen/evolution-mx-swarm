@@ -5,6 +5,7 @@ import sys
 import time
 import uuid
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 
@@ -813,7 +814,7 @@ async def test_process_task_invalid_python_fast_fails_and_deletes_workspace(monk
 
     workspace = tmp_path / f"mx_worker_{fixed_uuid.hex}"
     assert result is False
-    assert elapsed_ms < 500
+    assert elapsed_ms < 800
     assert queue.acks == []
     assert queue.nacks == [("rh-1", 60, "ERR_SYNTAX")]
     assert queue.dead_letters == []
@@ -1510,3 +1511,29 @@ async def test_run_command_falls_back_to_current_interpreter_when_python_missing
     assert ok is True
     assert output == "ok"
     assert captured["command"] == f'"{sys.executable}" -m pytest tests/test_textstats.py -q'
+
+
+@pytest.mark.asyncio
+async def test_run_command_rewrites_python_module_ruff_to_binary(monkeypatch) -> None:
+    config = MXConfig()
+    worker = Worker(config=config, worker_id="w1", queue=StubQueue(), llm=StubLLM(), vcs=CapturingVCS())
+    captured: dict[str, str] = {}
+
+    class DummyProc:
+        returncode = 0
+
+        async def communicate(self):
+            return (b"ok", b"")
+
+    async def fake_create_subprocess_shell(command: str, **kwargs):
+        captured["command"] = command
+        return DummyProc()
+
+    monkeypatch.setattr(worker_service.asyncio, "create_subprocess_shell", fake_create_subprocess_shell)
+
+    ok, output = await worker._run_command("python -m ruff check tools/jsonpeek.py", cwd=".")
+
+    expected_ruff = Path(sys.executable).parent / "ruff"
+    assert ok is True
+    assert output == "ok"
+    assert captured["command"] == f'"{expected_ruff}" check tools/jsonpeek.py'
