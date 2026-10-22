@@ -1,16 +1,18 @@
 # MX Swarm
 
-**PRD-to-Shipping Agent Delivery Harness**
+**PRD-to-Shipping Agent Delivery Harness (Experimental Research Prototype)**
 
-An autonomous system that takes a PRD (Product Requirements Document), generates structured specifications and tasks, and runs a scalable worker swarm (up to 100) that opens PRs, passes CI gates, and iterates until the Definition of Done is satisfied.
+An autonomous multi-agent research prototype that takes a PRD (Product Requirements Document), generates structured specifications and tasks (`SPEC.json`, `TaskContract`), and coordinates worker execution, verification checks, and VCS landing (`github`, `aether`, or offline `mock_github`).
+
+> **Research Prototype Notice:** MX Swarm is released as an experimental research prototype. Live-model execution, canned worker-load replay (`worker_load_canned`), mock-sink verification (`mock_github`), and control-plane simulation (`control_plane_hybrid`) are distinct modes; see [`reports/MX_CLOUD_AGENT_50_WORKER_DEMO_BRIEF_2026-10-22.md`](reports/MX_CLOUD_AGENT_50_WORKER_DEMO_BRIEF_2026-10-22.md) and [`reports/MX_SCALE_GATE_STATUS_2026-04-27.md`](reports/MX_SCALE_GATE_STATUS_2026-04-27.md) for measured attempt populations and current scale-gate status.
 
 ## Features
 
-- **Drop-in PRD execution**: Commit `PRD.md` and trigger the swarm
-- **Scale to 100 workers**: Parallel task execution with automatic coordination
-- **Guardrails-first**: No merge without passing deterministic CI gates
-- **Cloud-agnostic**: GCP-first with Azure portability
-- **Evidence packs**: Every PR includes verification evidence
+- **Drop-in PRD execution**: Decompose `PRD.md` into structured `SPEC.json` and `TaskContract` items
+- **Multi-mode verification**: Live LLM worker execution, deterministic canned-completion worker proofs, and hybrid control-plane simulations
+- **Guardrails-first**: Enforced CI lint, type, unit test, Bandit security, and release-hygiene gates
+- **Workspace containment**: Canonical path containment, symlink rejection, sanitized subprocess environments, and process-group timeout reaping
+- **Evidence packs**: Structured verification and settlement telemetry per task attempt
 
 ## Quick Start
 
@@ -18,25 +20,38 @@ An autonomous system that takes a PRD (Product Requirements Document), generates
 
 - Python 3.11+
 - Git
-- GitHub account with repo access
-- Anthropic API key (or OpenAI/Ollama)
+- Optional: Anthropic, OpenAI, or Gemini API key, or local Ollama server (not required for offline proofs or tests)
 
-### Installation
+### Installation (Single Tested Setup Path)
 
 ```bash
-# Clone and enter directory
-cd your-project-repo
+# Create and activate a virtual environment (outside cloud-synced directories)
+python3 -m venv .venv
+source .venv/bin/activate
 
-# Install MX Swarm
-pip install -r mx-swarm/requirements.txt
+# Install MX Swarm and development/verification dependencies
+python -m pip install --upgrade pip
+pip install -e ".[dev]"
 
-# Initialize project
-python -m mx-swarm.cli.main init --owner YOUR_GITHUB_USER --repo YOUR_REPO
+# Verify the installation with the default regression suite
+pytest
+```
+
+### Working Offline Example (No API Keys Required)
+
+```bash
+# Run an end-to-end single-slice worker proof using a deterministic canned fixture and mock GitHub sink
+python scripts/run_mock_sink_live_proof.py \
+  --slice jsonpeek \
+  --canned-completion-file proof_fixtures/jsonpeek_canned_completion.json
+
+# Run a 50-lane deterministic control-plane simulation
+python scripts/run_scale_control_plane.py --logical-lanes 50 --logical-tasks 50 --seed 7
 ```
 
 ### Configuration
 
-**Option A: Cloud API (Anthropic/OpenAI)**
+**Option A: Cloud API (Anthropic / OpenAI / Gemini)**
 
 Set environment variables:
 
@@ -45,30 +60,19 @@ export ANTHROPIC_API_KEY="your-api-key"
 export GITHUB_TOKEN="your-github-token"
 ```
 
-Or create a `.env` file:
+Or create a `.env` file (never committed):
 
 ```env
 ANTHROPIC_API_KEY=your-api-key
 GITHUB_TOKEN=your-github-token
 ```
 
-**Option B: Local Models (Ollama) - Recommended for Development**
+**Option B: Local Models (Ollama)**
 
 ```bash
-# Install Ollama
-curl -fsSL https://ollama.com/install.sh | sh
-
-# Pull a model (16GB+ RAM recommended)
+# Install Ollama and pull a local model
 ollama pull mistral:7b
-
-# Start Ollama server
 ollama serve
-
-# Run setup script (auto-detects RAM and recommends model)
-bash setup_local_model_final.sh
-
-# Test local model integration
-python3 test_local_model_final.py
 ```
 
 Configure `mx.config.json` for local models:
@@ -85,19 +89,16 @@ Configure `mx.config.json` for local models:
 ### Running the Swarm
 
 ```bash
-# Edit PRD.md with your requirements
-vim PRD.md
+# Initialize project configuration
+python -m cli.main init --owner YOUR_GITHUB_USER --repo YOUR_REPO
 
 # Start the swarm
-python -m mx-swarm.cli.main run --workers 5
+python -m cli.main run --workers 5
 
 # Or run individual components
-python -m mx-swarm.cli.main plan      # Generate tasks from PRD
-python -m mx-swarm.cli.main status    # Check progress
-python -m mx-swarm.cli.main judge     # Run evaluation
-
-# Run local demo with Ollama (no API keys needed)
-python3 mx_swarm_local_demo_final.py --agents 3 --tasks 5
+python -m cli.main plan      # Generate tasks from PRD
+python -m cli.main status    # Check progress
+python -m cli.main judge     # Run evaluation
 ```
 
 ## Architecture
@@ -295,18 +296,16 @@ View via:
 
 ## Security
 
-- Secrets stored in Secret Manager / Key Vault
-- No secrets in logs
-- Least privilege IAM
-- Scoped GitHub tokens
+See [`SECURITY.md`](SECURITY.md) for private vulnerability reporting and a detailed description of the trusted-code execution boundary:
+- Canonical workspace path containment and symlink rejection in `worker/service.py`
+- Sanitized subprocess environments (host API keys/tokens stripped) and process-group termination on timeout
+- Loopback-by-default dashboard binding (`127.0.0.1`) and token-authenticated control routes (`MX_DASHBOARD_TOKEN`)
 
 ## Contributing
 
-1. Fork the repository
-2. Create a feature branch
-3. Make changes with tests
-4. Submit a PR
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the supported environment, single tested setup path, offline verification workflow, architecture entry points, and benchmark scaffold conventions.
 
-## License
+## License & Third-Party Notices
 
-MIT License - see LICENSE file
+- Licensed under the MIT License — see [`LICENSE`](LICENSE).
+- Third-party dependency notices and attributions — see [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
