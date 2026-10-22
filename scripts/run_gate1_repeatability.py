@@ -7,6 +7,7 @@ import os
 import shutil
 import signal
 import subprocess
+import sys
 import tempfile
 import time
 from dataclasses import asdict, dataclass
@@ -18,7 +19,25 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in os.sys.path:
     os.sys.path.insert(0, str(REPO_ROOT))
 
-VENV_PYTHON = REPO_ROOT / ".venv" / "bin" / "python"
+
+def _resolve_python_executable(repo_root: Path) -> Path:
+    override = os.environ.get("MX_PYTHON_EXECUTABLE", "").strip()
+    if override:
+        return Path(override)
+    if sys.executable:
+        active = Path(sys.executable)
+        if active.exists():
+            return active
+    for candidate in (
+        repo_root / ".venv" / "bin" / "python",
+        repo_root / "venv" / "bin" / "python",
+    ):
+        if candidate.exists():
+            return candidate
+    return Path("python3")
+
+
+VENV_PYTHON = _resolve_python_executable(REPO_ROOT)
 DEFAULT_PRD = "prds/golden_path_002_jsonpeek.md"
 DEFAULT_TESTS = ["tests/test_jsonpeek.py"]
 STATE_RESET_PATHS = [

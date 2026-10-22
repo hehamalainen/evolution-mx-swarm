@@ -49,8 +49,11 @@ def test_worker_materializes_local_landing_and_closes_mock_submission(
         encoding="utf-8",
     )
 
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    config = MXConfig()
+    config.vcs.provider = "github"
     worker = Worker(
-        config=MXConfig(),
+        config=config,
         worker_id="worker-test",
         queue=_StubQueue(),
         llm=_StubLLM(),

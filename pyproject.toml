@@ -24,6 +24,12 @@ classifiers = [
 dependencies = [
     "anthropic>=0.34.0",
     "httpx>=0.25.0",
+    "fastapi>=0.109.0",
+    "uvicorn>=0.27.0",
+    "websockets>=12.0",
+    "aiohttp>=3.9.0",
+    "python-dotenv>=1.0.0",
+    "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]

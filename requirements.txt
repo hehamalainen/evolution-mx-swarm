@@ -1,6 +1,7 @@
 # Core dependencies
 anthropic>=0.34.0
 httpx>=0.25.0
+pyyaml>=6.0
 
 # Dashboard
 fastapi>=0.109.0

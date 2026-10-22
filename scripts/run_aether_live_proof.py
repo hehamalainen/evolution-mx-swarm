@@ -21,7 +21,25 @@ if str(REPO_ROOT) not in sys.path:
 
 from shared.utils.llm import Message, create_llm_client  # noqa: E402
 
-MX_VENV_PYTHON = REPO_ROOT / ".venv" / "bin" / "python"
+
+def _resolve_python_executable(repo_root: Path) -> Path:
+    override = os.environ.get("MX_PYTHON_EXECUTABLE", "").strip()
+    if override:
+        return Path(override)
+    if sys.executable:
+        active = Path(sys.executable)
+        if active.exists():
+            return active
+    for candidate in (
+        repo_root / ".venv" / "bin" / "python",
+        repo_root / "venv" / "bin" / "python",
+    ):
+        if candidate.exists():
+            return candidate
+    return Path("python3")
+
+
+MX_VENV_PYTHON = _resolve_python_executable(REPO_ROOT)
 REPORT_ROOT = REPO_ROOT / "reports" / "aether_live_proof"
 COPY_EXCLUDES = {
     ".git",

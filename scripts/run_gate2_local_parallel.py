@@ -9,6 +9,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 from dataclasses import asdict, dataclass, field
@@ -30,7 +31,25 @@ from shared.utils.qualification import load_qualification_corpus
 from shared.utils.task_registry import load_task_snapshot
 from worker.service import Worker
 
-VENV_PYTHON = REPO_ROOT / ".venv" / "bin" / "python"
+
+def _resolve_python_executable(repo_root: Path) -> Path:
+    override = os.environ.get("MX_PYTHON_EXECUTABLE", "").strip()
+    if override:
+        return Path(override)
+    if sys.executable:
+        active = Path(sys.executable)
+        if active.exists():
+            return active
+    for candidate in (
+        repo_root / ".venv" / "bin" / "python",
+        repo_root / "venv" / "bin" / "python",
+    ):
+        if candidate.exists():
+            return candidate
+    return Path("python3")
+
+
+VENV_PYTHON = _resolve_python_executable(REPO_ROOT)
 STATE_RESET_PATHS = [
     ".runtime",
     ".env",
