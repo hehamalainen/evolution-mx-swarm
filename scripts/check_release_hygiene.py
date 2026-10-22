@@ -34,6 +34,8 @@ FORBIDDEN_CREDENTIAL_PATHS: frozenset[str] = frozenset(
         "scripts/build_ris_graph.py",
         "scripts/ris_collector.py",
         "scripts/zoo_theory_analyzer.py",
+        "run_temp.py",
+        "tests/test_run_suite.py",
     }
 )
 
