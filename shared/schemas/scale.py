@@ -74,21 +74,22 @@ class ScaleFailureVerdict:
 class ScaleMetricsSummary:
     verified_landings: int = 0
     total_terminal_tasks: int = 0
-    false_success_rate: float = 0.0
-    blocked_dependency_ratio: float = 0.0
+    false_success_rate: float | None = None
+    blocked_dependency_ratio: float | None = None
     convergence_time_seconds: float = 0.0
     batch_wall_clock_seconds: float = 0.0
     throughput_tasks_per_minute: float = 0.0
-    governor_interventions: int = 0
-    cost_per_success_usd: float = 0.0
-    queue_depth_p95: float = 0.0
+    governor_interventions: int | None = None
+    cost_per_success_usd: float | None = None
+    queue_depth_p95: float | None = None
     sink_settlement_latency_p95_s: float = 0.0
-    retry_cascade_count: int = 0
+    retry_cascade_count: int | None = None
     dlq_volume: int = 0
-    duplicate_terminal_settlements: int = 0
-    zombie_blocked_tasks: int = 0
-    sink_truth_divergence_count: int = 0
-    unstable_governor_oscillation_count: int = 0
+    duplicate_terminal_settlements: int | None = None
+    zombie_blocked_tasks: int | None = None
+    sink_truth_divergence_count: int | None = None
+    unstable_governor_oscillation_count: int | None = None
+    unmeasured_metrics: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)

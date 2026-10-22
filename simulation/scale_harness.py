@@ -434,6 +434,7 @@ def run_hybrid_control_plane_simulation(
     retry_cascade_count = 0
     frontier_spend: Counter[str] = Counter()
     terminal_counter: Counter[str] = Counter()
+    terminal_settlement_counts: Counter[str] = Counter()
     governor_counter: Counter[str] = Counter()
     governor_status_history: dict[str, list[str]] = defaultdict(list)
     in_flight: set[str] = set()
@@ -475,6 +476,7 @@ def run_hybrid_control_plane_simulation(
                 cost_usd=cost_usd,
             )
             terminal_counter[sim_task.state.value] += 1
+            terminal_settlement_counts[sim_task.contract.id] += 1
             last_progress_tick = tick
             if outcome == "escalated":
                 retry_cascade_count += 1
@@ -491,6 +493,7 @@ def run_hybrid_control_plane_simulation(
                 sim_task.state = TaskState.DEAD_LETTER
                 sim_task.terminal_reason = "ERR_PREREQUISITE_FAILED"
                 terminal_counter[sim_task.state.value] += 1
+                terminal_settlement_counts[sim_task.contract.id] += 1
                 last_progress_tick = tick
 
         # Route queued tasks
@@ -508,6 +511,7 @@ def run_hybrid_control_plane_simulation(
                     sim_task.state = TaskState.DEAD_LETTER
                     sim_task.terminal_reason = decision.hold_reason.value
                     terminal_counter[sim_task.state.value] += 1
+                    terminal_settlement_counts[sim_task.contract.id] += 1
                 continue
 
             lane = lanes_by_key[decision.recommended_lane_key or ""]
@@ -562,12 +566,15 @@ def run_hybrid_control_plane_simulation(
         for statuses in governor_status_history.values()
         if len(statuses) >= 4 and len(set(statuses[-4:])) > 2
     )
+    duplicate_settlements = sum(
+        count - 1 for count in terminal_settlement_counts.values() if count > 1
+    )
     batch_wall_clock_seconds = round(time.perf_counter() - wall_clock_started, 6)
     capability_values = [lane.capabilities for lane in lanes]
     metrics = ScaleMetricsSummary(
         verified_landings=verified_landings,
         total_terminal_tasks=terminal_tasks,
-        false_success_rate=0.0,
+        false_success_rate=None,
         blocked_dependency_ratio=sum(1 for task in tasks.values() if task.state == TaskState.BLOCKED) / max(len(tasks), 1),
         convergence_time_seconds=float((max((task.finish_tick or 0) for task in tasks.values()) + 1) * SECONDS_PER_TICK),
         batch_wall_clock_seconds=batch_wall_clock_seconds,
@@ -581,18 +588,22 @@ def run_hybrid_control_plane_simulation(
         sink_settlement_latency_p95_s=float(settle_p95),
         retry_cascade_count=retry_cascade_count,
         dlq_volume=terminal_counter[TaskState.DEAD_LETTER.value],
-        duplicate_terminal_settlements=0,
+        duplicate_terminal_settlements=duplicate_settlements,
         zombie_blocked_tasks=zombies,
-        sink_truth_divergence_count=0,
+        sink_truth_divergence_count=None,
         unstable_governor_oscillation_count=oscillations,
+        unmeasured_metrics=[
+            "false_success_rate",
+            "sink_truth_divergence_count",
+        ],
     )
 
     verdict_reasons: list[str] = []
-    if metrics.false_success_rate > 0:
+    if metrics.false_success_rate is not None and metrics.false_success_rate > 0:
         verdict_reasons.append("false_success_detected")
     if zombies > 0:
         verdict_reasons.append("zombie_blocked_tasks_detected")
-    if metrics.duplicate_terminal_settlements > 0:
+    if metrics.duplicate_terminal_settlements is not None and metrics.duplicate_terminal_settlements > 0:
         verdict_reasons.append("duplicate_terminal_settlements_detected")
     if oscillations > 0:
         verdict_reasons.append("governor_oscillation_detected")
@@ -666,11 +677,13 @@ async def run_isolated_worker_load(
     fixture_path = repo_root / "proof_fixtures" / "jsonpeek_canned_completion.json"
     worker_artifacts: list[str] = []
     verified_landings = 0
+    false_success_count = 0
+    sink_divergence_count = 0
     failures: list[str] = []
     latencies: list[float] = []
 
     async def _run_one(index: int) -> None:
-        nonlocal verified_landings
+        nonlocal verified_landings, false_success_count, sink_divergence_count
         run_id = f"{manifest.run_id}-w{index:03d}"
         worker_report_root = report_root / "workers" / run_id
         proof_script = "run_aether_live_proof.py" if sink_mode == "aether" else "run_mock_sink_live_proof.py"
@@ -711,6 +724,11 @@ async def run_isolated_worker_load(
         payload = json.loads(artifact.read_text(encoding="utf-8"))
         if str(payload.get("post_landing_verify") or "") == "pass":
             verified_landings += 1
+        else:
+            sink_divergence_count += 1
+            if bool(payload.get("passed", True)):
+                false_success_count += 1
+            failures.append(f"{run_id}: post_landing_verify={payload.get('post_landing_verify')!r}")
         checkpoints = payload.get("stage_checkpoints") or {}
         started = checkpoints.get("task_selected", {}).get("timestamp")
         finished = checkpoints.get("terminal_status_seen", {}).get("timestamp")
@@ -732,26 +750,36 @@ async def run_isolated_worker_load(
     metrics = ScaleMetricsSummary(
         verified_landings=verified_landings,
         total_terminal_tasks=logical_workers,
-        false_success_rate=0.0,
-        blocked_dependency_ratio=0.0,
+        false_success_rate=round(false_success_count / max(logical_workers, 1), 6),
+        blocked_dependency_ratio=None,
         convergence_time_seconds=max(latencies or [0.0]),
         batch_wall_clock_seconds=batch_wall_clock_seconds,
         throughput_tasks_per_minute=round(
             logical_workers / max(batch_wall_clock_seconds / 60.0, 1e-9),
             6,
         ),
-        governor_interventions=0,
-        cost_per_success_usd=0.0,
-        queue_depth_p95=0.0,
+        governor_interventions=None,
+        cost_per_success_usd=None,
+        queue_depth_p95=None,
         sink_settlement_latency_p95_s=(
             statistics.quantiles(latencies, n=20)[18] if len(latencies) >= 20 else max(latencies or [0.0])
         ),
-        retry_cascade_count=0,
+        retry_cascade_count=None,
         dlq_volume=len(failures),
-        duplicate_terminal_settlements=0,
-        zombie_blocked_tasks=0,
-        sink_truth_divergence_count=0,
-        unstable_governor_oscillation_count=0,
+        duplicate_terminal_settlements=None,
+        zombie_blocked_tasks=None,
+        sink_truth_divergence_count=sink_divergence_count,
+        unstable_governor_oscillation_count=None,
+        unmeasured_metrics=[
+            "blocked_dependency_ratio",
+            "governor_interventions",
+            "cost_per_success_usd",
+            "queue_depth_p95",
+            "retry_cascade_count",
+            "duplicate_terminal_settlements",
+            "zombie_blocked_tasks",
+            "unstable_governor_oscillation_count",
+        ],
     )
     report = ScaleRunReport(
         manifest=manifest,

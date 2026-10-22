@@ -18,6 +18,10 @@ from scripts.run_aether_live_proof import _copy_worktree
 from simulation.scale_harness import run_isolated_worker_load
 
 
+def _fmt_metric(value: object) -> str:
+    return "unmeasured" if value is None else str(value)
+
+
 def _render_markdown(payload: dict) -> str:
     metrics = payload["metrics"]
     verdict = payload["verdict"]
@@ -32,13 +36,16 @@ def _render_markdown(payload: dict) -> str:
         f"- phase: `{manifest['phase']}`",
         f"- sink_mode: `{manifest['sink_mode']}`",
         f"- passed: `{verdict['passed']}`",
-        f"- verified_landings: `{metrics['verified_landings']}`",
-        f"- total_terminal_tasks: `{metrics['total_terminal_tasks']}`",
-        f"- convergence_time_seconds: `{metrics['convergence_time_seconds']}`",
-        f"- batch_wall_clock_seconds: `{metrics['batch_wall_clock_seconds']}`",
-        f"- throughput_tasks_per_minute: `{metrics['throughput_tasks_per_minute']}`",
-        f"- sink_settlement_latency_p95_s: `{metrics['sink_settlement_latency_p95_s']}`",
-        f"- dlq_volume: `{metrics['dlq_volume']}`",
+        f"- verified_landings: `{_fmt_metric(metrics['verified_landings'])}`",
+        f"- total_terminal_tasks: `{_fmt_metric(metrics['total_terminal_tasks'])}`",
+        f"- false_success_rate: `{_fmt_metric(metrics['false_success_rate'])}`",
+        f"- sink_truth_divergence_count: `{_fmt_metric(metrics['sink_truth_divergence_count'])}`",
+        f"- convergence_time_seconds: `{_fmt_metric(metrics['convergence_time_seconds'])}`",
+        f"- batch_wall_clock_seconds: `{_fmt_metric(metrics['batch_wall_clock_seconds'])}`",
+        f"- throughput_tasks_per_minute: `{_fmt_metric(metrics['throughput_tasks_per_minute'])}`",
+        f"- sink_settlement_latency_p95_s: `{_fmt_metric(metrics['sink_settlement_latency_p95_s'])}`",
+        f"- dlq_volume: `{_fmt_metric(metrics['dlq_volume'])}`",
+        f"- unmeasured_metrics: `{metrics.get('unmeasured_metrics', [])}`",
         f"- verdict_reasons: `{verdict['reasons']}`",
     ]
     return "\n".join(lines) + "\n"
