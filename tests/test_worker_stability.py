@@ -1200,6 +1200,7 @@ def test_submission_source_run_id_prefers_env_and_intent_type_maps_replan(monkey
 
 @pytest.mark.asyncio
 async def test_process_task_success_evidence_includes_execution_trace(monkeypatch, tmp_path) -> None:
+    monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(worker_service, "GitRepo", SuccessfulRepo)
 
     fixed_uuid = uuid.UUID("22222222-2222-2222-2222-222222222222")

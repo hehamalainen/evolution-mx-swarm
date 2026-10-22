@@ -346,33 +346,40 @@ class Worker:
         return f"https://github.com/{owner}/{repo}.git"
 
     async def _read_file(self, repo: GitRepo, path: str) -> str | None:
-        """Read file from repo."""
-        full_path = os.path.join(repo.local_path, path)
-        if os.path.exists(full_path):
-            with open(full_path) as f:
+        """Read file from repo after enforcing canonical workspace containment."""
+        full_path = self._resolve_contained_workspace_path(repo.local_path, path)
+        if os.path.isfile(full_path):
+            with open(full_path, encoding="utf-8") as f:
                 return f.read()
         return None
 
     async def _write_file(self, repo: GitRepo, path: str, content: str) -> None:
-        """Write file to repo."""
-        full_path = os.path.join(repo.local_path, path)
+        """Write file to repo after enforcing canonical workspace containment."""
+        full_path = self._resolve_contained_workspace_path(repo.local_path, path)
         os.makedirs(os.path.dirname(full_path), exist_ok=True)
-        with open(full_path, "w") as f:
+        if os.path.islink(full_path):
+            raise PermissionError(f"Symlink target rejected: {path!r}")
+        with open(full_path, "w", encoding="utf-8") as f:
             f.write(content)
 
     async def _list_files(self, repo: GitRepo, pattern: str = "**/*") -> list[str]:
-        """List files in repo matching pattern."""
+        """List files in repo matching pattern, excluding symlinks and escaping paths."""
         import glob
+
+        root_real = os.path.realpath(os.path.abspath(repo.local_path))
         files = glob.glob(
             os.path.join(repo.local_path, pattern),
             recursive=True,
         )
-        # Return relative paths
-        return [
-            os.path.relpath(f, repo.local_path)
-            for f in files
-            if os.path.isfile(f)
-        ]
+        results: list[str] = []
+        for f in files:
+            if os.path.islink(f) or not os.path.isfile(f):
+                continue
+            real_f = os.path.realpath(os.path.abspath(f))
+            if os.path.commonpath([root_real, real_f]) != root_real:
+                continue
+            results.append(os.path.relpath(real_f, root_real))
+        return results
 
     def _create_workspace_root(self) -> str:
         """Create an isolated worker workspace in /tmp."""
@@ -380,11 +387,68 @@ class Worker:
         os.makedirs(workspace_root, exist_ok=True)
         return workspace_root
 
+    def _strip_path_wrappers(self, path: str) -> str:
+        """Strip outer whitespace and matching or stray quote wrappers."""
+        cleaned = str(path or "").strip()
+        while len(cleaned) >= 2 and cleaned[0] == cleaned[-1] and cleaned[0] in {"`", "'", '"'}:
+            cleaned = cleaned[1:-1].strip()
+        return cleaned.strip("`").strip("'").strip('"').strip()
+
     def _normalize_relative_path(self, path: str) -> str:
         """Normalize generated file paths to stable repo-relative form."""
-        cleaned = path.strip().strip("`").strip("'").strip('"')
+        cleaned = self._strip_path_wrappers(path)
+        if not cleaned:
+            return ""
         normalized = os.path.normpath(cleaned.replace("\\", "/")).replace("\\", "/")
         return "" if normalized == "." else normalized
+
+    def _is_unsafe_relative_path(self, raw_path: str, normalized_path: str) -> bool:
+        """Return True if raw_path or normalized_path is absolute, escaping, or malformed."""
+        cleaned = self._strip_path_wrappers(raw_path)
+        if not cleaned or not normalized_path:
+            return True
+        return bool(
+            raw_path.endswith(("/", "\\"))
+            or cleaned.endswith(("/", "\\"))
+            or os.path.isabs(raw_path)
+            or os.path.isabs(cleaned)
+            or os.path.isabs(normalized_path)
+            or cleaned.startswith(("/", "\\"))
+            or normalized_path.startswith(("/", "\\"))
+            or os.path.splitdrive(cleaned)[0]
+            or os.path.splitdrive(normalized_path)[0]
+            or normalized_path == ".."
+            or normalized_path.startswith("../")
+            or "/../" in f"/{normalized_path}/"
+            or normalized_path == ".git"
+            or normalized_path.startswith(".git/")
+        )
+
+    def _resolve_contained_workspace_path(self, workspace_root: str, path: str) -> str:
+        """Resolve a workspace-relative path and reject symlink or parent-directory escapes."""
+        normalized_path = self._normalize_relative_path(path)
+        if self._is_unsafe_relative_path(path, normalized_path):
+            raise PermissionError(f"Unsafe or malformed workspace path rejected: {path!r}")
+
+        root_abs = os.path.abspath(workspace_root)
+        root_real = os.path.realpath(root_abs)
+        parts = [part for part in normalized_path.split("/") if part and part != "."]
+        if not parts:
+            raise PermissionError(f"Empty workspace path rejected: {path!r}")
+
+        current = root_abs
+        for part in parts:
+            if part in {"..", ".git"}:
+                raise PermissionError(f"Disallowed path segment {part!r} in {path!r}")
+            current = os.path.join(current, part)
+            if os.path.islink(current):
+                raise PermissionError(f"Symlink path traversal rejected: {path!r}")
+
+        target_real = os.path.realpath(current)
+        if os.path.commonpath([root_real, target_real]) != root_real or target_real == root_real:
+            raise PermissionError(f"Resolved path escapes workspace containment: {path!r}")
+
+        return target_real
 
     def _resolve_allowed_target_path(
         self,
@@ -393,14 +457,7 @@ class Worker:
     ) -> tuple[str | None, str | None]:
         """Resolve model output paths against strict allowed targets."""
         normalized_path = self._normalize_relative_path(raw_path)
-        if (
-            not normalized_path
-            or raw_path.endswith("/")
-            or raw_path.endswith("\\")
-            or os.path.isabs(raw_path)
-            or normalized_path == ".."
-            or normalized_path.startswith("../")
-        ):
+        if self._is_unsafe_relative_path(raw_path, normalized_path):
             return None, "unsafe_or_malformed"
 
         if not allowed_paths_set:
@@ -433,13 +490,18 @@ class Worker:
             normalized = self._normalize_relative_path(rel_path)
             if not normalized or normalized in seen:
                 continue
+            if self._is_unsafe_relative_path(rel_path, normalized):
+                continue
             seen.add(normalized)
 
-            source_path = os.path.join(source_root, normalized)
+            try:
+                source_path = self._resolve_contained_workspace_path(source_root, normalized)
+                target_path = self._resolve_contained_workspace_path(workspace_root, normalized)
+            except PermissionError:
+                continue
             if not os.path.isfile(source_path):
                 continue
 
-            target_path = os.path.join(workspace_root, normalized)
             os.makedirs(os.path.dirname(target_path), exist_ok=True)
             shutil.copy2(source_path, target_path)
             copied.append(normalized)
@@ -599,13 +661,13 @@ class Worker:
             rel = str(relative_path).strip()
             if not rel:
                 continue
-            source_path = os.path.join(workspace_root, rel)
-            target_path = os.path.join(source_root, rel)
+            source_path = self._resolve_contained_workspace_path(workspace_root, rel)
+            target_path = self._resolve_contained_workspace_path(source_root, rel)
             if not os.path.exists(source_path):
                 raise FileNotFoundError(f"Local landing source missing: {rel}")
             os.makedirs(os.path.dirname(target_path), exist_ok=True)
             shutil.copy2(source_path, target_path)
-            copied.append(rel)
+            copied.append(self._normalize_relative_path(rel))
         if copied:
             print(f"[{self.worker_id}] Local landing materialized paths: {copied}")
         return copied
@@ -1590,6 +1652,47 @@ Example:
         delay = min(30 * (2 ** max(message.receive_count, 1)), 300)
         await self.queue.nack(message.receipt_handle, reason=reason_enum.value, delay=delay)
 
+    def _build_sanitized_command_env(self, cwd: str) -> dict[str, str]:
+        """Build a minimal environment for acceptance commands without host credentials."""
+        _ = cwd
+        allowed_keys = {
+            "PATH",
+            "LANG",
+            "LC_ALL",
+            "LC_CTYPE",
+            "TERM",
+            "SYSTEMROOT",
+            "PYTHONPATH",
+            "VIRTUAL_ENV",
+        }
+        sanitized: dict[str, str] = {}
+        for key in allowed_keys:
+            val = os.environ.get(key)
+            if val is not None:
+                sanitized[key] = val
+
+        python_bin_dir = str(Path(sys.executable).resolve().parent)
+        existing_path = sanitized.get("PATH", "")
+        path_parts = [part for part in existing_path.split(os.pathsep) if part]
+        if python_bin_dir not in path_parts:
+            path_parts.insert(0, python_bin_dir)
+        sanitized["PATH"] = os.pathsep.join(path_parts)
+
+        isolated_env_root = os.path.join(tempfile.gettempdir(), f"mx_cmd_env_{os.getpid()}")
+        isolated_home = os.path.join(isolated_env_root, "home")
+        isolated_tmp = os.path.join(isolated_env_root, "tmp")
+        os.makedirs(isolated_home, exist_ok=True)
+        os.makedirs(isolated_tmp, exist_ok=True)
+        sanitized["HOME"] = isolated_home
+        sanitized["TMPDIR"] = isolated_tmp
+        sanitized["TMP"] = isolated_tmp
+        sanitized["TEMP"] = isolated_tmp
+        sanitized["XDG_CACHE_HOME"] = os.path.join(isolated_home, ".cache")
+        sanitized["PYTHONDONTWRITEBYTECODE"] = "1"
+        sanitized["PYTHONUNBUFFERED"] = "1"
+        sanitized["GIT_TERMINAL_PROMPT"] = "0"
+        return sanitized
+
     async def _run_command(
         self,
         command: str,
@@ -1628,6 +1731,7 @@ Example:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
                 cwd=cwd,
+                env=self._build_sanitized_command_env(cwd),
             )
 
             stdout, _ = await asyncio.wait_for(
