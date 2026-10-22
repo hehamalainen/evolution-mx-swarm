@@ -97,3 +97,40 @@ async def test_reconcile_merges_updates_without_overwriting_concurrent_enqueues(
     assert set(by_task.keys()) == {"task-a", "task-b"}
     assert by_task["task-a"]["attempts"] == 1
     assert by_task["task-b"]["attempts"] == 0
+
+
+@pytest.mark.asyncio
+async def test_concurrent_reconcilers_do_not_let_stale_pending_reverse_settled_ack(tmp_path: Path) -> None:
+    """A slow reconciler returning a stale pending poll must not overwrite a newer settled_ack."""
+    backlog_file = tmp_path / "reconciliation_backlog.json"
+    worker_stale = _make_worker(backlog_file, max_attempts=3, worker_id="worker-stale")
+    worker_fresh = _make_worker(backlog_file, max_attempts=3, worker_id="worker-fresh")
+    worker_fresh.config.vcs.post_landing_verification_required = False
+
+    task = TaskContract.create(task_type=TaskType.FEATURE, goal="Settle once")
+    task.id = "task-settle-race"
+    await worker_stale._enqueue_reconciliation_item(
+        task,
+        submission_id="sub-race-1",
+        detail="awaiting ledger",
+    )
+
+    worker_fresh._vcs.get_status = AsyncMock(return_value={"status": "accepted"})
+
+    async def _stale_poll_after_fresh_settlement(submission_id: str) -> dict[str, str]:
+        assert submission_id == "sub-race-1"
+        # While worker_stale is polling, worker_fresh polls and settles the item to settled_ack
+        await worker_fresh._reconcile_backlog_once()
+        mid_state = worker_fresh._load_reconciliation_backlog()
+        assert mid_state[0]["status"] == "settled_ack"
+        return {"status": "pending"}
+
+    worker_stale._vcs.get_status = AsyncMock(side_effect=_stale_poll_after_fresh_settlement)
+    await worker_stale._reconcile_backlog_once()
+
+    persisted = worker_stale._load_reconciliation_backlog()
+    assert len(persisted) == 1
+    assert persisted[0]["status"] == "settled_ack"
+    assert persisted[0]["state"] == TaskState.SETTLED_ACK.value
+    assert persisted[0]["version"] >= 1
+

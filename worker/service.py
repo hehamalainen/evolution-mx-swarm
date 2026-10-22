@@ -1572,6 +1572,7 @@ Example:
             "state": TaskState.SUBMITTED_PENDING_LEDGER.value,
             "status": "pending",
             "attempts": 0,
+            "version": 0,
             "reason": NackReason.ERR_LEDGER_UNAVAILABLE.value,
             "detail": detail,
             "affected_paths": list(affected_paths or []),
@@ -1593,18 +1594,25 @@ Example:
 
         changed = False
         updated_items: dict[tuple[str, str, str], dict] = {}
+        snapshot_versions: dict[tuple[str, str, str], tuple[int, int]] = {}
         max_attempts = max(1, self.config.vcs.settlement_retry_max)
         accepted = {"accepted", "committed", "merged", "settled_ack", "complete", "completed"}
         rejected = {"rejected", "failed", "settled_nack", "denied"}
 
-        for item in backlog:
-            if item.get("status") != "pending":
+        for raw_item in backlog:
+            if raw_item.get("status") != "pending":
                 continue
+            item = dict(raw_item)
             item_key = self._reconciliation_item_key(item)
+            base_attempts = int(item.get("attempts", 0))
+            base_version = int(item.get("version", base_attempts))
+            snapshot_versions[item_key] = (base_version, base_attempts)
+
             submission_id = str(item.get("submission_id") or "").strip()
             if not submission_id:
                 item["status"] = "dead_letter"
                 item["reason"] = NackReason.ERR_RECON_DIVERGENCE.value
+                item["version"] = base_version + 1
                 item["updated_at"] = datetime.now(UTC).isoformat()
                 updated_items[item_key] = dict(item)
                 changed = True
@@ -1612,8 +1620,9 @@ Example:
 
             status = await self._vcs.get_status(submission_id)
             normalized = str(status.get("status") or status.get("state") or "").strip().lower()
-            attempts = int(item.get("attempts", 0)) + 1
+            attempts = base_attempts + 1
             item["attempts"] = attempts
+            item["version"] = base_version + 1
             item["last_status"] = normalized or "unknown"
             item["updated_at"] = datetime.now(UTC).isoformat()
             changed = True
@@ -1666,9 +1675,29 @@ Example:
                 mutated = False
                 for idx, existing in enumerate(current_backlog):
                     key = self._reconciliation_item_key(existing)
-                    if key in updated_items:
-                        current_backlog[idx] = updated_items[key]
+                    if key not in updated_items:
+                        continue
+                    # Never reverse or overwrite an item that has already reached a non-pending terminal state
+                    if existing.get("status") != "pending":
+                        continue
+                    candidate = dict(updated_items[key])
+                    existing_attempts = int(existing.get("attempts", 0))
+                    existing_version = int(existing.get("version", existing_attempts))
+                    base_version, base_attempts = snapshot_versions.get(
+                        key, (existing_version, existing_attempts)
+                    )
+                    if candidate.get("status") != "pending":
+                        # Terminal settlement on a still-pending item advances version and preserves max attempts
+                        candidate["attempts"] = max(existing_attempts + 1, int(candidate.get("attempts", 1)))
+                        candidate["version"] = existing_version + 1
+                        current_backlog[idx] = candidate
                         mutated = True
+                        continue
+                    # Reject stale pending poll results when a newer reconciliation already updated this item
+                    if existing_version != base_version or existing_attempts != base_attempts:
+                        continue
+                    current_backlog[idx] = candidate
+                    mutated = True
                 return mutated
 
             self._update_reconciliation_backlog(_merge_updates)
