@@ -343,7 +343,7 @@ export function VoiceAI({ peopleData, onPersonFound, currentConnections = [] }: 
           {isActive ? <Volume2 className="w-3 h-3 text-emerald-400" /> : <Mic className="w-3 h-3 text-primary" />}
         </div>
         <div className="flex items-center gap-1.5">
-          <img src="/xai-logo.png" alt="xAI" className="h-3 w-auto opacity-70" />
+          <span className="text-[10px] font-mono text-primary/70 border border-primary/30 px-1">MX</span>
           <span className="text-xs font-mono text-foreground uppercase tracking-wide">Voice AI</span>
         </div>
       </div>
