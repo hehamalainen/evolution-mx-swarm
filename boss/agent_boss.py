@@ -511,12 +511,12 @@ Consider:
         # Real Bazaar Outsourcing for non-core tasks
         if not dry_run:
             bazaar = MoltBazaarClient()
-            
+
             # Extract a few tasks to "outsource"
             tasks = plan_result.get("tasks", [])
             if tasks:
                 external_task = tasks[-1] # Simple heuristic: last task
-                
+
                 # Decision Transparency: Log the decision to outsource
                 append_decision_event(
                     task_id=external_task.id,
@@ -529,7 +529,7 @@ Consider:
                         "reward_est": "x402 simulated"
                     }
                 )
-                
+
                 posting_id = await bazaar.post_task(external_task)
                 if posting_id:
                     print(f"  [Marketplace] Outsource task {external_task.id} published to Bazaar (Post ID: {posting_id})")

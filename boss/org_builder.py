@@ -770,10 +770,10 @@ class OrgBuilder:
 
         if total_workers > constraints.max_workers and total_workers > 0:
             scale = constraints.max_workers / total_workers
-            for stream in streams:
-                scaled_target = max(1, math.floor(stream.target_workers * scale))
-                stream.target_workers = scaled_target
-                stream.max_workers = max(scaled_target, math.ceil(scaled_target * 1.4))
+            for stream_cfg in streams:
+                scaled_target = max(1, math.floor(stream_cfg.target_workers * scale))
+                stream_cfg.target_workers = scaled_target
+                stream_cfg.max_workers = max(scaled_target, math.ceil(scaled_target * 1.4))
 
         return streams
 

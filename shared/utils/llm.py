@@ -12,6 +12,7 @@ import os
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass
@@ -250,8 +251,8 @@ class GeminiClient(LLMClient):
             except ImportError:
                 raise ImportError("google-generativeai package required. Install with: pip install google-generativeai") from None
             genai.configure(api_key=self.api_key)
-            
-            # Note: system instruction should theoretically be passed here if required constantly, 
+
+            # Note: system instruction should theoretically be passed here if required constantly,
             # but we will pass it ad-hoc where possible or handle directly if the API demands.
             self._client = genai.GenerativeModel(self.model)
         return self._client
@@ -266,21 +267,21 @@ class GeminiClient(LLMClient):
         client = await self._get_client()
 
         # Convert roles: "assistant" -> "model"
-        formatted_messages = []
+        formatted_messages: list[dict[str, Any]] = []
         for m in messages:
             role = "model" if m.role == "assistant" else m.role
             # skip 'system' if it happens to be bleeding in, though usually it's passed via `system` kwarg
             if role == "system":
                 continue
             formatted_messages.append({"role": role, "parts": [m.content]})
-            
+
         kwargs = {
             "generation_config": {
                 "max_output_tokens": max_tokens,
                 "temperature": temperature,
             }
         }
-        
+
         # In the modern SDK, system_instruction can be passed to generate_content or the model init.
         # It's safest to prepend to the first user message if we can't cleanly inject it at generation time.
         if system and formatted_messages:
@@ -314,20 +315,20 @@ class GeminiClient(LLMClient):
     ) -> AsyncIterator[str]:
         client = await self._get_client()
 
-        formatted_messages = []
+        formatted_messages: list[dict[str, Any]] = []
         for m in messages:
             role = "model" if m.role == "assistant" else m.role
             if role == "system":
                 continue
             formatted_messages.append({"role": role, "parts": [m.content]})
-            
+
         kwargs = {
             "generation_config": {
                 "max_output_tokens": max_tokens,
                 "temperature": temperature,
             }
         }
-        
+
         if system and formatted_messages:
             if formatted_messages[0]["role"] == "user":
                 formatted_messages[0]["parts"][0] = f"System Instruction:\n{system}\n\nUser Request:\n" + formatted_messages[0]["parts"][0]

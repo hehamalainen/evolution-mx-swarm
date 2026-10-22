@@ -293,7 +293,7 @@ class InMemoryQueue(QueueAdapter):
             return
 
         if not blocked_by and task.state == TaskState.BLOCKED:
-            state_from = task.state
+            prev_state = task.state
             if task.can_transition_to(TaskState.QUEUED):
                 task.transition_to(TaskState.QUEUED)
             else:
@@ -303,7 +303,7 @@ class InMemoryQueue(QueueAdapter):
             snapshot_task(task, repo_path=self.repo_path, actor_id=f"queue:{self.name}")
             self._emit_task_event(
                 task,
-                state_from,
+                prev_state,
                 TaskState.QUEUED,
                 reason="DEPENDENCY_READY",
             )
@@ -360,7 +360,7 @@ class InMemoryQueue(QueueAdapter):
     ) -> list[QueueMessage]:
         self._return_expired_messages()
 
-        messages = []
+        messages: list[QueueMessage] = []
         with self._lock:
             inflight_task_ids = {
                 inflight_msg.attributes.get("task_id")

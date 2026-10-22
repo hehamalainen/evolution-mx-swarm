@@ -22,13 +22,17 @@ from shared.schemas import TaskContext, TaskContract, TaskType  # noqa: E402
 
 
 def _http_json(method: str, url: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    import urllib.parse
+
+    if urllib.parse.urlparse(url).scheme not in {"http", "https"}:
+        raise ValueError(f"Unsupported URL scheme in {url!r}")
     data = None
     headers: dict[str, str] = {}
     if payload is not None:
         data = json.dumps(payload).encode("utf-8")
         headers["Content-Type"] = "application/json"
     request = urllib.request.Request(url, data=data, headers=headers, method=method)
-    with urllib.request.urlopen(request, timeout=30) as response:
+    with urllib.request.urlopen(request, timeout=30) as response:  # nosec B310
         return json.loads(response.read().decode("utf-8"))
 
 

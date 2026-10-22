@@ -526,7 +526,7 @@ class MetricsCollector:
         utility_score: float | None = None,
         hold_reason: str | None = None,
     ) -> dict[str, Any]:
-        payload = {
+        payload: dict[str, Any] = {
             "event_id": f"route-{uuid.uuid4().hex[:16]}",
             "task_id": task_id,
             "trace_id": trace_id,

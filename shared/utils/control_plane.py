@@ -209,7 +209,7 @@ def compute_rig_telemetry(
 
     now = datetime.now(UTC)
     llm_usage_events = metrics.read_llm_usage_events(limit=50000)
-    frontier_spend: Counter[str] = Counter()
+    frontier_spend: dict[str, float] = defaultdict(float)
     for event in llm_usage_events:
         timestamp = _parse_iso8601(str(event.get("timestamp") or ""))
         if timestamp is None or timestamp.date() != now.date():
@@ -217,9 +217,9 @@ def compute_rig_telemetry(
         if str(event.get("model_tier") or "") != "frontier":
             continue
         task_id = str(event.get("task_id") or "").strip()
-        rig_id = task_to_rig.get(task_id)
-        if rig_id:
-            frontier_spend[rig_id] += float(event.get("estimated_cost_usd") or 0.0)
+        event_rig_id = task_to_rig.get(task_id)
+        if event_rig_id:
+            frontier_spend[event_rig_id] += float(event.get("estimated_cost_usd") or 0.0)
 
     governor_events = metrics.read_governor_events(limit=5000)
     rig_ids = sorted({lane_key.split(":")[0] for lane_key in lane_by_rig} | set(task_to_rig.values()))

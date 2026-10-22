@@ -875,7 +875,8 @@ def _v2_phase_transition_path() -> str:
 def _read_json_file(path: str) -> dict[str, Any] | None:
     try:
         with open(path) as handle:
-            return json.load(handle)
+            data = json.load(handle)
+        return data if isinstance(data, dict) else None
     except Exception:
         return None
 
@@ -2073,8 +2074,8 @@ async def swarm_heartbeat(heartbeat: SwarmHeartbeat):
     state.worker_state.enforce_invariant()
 
     # Register workers from details or create placeholders
+    heartbeat_workers: dict[str, dict[str, Any]] = {}
     if heartbeat.worker_details:
-        heartbeat_workers: dict[str, dict[str, Any]] = {}
         heartbeat_tasks: dict[str, dict] = {}
         for w in heartbeat.worker_details:
             worker_id = w.get("id", f"worker-{len(heartbeat_workers)}")
@@ -2100,7 +2101,6 @@ async def swarm_heartbeat(heartbeat: SwarmHeartbeat):
         state.active_tasks = heartbeat_tasks
     else:
         # Create placeholder workers based on count
-        heartbeat_workers: dict[str, dict[str, Any]] = {}
         for i in range(heartbeat.active_workers):
             worker_id = f"swarm-worker-{i}"
             heartbeat_workers[worker_id] = {

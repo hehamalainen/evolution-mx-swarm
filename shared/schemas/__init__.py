@@ -13,12 +13,6 @@ from .org_topology import (
     WorkerLane,
     build_lane_key,
 )
-from .spec import (
-    Requirement,
-    RequirementStatus,
-    RequirementType,
-    Spec,
-)
 from .scale import (
     ScaleCapabilityDelta,
     ScaleFailureVerdict,
@@ -27,6 +21,12 @@ from .scale import (
     ScaleRunManifest,
     ScaleRunReport,
     ScaleScenarioConfig,
+)
+from .spec import (
+    Requirement,
+    RequirementStatus,
+    RequirementType,
+    Spec,
 )
 from .task_contract import (
     AcceptanceCriteria,

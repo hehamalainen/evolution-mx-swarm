@@ -6,7 +6,7 @@ Used by the Judge to evaluate agents and by the Boss/Governor for hiring/firing.
 
 import json
 import os
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 
 
@@ -28,21 +28,21 @@ class AgentReputation:
         if event_id in self.processed_events:
             return
         self.processed_events.add(event_id)
-        
+
         self.tasks_completed += 1 if success else 0
         self.tasks_failed += 0 if success else 1
-        
+
         # Calculate new CI pass rate (moving average)
         current_pass_rate = ci_passes / total_checks if total_checks > 0 else 0.0
         self.ci_first_pass_rate = (self.ci_first_pass_rate * (self.tasks_completed + self.tasks_failed - 1) + current_pass_rate) / (self.tasks_completed + self.tasks_failed)
-        
+
         # Scoring logic
         if success:
             self.trust_score = min(100, self.trust_score + 5)
         else:
             # Failure is more penalizing
             self.trust_score = max(0, self.trust_score - 15)
-            
+
         self.last_active = datetime.now(UTC).isoformat()
         self.history.append({
             "timestamp": self.last_active,
@@ -50,7 +50,7 @@ class AgentReputation:
             "ci_pass_rate": current_pass_rate,
             "score_after": self.trust_score
         })
-        
+
         # Auto-blacklist if score drops too low
         if self.trust_score < 20:
             self.blacklist_status = True
@@ -58,7 +58,7 @@ class AgentReputation:
 
 class ReputationManager:
     """Service to persist and manage agent reputations."""
-    
+
     def __init__(self, db_path: str = ".runtime/reputation_db.json"):
         self.db_path = db_path
         self._reputations: dict[str, AgentReputation] = {}
@@ -90,7 +90,7 @@ class ReputationManager:
             rep_dict = asdict(rep)
             rep_dict["processed_events"] = list(rep.processed_events)
             data[agent_id] = rep_dict
-            
+
         with open(self.db_path, "w") as f:
             json.dump(data, f, indent=2)
 

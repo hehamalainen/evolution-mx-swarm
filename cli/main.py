@@ -93,13 +93,16 @@ async def llm_preflight(config: MXConfig) -> tuple[bool, str]:
 
     if provider == "ollama":
         import urllib.error
+        import urllib.parse
         import urllib.request
 
         base_url = (config.llm.base_url or "http://localhost:11434").rstrip("/")
         health_url = f"{base_url}/api/tags"
+        if urllib.parse.urlparse(health_url).scheme not in {"http", "https"}:
+            return False, f"Unsupported Ollama URL scheme in {health_url}"
         req = urllib.request.Request(health_url, method="GET")
         try:
-            with urllib.request.urlopen(req, timeout=3):
+            with urllib.request.urlopen(req, timeout=3):  # nosec B310
                 return True, ""
         except (urllib.error.URLError, OSError) as exc:
             return False, f"Ollama is unreachable at {health_url}: {exc}"
@@ -544,8 +547,6 @@ async def cmd_run(args):
                 import aiohttp
                 use_aiohttp = True
             except ImportError:
-                import urllib.error
-                import urllib.request
                 use_aiohttp = False
 
             while True:
@@ -615,14 +616,19 @@ async def cmd_run(args):
                     else:
                         # Fallback to synchronous urllib in thread pool
                         def sync_post(p):
+                            import urllib.parse
+
+                            hb_url = f"{dashboard_url}/api/swarm/heartbeat"
+                            if urllib.parse.urlparse(hb_url).scheme not in {"http", "https"}:
+                                return
                             req = urllib.request.Request(
-                                f"{dashboard_url}/api/swarm/heartbeat",
+                                hb_url,
                                 data=json.dumps(p).encode('utf-8'),
                                 headers={'Content-Type': 'application/json'},
                                 method='POST'
                             )
                             try:
-                                urllib.request.urlopen(req, timeout=2)
+                                urllib.request.urlopen(req, timeout=2)  # nosec B310
                             except (urllib.error.URLError, OSError):
                                 pass
                         await asyncio.get_event_loop().run_in_executor(None, sync_post, payload)

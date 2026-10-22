@@ -11,7 +11,6 @@ Workers are the execution engines of MX Swarm:
 
 import ast
 import asyncio
-from collections.abc import Callable
 import contextlib
 import fcntl
 import json
@@ -24,9 +23,11 @@ import sys
 import tempfile
 import traceback
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 from shared.adapters import (
     QueueAdapter,
@@ -863,7 +864,7 @@ class Worker:
 
     def _llm_max_tokens_for_task(self, task: TaskContract) -> int:
         llm_config = self._llm_config_for_task(task)
-        max_tokens = llm_config.max_tokens
+        max_tokens = int(llm_config.max_tokens)
         if llm_config.provider != "ollama":
             return max_tokens
 
@@ -1107,16 +1108,19 @@ Example:
         created_at = datetime.now(UTC).isoformat()
         source_run_id = self._submission_source_run_id(task)
         intent_type = self._submission_intent_type(task)
-        payload = {
-            "branch_name": task.branch_name(),
+        branch_name = task.branch_name()
+        provider = self.config.vcs.provider
+        local_mode = self._is_local_submission_mode()
+        payload: dict[str, Any] = {
+            "branch_name": branch_name,
             "submission_id": submission_id,
             "submission_type": submission_type,
-            "provider": self.config.vcs.provider,
+            "provider": provider,
             "url": url,
             "status": status,
             "goal": task.goal,
             "affected_paths": affected_paths,
-            "local_mode": self._is_local_submission_mode(),
+            "local_mode": local_mode,
             "created_at": created_at,
             "canonical_status": None,
             "landing_verification_status": None,
@@ -1134,20 +1138,20 @@ Example:
             task_id=task.id,
             trace_id=task.trace_id,
             attempt_id=task.attempt_id,
-            branch_name=payload["branch_name"],
+            branch_name=branch_name,
             submission_id=submission_id,
             submission_type=submission_type,
-            provider=payload["provider"],
+            provider=provider,
             url=url,
             status=status,
             goal=task.goal,
             affected_paths=affected_paths,
-            local_mode=payload["local_mode"],
+            local_mode=local_mode,
             created_at=created_at,
             canonical_status=None,
             landing_verification_status=None,
             landing_verification_detail=None,
-            source=payload["source"],
+            source="mx_swarm",
             source_run_id=source_run_id,
             source_task_id=task.id,
             source_agent_id=self.worker_id,
@@ -1376,7 +1380,7 @@ Example:
         except ValueError:
             return 0.0
 
-    def _budget_snapshot(self) -> dict[str, object]:
+    def _budget_snapshot(self) -> dict[str, Any]:
         snapshot = get_budget_snapshot(self.config.budget)
         env_override_pct = self._budget_usage_pct()
         if env_override_pct > snapshot.get("total_budget_pct", 0.0):

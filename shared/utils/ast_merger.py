@@ -1,7 +1,6 @@
 import ast
-import logging
 import hashlib
-from typing import Any
+import logging
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +15,7 @@ def merge_partial_python_update(
 ) -> str | None:
     """
     Merge top-level Python definitions (functions/classes) from emitted into existing.
-    
+
     If expected_base_hash is provided, the merge will fail if the existing_content
     hash does not match, ensuring concurrency safety in multi-agent environments.
     """
@@ -39,14 +38,14 @@ def merge_partial_python_update(
         for node in emitted_tree.body
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
     }
-    
+
     if not emitted_defs:
         logger.debug("No mergeable definitions found in emitted content.")
         return None
 
     replaced = False
-    merged_body = []
-    
+    merged_body: list[ast.stmt] = []
+
     # Iterate through existing code and replace matching definitions
     for node in existing_tree.body:
         name = getattr(node, "name", "")
@@ -59,9 +58,9 @@ def merge_partial_python_update(
 
     # Note: If there are NEW definitions in emitted_defs that weren't in existing_tree,
     # we could theoretically append them, but for this "rehydration" use case,
-    # we only want to replace existing ones. 
+    # we only want to replace existing ones.
     # Current implementation ignores new definitions to stay safe.
-    
+
     if not replaced:
         logger.debug("No matching definitions found to replace in existing content.")
         return None
@@ -69,7 +68,7 @@ def merge_partial_python_update(
     # Re-apply merged body to the tree
     existing_tree.body = merged_body
     ast.fix_missing_locations(existing_tree)
-    
+
     try:
         return ast.unparse(existing_tree).strip() + "\n"
     except Exception as e:
@@ -77,8 +76,8 @@ def merge_partial_python_update(
         return None
 
 if __name__ == "__main__":
-    import sys
     import json
+    import sys
 
     # CLI Interface for Node.js Bridge / Sovereign Middleware
     try:
@@ -89,7 +88,7 @@ if __name__ == "__main__":
         expected_hash = input_data.get("expected_hash")
 
         merged = merge_partial_python_update(existing, emitted, expected_hash)
-        
+
         if merged:
             print(json.dumps({"success": True, "merged": merged}))
         else:
@@ -100,7 +99,7 @@ if __name__ == "__main__":
             else:
                 print(json.dumps({"success": False, "error": "Merge failed (no definitions replaced or syntax error)."}))
             sys.exit(1)
-            
+
     except Exception as e:
         print(json.dumps({"success": False, "error": str(e)}))
         sys.exit(1)

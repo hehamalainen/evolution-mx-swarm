@@ -5,7 +5,6 @@ This is used to demonstrate the "hiring" flow in MX Swarm.
 """
 
 import asyncio
-import json
 import random
 import uuid
 from dataclasses import dataclass, field
@@ -50,7 +49,7 @@ class MoltBazaarMock:
 
         # Generate 1-3 mock bids
         bids = []
-        for i in range(random.randint(1, 3)):
+        for _i in range(random.randint(1, 3)):
             agent_id = f"u/Agent-{random.choice(['Alpha', 'Beta', 'Gamma', 'Delta'])}-{random.randint(100, 999)}"
             bids.append(BazaarBid(
                 agent_id=agent_id,
@@ -59,7 +58,7 @@ class MoltBazaarMock:
                 estimated_delivery_mins=random.randint(30, 120),
                 notes=f"Experienced in {random.choice(['Python', 'TypeScript', 'DevOps', 'QA'])}."
             ))
-        
+
         return bids
 
     async def accept_bid(self, posting_id: str, bid_id: str) -> bool:

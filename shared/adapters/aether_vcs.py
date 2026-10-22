@@ -10,6 +10,7 @@ merging and probabilistic proposal scoring.
 import asyncio
 import json
 import re
+import urllib.parse
 from typing import Any, cast
 
 from shared.adapters.vcs_adapter import LandingVerificationResult, SubmitResult, VCSAdapter
@@ -22,6 +23,11 @@ try:
     aiohttp = aiohttp_module
 except ImportError:
     pass  # Will use fallback sync
+
+
+def _assert_http_url(url: str) -> None:
+    if urllib.parse.urlparse(url).scheme not in {"http", "https"}:
+        raise ValueError(f"Unsupported URL scheme in {url!r}")
 
 
 def _as_dict(value: Any) -> dict[str, Any]:
@@ -267,12 +273,13 @@ class AetherVCS(VCSAdapter):
                         return _as_list_of_dicts(data.get("proposals"))
             else:
                 # Sync fallback
-                import urllib.parse
                 import urllib.request
 
                 query = urllib.parse.urlencode(params)
-                req = urllib.request.Request(f"{url}?{query}")
-                with urllib.request.urlopen(req) as response:
+                full_url = f"{url}?{query}"
+                _assert_http_url(full_url)
+                req = urllib.request.Request(full_url)
+                with urllib.request.urlopen(req) as response:  # nosec B310
                     raw = response.read().decode("utf-8")
                     data = _as_dict(json.loads(raw))
                     return _as_list_of_dicts(data.get("proposals"))
@@ -317,6 +324,7 @@ class AetherVCS(VCSAdapter):
         """Fallback sync submission using urllib."""
         import urllib.request
 
+        _assert_http_url(url)
         req = urllib.request.Request(
             url,
             data=json.dumps(data).encode("utf-8"),
@@ -328,7 +336,7 @@ class AetherVCS(VCSAdapter):
         loop = asyncio.get_event_loop()
         response = await loop.run_in_executor(
             None,
-            lambda: urllib.request.urlopen(req, timeout=30),
+            lambda: urllib.request.urlopen(req, timeout=30),  # nosec B310
         )
 
         body = _as_dict(json.loads(response.read().decode("utf-8")))
@@ -370,8 +378,9 @@ class AetherVCS(VCSAdapter):
             else:
                 import urllib.request
 
+                _assert_http_url(url)
                 req = urllib.request.Request(url, method="GET")
-                response = urllib.request.urlopen(req, timeout=10)
+                response = urllib.request.urlopen(req, timeout=10)  # nosec B310
                 return _as_dict(json.loads(response.read().decode("utf-8")))
 
         except Exception as e:
@@ -484,8 +493,9 @@ class AetherVCS(VCSAdapter):
             else:
                 import urllib.request
 
+                _assert_http_url(url)
                 req = urllib.request.Request(url, method="GET")
-                response = urllib.request.urlopen(req, timeout=5)
+                response = urllib.request.urlopen(req, timeout=5)  # nosec B310
                 data = _as_dict(json.loads(response.read().decode("utf-8")))
                 return data.get("status") == "healthy"
 

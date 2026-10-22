@@ -1,17 +1,17 @@
-import sys
 import os
-import json
+import sys
 
 # Add the project root to sys.path to import our utility
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from shared.utils.ast_merger import merge_partial_python_update, compute_content_hash
+from shared.utils.ast_merger import compute_content_hash, merge_partial_python_update
+
 
 def demo_sovereign_handshake():
     """
     Demonstrates the high-integrity AST merge protocol.
     """
-    
+
     # 1. THE EXISTING STATE
     existing_code = """
 def calculate_reward(score):
@@ -20,7 +20,7 @@ def calculate_reward(score):
 def log_event(msg):
     print(f"LOG: {msg}")
 """
-    
+
     # 2. THE EMITTED UPDATE (Selective)
     # The agent only wants to update the 'calculate_reward' function.
     emitted_snippet = """
@@ -29,7 +29,7 @@ def calculate_reward(score):
     multiplier = 0.15 if score > 100 else 0.1
     return score * multiplier
 """
-    
+
     # 3. CONCURRENCY GUARD
     # Compute the hash of what the agent *thinks* it is editing.
     base_hash = compute_content_hash(existing_code)
@@ -42,7 +42,7 @@ def calculate_reward(score):
         emitted_content=emitted_snippet,
         expected_base_hash=base_hash
     )
-    
+
     if merged_code:
         print("SUCCESS: Partial update applied via AST rewrite.")
         print("\n--- Resulting Code ---")
@@ -58,7 +58,7 @@ def calculate_reward(score):
         emitted_content=emitted_snippet,
         expected_base_hash=stale_hash
     )
-    
+
     if not conflict_result:
         print("VERIFIED: Guard correctly rejected update to modified file.")
 
