@@ -23,6 +23,7 @@ Thumbs.db
 .env.local
 *.key
 credentials.json
+reg_output.txt
 
 # Logs
 *.log
