@@ -36,10 +36,39 @@ logs/
 reports/heartbeat/
 reports/hourly/
 reports/daily/
+reports/scale_worker_load/
+reports/scale_control_plane/
+reports/scale_sampled_real_hybrid/
+reports/aether_live_proof/
+reports/aether_worker_proof/
+reports/aether_adapter_proof/
+reports/delivery_proof/
+reports/model_qualification/
+reports/mock_sink_debug/
+reports/gate1_repeatability/
+reports/gate2_local_parallel/
+reports/gcp_gate_ab/
+reports/frontier_smoke/
+reports/quarantine_audit/
 
-# Runtime artifacts
+# Runtime artifacts and local databases
 decisions/
 .runtime/
+evidence/
+data/
+vault/
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+mock_prs.json
+JUDGE_REPORT.md
+GOVERNOR_REPORT.md
+ok.py
+broken.py
+run_temp.py
+tests/test_run_suite.py
 
 # Frontend build/vendor artifacts
 dashboard_v2/node_modules/

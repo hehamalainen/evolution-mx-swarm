@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "description": "Explicit source and evidence allowlist for the MX-Swarm public research prototype release.",
+  "allowed_root_files": [
+    ".dockerignore",
+    ".env.example",
+    ".gitignore",
+    "AGENT.md",
+    "AGENTS.md",
+    "CONTRIBUTING.md",
+    "Dockerfile.worker",
+    "LICENSE",
+    "PRD.md",
+    "README.md",
+    "RELEASE_ALLOWLIST.json",
+    "SECURITY.md",
+    "SPEC.json",
+    "TEAMPLAN.json",
+    "THIRD_PARTY_NOTICES.md",
+    "docker-compose.yml",
+    "mx.config.cloud-template.json",
+    "mx.config.cloud.json",
+    "mx.config.json",
+    "pyproject.toml",
+    "requirements.txt"
+  ],
+  "allowed_top_level_directories": [
+    ".github",
+    "app",
+    "boss",
+    "claude",
+    "cli",
+    "dashboard",
+    "dashboard_v2",
+    "dashboard_v3",
+    "deploy",
+    "docs",
+    "judge",
+    "planner",
+    "prds",
+    "proof_fixtures",
+    "qualification",
+    "scripts",
+    "shared",
+    "simulation",
+    "templates",
+    "tests",
+    "tools",
+    "worker"
+  ],
+  "allowed_reports": [
+    "reports/DEEP_THINK_TECHNICAL_DOSSIER.md",
+    "reports/MX_CLOUD_AGENT_50_WORKER_DEMO_BRIEF_2026-10-22.md",
+    "reports/MX_SCALE_GATE_STATUS_2026-04-27.md",
+    "reports/SCALE_CONTROL_PLANE_COMPARISON_2026-03-25.md",
+    "reports/SCALE_PHASE1_STATUS_2026-03-26.md"
+  ],
+  "forbidden_extensions": [
+    ".db",
+    ".db-shm",
+    ".db-wal",
+    ".sqlite",
+    ".sqlite3",
+    ".key",
+    ".pem"
+  ],
+  "forbidden_path_prefixes": [
+    "vault/",
+    "evidence/",
+    "data/",
+    "temp_analysis/"
+  ]
+}

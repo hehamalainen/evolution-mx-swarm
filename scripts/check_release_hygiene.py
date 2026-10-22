@@ -10,6 +10,7 @@ import subprocess
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+ALLOWLIST_PATH = REPO_ROOT / "RELEASE_ALLOWLIST.json"
 
 PROVIDER_TOKEN_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("moltbook_api_key", re.compile(r"moltbook_sk_[A-Za-z0-9_-]{8,}")),
@@ -20,6 +21,8 @@ PROVIDER_TOKEN_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("google_api_key", re.compile(r"AIza[0-9A-Za-z_-]{35}")),
     ("aws_access_key", re.compile(r"AKIA[0-9A-Z]{16}")),
 )
+
+PRIVATE_PATH_PATTERN = re.compile(r"/Users/[A-Za-z0-9._-]+")
 
 FORBIDDEN_CREDENTIAL_PATHS: frozenset[str] = frozenset(
     {
@@ -79,8 +82,56 @@ def scan_tracked_credentials(repo_root: Path = REPO_ROOT) -> list[dict[str, obje
     return findings
 
 
+def scan_release_boundary(
+    repo_root: Path = REPO_ROOT,
+    allowlist_path: Path | None = None,
+) -> list[dict[str, object]]:
+    """Verify tracked files conform to RELEASE_ALLOWLIST.json and contain no private paths."""
+    target_allowlist = allowlist_path or (repo_root / "RELEASE_ALLOWLIST.json")
+    if not target_allowlist.is_file():
+        return [{"path": "RELEASE_ALLOWLIST.json", "line": 1, "kind": "missing_allowlist"}]
+
+    allowlist = json.loads(target_allowlist.read_text(encoding="utf-8"))
+    allowed_root = set(allowlist.get("allowed_root_files", []))
+    allowed_dirs = set(allowlist.get("allowed_top_level_directories", []))
+    allowed_reports = set(allowlist.get("allowed_reports", []))
+    forbidden_exts = tuple(allowlist.get("forbidden_extensions", []))
+    forbidden_prefixes = tuple(allowlist.get("forbidden_path_prefixes", []))
+
+    findings: list[dict[str, object]] = []
+    for rel_path in list_tracked_files(repo_root):
+        if any(rel_path.endswith(ext) for ext in forbidden_exts):
+            findings.append({"path": rel_path, "line": 1, "kind": "forbidden_extension"})
+        if any(rel_path.startswith(prefix) for prefix in forbidden_prefixes):
+            findings.append({"path": rel_path, "line": 1, "kind": "forbidden_prefix"})
+
+        if "/" not in rel_path:
+            if rel_path not in allowed_root:
+                findings.append({"path": rel_path, "line": 1, "kind": "unapproved_root_file"})
+        else:
+            top_dir = rel_path.split("/", 1)[0]
+            if top_dir == "reports":
+                if rel_path not in allowed_reports:
+                    findings.append({"path": rel_path, "line": 1, "kind": "unapproved_report_file"})
+            elif top_dir not in allowed_dirs:
+                findings.append({"path": rel_path, "line": 1, "kind": "unapproved_directory"})
+
+        file_path = repo_root / rel_path
+        if not file_path.is_file():
+            continue
+        try:
+            content = file_path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            continue
+        for line_no, line in enumerate(content.splitlines(), start=1):
+            if PRIVATE_PATH_PATTERN.search(line):
+                findings.append({"path": rel_path, "line": line_no, "kind": "private_path"})
+
+    return findings
+
+
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Verify MX-Swarm release credential hygiene.")
+    parser = argparse.ArgumentParser(description="Verify MX-Swarm release credential and boundary hygiene.")
     parser.add_argument(
         "--repo-root",
         default=str(REPO_ROOT),
@@ -89,7 +140,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     repo_root = Path(args.repo_root).resolve()
 
-    findings = scan_tracked_credentials(repo_root)
+    cred_findings = scan_tracked_credentials(repo_root)
+    boundary_findings = scan_release_boundary(repo_root)
+    findings = [*cred_findings, *boundary_findings]
     if findings:
         print(json.dumps({"ok": False, "findings": findings}, indent=2))
         return 1
