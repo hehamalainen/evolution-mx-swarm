@@ -1768,50 +1768,80 @@ Example:
         sanitized["GIT_TERMINAL_PROMPT"] = "0"
         return sanitized
 
+    @staticmethod
+    def _process_group_alive(pgid: int) -> bool:
+        if pgid <= 0 or not hasattr(os, "killpg"):
+            return False
+        try:
+            os.killpg(pgid, 0)
+            return True
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+        except OSError:
+            return False
+
     async def _terminate_subprocess_tree(self, proc: object) -> None:
         """Terminate, kill if needed, and reap a timed-out or cancelled subprocess group."""
         pid = getattr(proc, "pid", None)
+        has_pgid = isinstance(pid, int) and pid > 0 and hasattr(os, "killpg")
         returncode = getattr(proc, "returncode", None)
-        if returncode is not None:
+
+        if returncode is not None and (not has_pgid or not self._process_group_alive(pid)):
             return
 
         killed_group = False
-        if isinstance(pid, int) and pid > 0 and hasattr(os, "killpg"):
+        if has_pgid:
             try:
                 os.killpg(pid, signal.SIGTERM)
                 killed_group = True
             except (ProcessLookupError, PermissionError, OSError):
                 pass
-        if not killed_group:
+        if not killed_group and returncode is None:
             terminate = getattr(proc, "terminate", None)
             if callable(terminate):
                 try:
                     terminate()
                 except ProcessLookupError:
-                    return
+                    pass
 
+        loop = asyncio.get_running_loop()
         wait_fn = getattr(proc, "wait", None)
-        if callable(wait_fn):
-            try:
-                await asyncio.wait_for(wait_fn(), timeout=1.0)
+        deadline = loop.time() + 0.5
+        while loop.time() < deadline:
+            if callable(wait_fn) and getattr(proc, "returncode", None) is None:
+                try:
+                    await asyncio.wait_for(wait_fn(), timeout=0.05)
+                except (TimeoutError, Exception):
+                    pass
+            group_alive = has_pgid and self._process_group_alive(pid)
+            proc_alive = getattr(proc, "returncode", None) is None
+            if not group_alive and not proc_alive:
                 return
-            except (TimeoutError, Exception):
-                pass
+            if group_alive:
+                await asyncio.sleep(0.05)
 
-        if isinstance(pid, int) and pid > 0 and hasattr(os, "killpg"):
+        if has_pgid:
             try:
                 os.killpg(pid, signal.SIGKILL)
             except (ProcessLookupError, PermissionError, OSError):
                 pass
-        kill_fn = getattr(proc, "kill", None)
-        if callable(kill_fn):
+        if getattr(proc, "returncode", None) is None:
+            kill_fn = getattr(proc, "kill", None)
+            if callable(kill_fn):
+                try:
+                    kill_fn()
+                except ProcessLookupError:
+                    pass
+
+        kill_deadline = loop.time() + 1.0
+        while has_pgid and self._process_group_alive(pid) and loop.time() < kill_deadline:
+            await asyncio.sleep(0.02)
+
+        if callable(wait_fn) and getattr(proc, "returncode", None) is None:
             try:
-                kill_fn()
-            except ProcessLookupError:
-                pass
-        if callable(wait_fn):
-            try:
-                await asyncio.wait_for(wait_fn(), timeout=2.0)
+                await asyncio.wait_for(wait_fn(), timeout=1.0)
             except Exception:
                 pass
 

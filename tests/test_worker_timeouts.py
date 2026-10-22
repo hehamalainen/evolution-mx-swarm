@@ -67,3 +67,61 @@ async def test_run_command_timeout_terminates_and_reaps_child_process_group(
     await asyncio.sleep(0.7)
     assert not marker.exists(), "Timed-out child process continued running and wrote marker file"
 
+
+@pytest.mark.asyncio
+async def test_run_command_timeout_kills_surviving_child_after_parent_exits_early(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    worker = Worker(
+        config=MXConfig(),
+        worker_id="worker-timeout-parent-exited",
+        queue=_StubQueue(),
+        llm=_StubLLM(),
+    )
+    marker = tmp_path / "orphan_child_marker.txt"
+    cmd = (
+        "python3 -c \"import subprocess, sys; "
+        "subprocess.Popen([sys.executable, '-c', "
+        "'import pathlib, time; time.sleep(0.6); pathlib.Path(\\\"orphan_child_marker.txt\\\").write_text(\\\"escaped\\\")']); "
+        "sys.exit(0)\""
+    )
+    ok, output = await worker._run_command(cmd, cwd=str(tmp_path), timeout=0.1)
+    assert ok is False
+    assert "timed out" in output
+
+    await asyncio.sleep(0.8)
+    assert not marker.exists(), "Surviving child after exited parent was not terminated on timeout"
+
+
+@pytest.mark.asyncio
+async def test_run_command_timeout_escalates_to_sigkill_when_descendant_ignores_sigterm(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    worker = Worker(
+        config=MXConfig(),
+        worker_id="worker-timeout-sigign",
+        queue=_StubQueue(),
+        llm=_StubLLM(),
+    )
+    marker = tmp_path / "sigign_child_marker.txt"
+    cmd = (
+        "python3 -c \"import subprocess, sys; "
+        "subprocess.Popen([sys.executable, '-c', "
+        "'import pathlib, signal, time; "
+        "signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+        "time.sleep(1.2); "
+        "pathlib.Path(\\\"sigign_child_marker.txt\\\").write_text(\\\"escaped\\\")']); "
+        "sys.exit(0)\""
+    )
+    ok, output = await worker._run_command(cmd, cwd=str(tmp_path), timeout=0.1)
+    assert ok is False
+    assert "timed out" in output
+
+    await asyncio.sleep(0.8)
+    assert not marker.exists(), "Descendant ignoring SIGTERM survived timeout cleanup"
+
+
