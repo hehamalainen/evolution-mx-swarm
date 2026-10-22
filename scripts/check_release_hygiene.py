@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import subprocess
@@ -20,8 +21,31 @@ PROVIDER_TOKEN_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("github_pat", re.compile(r"(?:ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})")),
     ("google_api_key", re.compile(r"AIza[0-9A-Za-z_-]{35}")),
     ("aws_access_key", re.compile(r"AKIA[0-9A-Z]{16}")),
+    (
+        "private_key_block",
+        re.compile(r"-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP |ENCRYPTED )?PRIVATE KEY-----"),
+    ),
 )
 
+# SHA-256 digests of historical credential tokens, 32-char suffixes, and 12-char prefixes
+# from ancestor commits (001b73c6 and d66d392b). Stored as one-way hashes so no plaintext
+# credential fragment ever appears in the scanner source.
+REVOKED_CREDENTIAL_FRAGMENT_SHA256: frozenset[str] = frozenset(
+    {
+        "208dbb34231a027a6bc2c8ce7881fa0ebc9ad807c3fb9e9400e24c49047c47b2",
+        "2786ee25d2e8640b4e5346995c7163fb5e2e0c76acc63bc2ab7cb64a60fd58f8",
+        "35b79c4a49cd93bfe4a7d4329413be7cb63eac459bd90d030a4a64c19f74460e",
+        "3ee74c9c6a7e056692c5b6b0f29ee47b7049d176c47ed2b86c4d4dd03502e99d",
+        "40d319406fdb190626b1eb0d492403e6f14a5626e2f31b85a052e1bf5b39fabd",
+        "56b231cd76e12ea2674c17caec3a55bceb9a5c4d24df818a5cecc4118c86ff4e",
+        "8b3e0bc117a524edf80953434f5bd094e34bc4778bdd30ba1f4c09a11bbb78f2",
+        "c851942e07bed572c5dadf7ee34a34052ec06d38aa0b6f39f7dd666413ad5ee4",
+        "dc1070ac2c4f1a85c582d12d8da024874e785f910ddd77547fe3ba8f87b19205",
+    }
+)
+
+TOKEN_CANDIDATE_PATTERN = re.compile(r"[A-Za-z0-9_-]{12,}")
+CONCAT_JOIN_PATTERN = re.compile(r"""['"]\s*\+?\s*['"]""")
 PRIVATE_PATH_PATTERN = re.compile(r"/Users/[A-Za-z0-9._-]+")
 
 FORBIDDEN_CREDENTIAL_PATHS: frozenset[str] = frozenset(
@@ -51,12 +75,26 @@ def list_tracked_files(repo_root: Path) -> list[str]:
     return [line.strip() for line in proc.stdout.splitlines() if line.strip()]
 
 
+def _has_revoked_credential_fragment(text: str) -> bool:
+    for match in TOKEN_CANDIDATE_PATTERN.finditer(text):
+        token = match.group(0)
+        candidates = {token, token[:12]}
+        if len(token) >= 32:
+            candidates.add(token[-32:])
+        for candidate in candidates:
+            digest = hashlib.sha256(candidate.encode("utf-8")).hexdigest()
+            if digest in REVOKED_CREDENTIAL_FRAGMENT_SHA256:
+                return True
+    return False
+
+
 def scan_text_for_credentials(text: str, rel_path: str) -> list[dict[str, object]]:
-    """Scan a single text payload for live-format provider tokens."""
+    """Scan a single text payload for live-format provider tokens, private keys, or historical fragments."""
     findings: list[dict[str, object]] = []
     for line_no, line in enumerate(text.splitlines(), start=1):
+        collapsed_line = CONCAT_JOIN_PATTERN.sub("", line)
         for kind, pattern in PROVIDER_TOKEN_PATTERNS:
-            if pattern.search(line):
+            if pattern.search(line) or pattern.search(collapsed_line):
                 findings.append(
                     {
                         "path": rel_path,
@@ -64,6 +102,32 @@ def scan_text_for_credentials(text: str, rel_path: str) -> list[dict[str, object
                         "kind": kind,
                     }
                 )
+        if _has_revoked_credential_fragment(line) or _has_revoked_credential_fragment(collapsed_line):
+            findings.append(
+                {
+                    "path": rel_path,
+                    "line": line_no,
+                    "kind": "revoked_historical_credential_fragment",
+                }
+            )
+
+    # Also check multi-line concatenated string literals across the whole file
+    collapsed_full = CONCAT_JOIN_PATTERN.sub("", text)
+    existing_kinds = {str(item["kind"]) for item in findings}
+    for kind, pattern in PROVIDER_TOKEN_PATTERNS:
+        if kind not in existing_kinds and pattern.search(collapsed_full):
+            findings.append({"path": rel_path, "line": 1, "kind": kind})
+    if (
+        "revoked_historical_credential_fragment" not in existing_kinds
+        and _has_revoked_credential_fragment(collapsed_full)
+    ):
+        findings.append(
+            {
+                "path": rel_path,
+                "line": 1,
+                "kind": "revoked_historical_credential_fragment",
+            }
+        )
     return findings
 
 

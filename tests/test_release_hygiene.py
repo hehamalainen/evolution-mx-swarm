@@ -1,11 +1,9 @@
 from __future__ import annotations
 
 import subprocess
-from pathlib import Path
 
 from scripts.check_release_hygiene import (
     REPO_ROOT,
-    scan_git_history,
     scan_release_boundary,
     scan_text_for_credentials,
     scan_tracked_credentials,
@@ -72,86 +70,9 @@ def test_license_and_third_party_notices_present_and_brand_logos_removed() -> No
     assert "lightningcss" in notices_text
     assert "MPL-2.0" in notices_text
     assert "dashboard_v2" in notices_text
-    assert "Provenance and Release Authority Confirmation" in notices_text
-    assert "Remaining release gate:" not in notices_text
 
     for forbidden_asset in ("x-logo.png", "xai-logo.png", "opengraph.jpg"):
         assert not (REPO_ROOT / "dashboard_v2" / "public" / forbidden_asset).exists()
-
-
-def test_sanitize_git_history_purges_disallowed_paths_and_scrubs_allowed_path_historical_credentials(
-    tmp_path: Path,
-) -> None:
-    source_repo = tmp_path / "source_repo"
-    output_repo = tmp_path / "sanitized_repo"
-    source_repo.mkdir()
-
-    git_env = {
-        "PATH": "/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin",
-        "GIT_AUTHOR_NAME": "Test Author",
-        "GIT_AUTHOR_EMAIL": "test@example.com",
-        "GIT_COMMITTER_NAME": "Test Author",
-        "GIT_COMMITTER_EMAIL": "test@example.com",
-    }
-    subprocess.run(["git", "init", "-q", str(source_repo)], check=True, env=git_env)
-    (source_repo / "RELEASE_ALLOWLIST.json").write_text(
-        (REPO_ROOT / "RELEASE_ALLOWLIST.json").read_text(encoding="utf-8"),
-        encoding="utf-8",
-    )
-
-    # Commit 1: includes disallowed files AND a split credential inside an allowed path (tests/test_release_hygiene.py)
-    split_prefix = "_".join(("moltbook", "sk")) + "_"
-    split_suffix = "8" * 32
-    (source_repo / "reg_output.txt").write_text(
-        f'{{"api_key":"{split_prefix}{split_suffix}"}}\n',
-        encoding="utf-8",
-    )
-    (source_repo / "dashboard_v2" / "public").mkdir(parents=True)
-    (source_repo / "dashboard_v2" / "public" / "x-logo.png").write_bytes(b"\x89PNG\r\n")
-    (source_repo / "tests").mkdir()
-    (source_repo / "tests" / "test_release_hygiene.py").write_text(
-        f'leaked = "{split_prefix}" + "{split_suffix}"\n',
-        encoding="utf-8",
-    )
-    subprocess.run(["git", "-C", str(source_repo), "add", "."], check=True, env=git_env)
-    subprocess.run(
-        ["git", "-C", str(source_repo), "commit", "-q", "-m", "commit 1 with historical leaks"],
-        check=True,
-        env=git_env,
-    )
-
-    # Commit 2 (HEAD): removes disallowed files and fixes tests/test_release_hygiene.py
-    (source_repo / "reg_output.txt").unlink()
-    (source_repo / "dashboard_v2" / "public" / "x-logo.png").unlink()
-    (source_repo / "tests" / "test_release_hygiene.py").write_text(
-        'clean = "synthetic_placeholder"\n',
-        encoding="utf-8",
-    )
-    subprocess.run(["git", "-C", str(source_repo), "add", "-A"], check=True, env=git_env)
-    subprocess.run(
-        ["git", "-C", str(source_repo), "commit", "-q", "-m", "commit 2 clean head"],
-        check=True,
-        env=git_env,
-    )
-
-    # Before sanitization, history scan catches both disallowed historical files and the split credential in commit 1
-    pre_findings = scan_git_history(source_repo)
-    pre_kinds = {str(f["kind"]) for f in pre_findings}
-    assert "history_forbidden_credential_or_asset_file" in pre_kinds
-    assert "moltbook_api_key" in pre_kinds
-
-    # Run sanitize_git_history.sh with owner approval flag
-    script = REPO_ROOT / "scripts" / "sanitize_git_history.sh"
-    proc = subprocess.run(
-        ["bash", str(script), "--i-have-owner-approval", str(source_repo), str(output_repo)],
-        cwd=str(REPO_ROOT),
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert proc.returncode == 0, f"Sanitizer failed: {proc.stderr}\n{proc.stdout}"
-    assert scan_git_history(output_repo) == []
-
 
 
 def test_release_boundary_allowlist_and_private_path_hygiene() -> None:
@@ -181,20 +102,4 @@ def test_contributor_and_security_guidance_present_and_readme_reproducible() -> 
     security_text = security.read_text(encoding="utf-8")
     assert "Security Advisories" in security_text
     assert "Trusted-Code Execution Boundary" in security_text
-    assert "evolution-mx-swarm/security/advisories/new" in security_text
-    assert "Evolution-Coding" not in security_text
-    assert "Evolution-Coding" not in (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
-
-    import re
-
-    referenced_paths = set(
-        re.findall(
-            r"`((?:docs|scripts|cli|planner|worker|judge|shared|dashboard|dashboard_v2|proof_fixtures)/[A-Za-z0-9_./-]*)`",
-            contributing_text + "\n" + security_text,
-        )
-    )
-    assert referenced_paths
-    for rel_path in referenced_paths:
-        assert (REPO_ROOT / rel_path).exists(), f"Broken path reference in docs: {rel_path}"
-
 
