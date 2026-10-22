@@ -1367,10 +1367,47 @@
         let ws = null;
         let reconnectAttempts = 0;
 
+        function getDashboardToken() {
+            try {
+                const params = new URLSearchParams(window.location.search);
+                const urlToken = (params.get('token') || '').trim();
+                if (urlToken) {
+                    sessionStorage.setItem('mx_dashboard_token', urlToken);
+                    return urlToken;
+                }
+                return (
+                    sessionStorage.getItem('mx_dashboard_token') ||
+                    localStorage.getItem('mx_dashboard_token') ||
+                    ''
+                ).trim();
+            } catch (_err) {
+                return '';
+            }
+        }
+
+        const _nativeFetch = window.fetch.bind(window);
+        window.fetch = function(input, init = {}) {
+            const url = typeof input === 'string' ? input : (input && input.url) || '';
+            const token = getDashboardToken();
+            if (token && (url.startsWith('/api') || url.includes('/api/'))) {
+                const headers = new Headers(init.headers || {});
+                if (!headers.has('Authorization')) {
+                    headers.set('Authorization', `Bearer ${token}`);
+                }
+                if (!headers.has('X-MX-Dashboard-Token')) {
+                    headers.set('X-MX-Dashboard-Token', token);
+                }
+                init = { ...init, headers, credentials: init.credentials || 'same-origin' };
+            }
+            return _nativeFetch(input, init);
+        };
+
         // WebSocket connection
         function connectWebSocket() {
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
+            const token = getDashboardToken();
+            const tokenQuery = token ? `?token=${encodeURIComponent(token)}` : '';
+            ws = new WebSocket(`${protocol}//${window.location.host}/ws${tokenQuery}`);
 
             ws.onopen = () => {
                 console.log('WebSocket connected');

@@ -1037,25 +1037,67 @@ def assert_dashboard_bind_safe(host: str) -> None:
         )
 
 
-def _extract_dashboard_token(request: Request) -> str:
-    auth_header = request.headers.get("authorization", "").strip()
+def _extract_dashboard_token(conn: Request | WebSocket) -> str:
+    auth_header = conn.headers.get("authorization", "").strip()
     if auth_header.lower().startswith("bearer "):
         return auth_header[7:].strip()
-    return request.headers.get("x-mx-dashboard-token", "").strip()
+    header_token = conn.headers.get("x-mx-dashboard-token", "").strip()
+    if header_token:
+        return header_token
+    query_token = conn.query_params.get("token", "").strip()
+    if query_token:
+        return query_token
+    return conn.cookies.get("mx_dashboard_token", "").strip()
+
+
+def _is_trusted_origin(origin: str) -> bool:
+    if not origin:
+        return True
+    parsed_origin = urlparse(origin)
+    if parsed_origin.scheme not in {"http", "https"}:
+        return False
+    return (parsed_origin.hostname or "").lower() in LOOPBACK_BIND_HOSTS
+
+
+def _is_protected_dashboard_path(path: str, method: str) -> bool:
+    if method.upper() in MUTATING_HTTP_METHODS:
+        return True
+    return path == "/api" or path.startswith("/api/")
 
 
 @app.middleware("http")
 async def enforce_control_route_security(request: Request, call_next):
-    if request.method.upper() not in MUTATING_HTTP_METHODS:
-        return await call_next(request)
-
     expected_token = os.environ.get("MX_DASHBOARD_TOKEN", "").strip()
     provided_token = _extract_dashboard_token(request)
+
+    if not _is_protected_dashboard_path(request.url.path, request.method):
+        response = await call_next(request)
+        if (
+            expected_token
+            and provided_token
+            and hmac.compare_digest(provided_token, expected_token)
+            and request.query_params.get("token")
+        ):
+            response.set_cookie(
+                key="mx_dashboard_token",
+                value=expected_token,
+                httponly=True,
+                samesite="strict",
+            )
+        return response
+
+    origin = request.headers.get("origin", "").strip()
+    if origin and not _is_trusted_origin(origin):
+        return JSONResponse(
+            status_code=403,
+            content={"detail": "Cross-origin dashboard request rejected"},
+        )
+
     if expected_token:
         if not provided_token or not hmac.compare_digest(provided_token, expected_token):
             return JSONResponse(
                 status_code=401,
-                content={"detail": "Valid MX_DASHBOARD_TOKEN required for control operations"},
+                content={"detail": "Valid MX_DASHBOARD_TOKEN required for dashboard API access"},
             )
         return await call_next(request)
 
@@ -1064,17 +1106,8 @@ async def enforce_control_route_security(request: Request, call_next):
     if client_host not in LOOPBACK_CLIENT_HOSTS or forwarded:
         return JSONResponse(
             status_code=403,
-            content={"detail": "Remote control requests require MX_DASHBOARD_TOKEN authentication"},
+            content={"detail": "Remote dashboard requests require MX_DASHBOARD_TOKEN authentication"},
         )
-
-    origin = request.headers.get("origin", "").strip()
-    if origin:
-        parsed_origin = urlparse(origin)
-        if (parsed_origin.hostname or "").lower() not in LOOPBACK_BIND_HOSTS:
-            return JSONResponse(
-                status_code=403,
-                content={"detail": "Cross-origin control request rejected"},
-            )
 
     return await call_next(request)
 
@@ -2167,6 +2200,24 @@ async def get_swarm_running_status():
 
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
+    origin = ws.headers.get("origin", "").strip()
+    if origin and not _is_trusted_origin(origin):
+        await ws.close(code=1008)
+        return
+
+    expected_token = os.environ.get("MX_DASHBOARD_TOKEN", "").strip()
+    provided_token = _extract_dashboard_token(ws)
+    if expected_token:
+        if not provided_token or not hmac.compare_digest(provided_token, expected_token):
+            await ws.close(code=1008)
+            return
+    else:
+        client_host = (ws.client.host if ws.client else "").strip().lower()
+        forwarded = ws.headers.get("x-forwarded-for") or ws.headers.get("forwarded")
+        if client_host not in LOOPBACK_CLIENT_HOSTS or forwarded:
+            await ws.close(code=1008)
+            return
+
     await ws.accept()
     state.websocket_clients.append(ws)
     state.add_log(EventType.SYS_CONFIG, "Dashboard client connected")

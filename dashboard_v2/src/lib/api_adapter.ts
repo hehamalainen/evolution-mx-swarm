@@ -490,9 +490,35 @@ function getApiBase() {
   return rawBase.endsWith('/') ? rawBase.slice(0, -1) : rawBase;
 }
 
+function getDashboardRequestInit(): RequestInit {
+  const headers: Record<string, string> = {};
+  try {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const urlToken = (params.get('token') ?? '').trim();
+      if (urlToken) {
+        window.sessionStorage.setItem('mx_dashboard_token', urlToken);
+      }
+      const token = (
+        urlToken ||
+        window.sessionStorage.getItem('mx_dashboard_token') ||
+        window.localStorage.getItem('mx_dashboard_token') ||
+        ''
+      ).trim();
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+        headers['X-MX-Dashboard-Token'] = token;
+      }
+    }
+  } catch {
+    // Ignore storage access errors in restricted contexts
+  }
+  return { credentials: 'include', headers };
+}
+
 async function fetchSwarmStatus(): Promise<SwarmStatus> {
   const apiBase = getApiBase();
-  const res = await fetch(`${apiBase}/api/status`, { credentials: 'include' });
+  const res = await fetch(`${apiBase}/api/status`, getDashboardRequestInit());
   if (!res.ok) {
     const text = await res.text();
     throw new Error(text || res.statusText);
@@ -504,7 +530,7 @@ async function fetchEventSourcedMetrics(windowMinutes = 60): Promise<EventSource
   const apiBase = getApiBase();
   const res = await fetch(
     `${apiBase}/api/metrics/event_sourced?window_minutes=${windowMinutes}`,
-    { credentials: 'include' },
+    getDashboardRequestInit(),
   );
   if (!res.ok) {
     const text = await res.text();
@@ -515,7 +541,7 @@ async function fetchEventSourcedMetrics(windowMinutes = 60): Promise<EventSource
 
 async function fetchTraceSpans(limit = 200): Promise<TraceListResponse> {
   const apiBase = getApiBase();
-  const res = await fetch(`${apiBase}/api/traces?limit=${limit}`, { credentials: 'include' });
+  const res = await fetch(`${apiBase}/api/traces?limit=${limit}`, getDashboardRequestInit());
   if (!res.ok) {
     const text = await res.text();
     throw new Error(text || res.statusText);
@@ -527,7 +553,7 @@ async function fetchTraceBundle(traceId: string, limit = 500): Promise<TraceBund
   const apiBase = getApiBase();
   const res = await fetch(
     `${apiBase}/api/traces/${encodeURIComponent(traceId)}?limit=${limit}`,
-    { credentials: 'include' },
+    getDashboardRequestInit(),
   );
   if (!res.ok) {
     const text = await res.text();
@@ -540,7 +566,7 @@ async function fetchRecentSubmissions(limit = 12): Promise<RecentSubmissionsResp
   const apiBase = getApiBase();
   const res = await fetch(
     `${apiBase}/api/submissions/recent?limit=${limit}&settled_only=true`,
-    { credentials: 'include' },
+    getDashboardRequestInit(),
   );
   if (!res.ok) {
     const text = await res.text();
@@ -555,21 +581,21 @@ async function fetchRecentSubmissions(limit = 12): Promise<RecentSubmissionsResp
 
 async function fetchEconomicFlow(): Promise<EconomicNode[]> {
   const apiBase = getApiBase();
-  const res = await fetch(`${apiBase}/api/v2/economic-flow`, { credentials: 'include' });
+  const res = await fetch(`${apiBase}/api/v2/economic-flow`, getDashboardRequestInit());
   if (!res.ok) throw new Error(await res.text() || res.statusText);
   return (await res.json()) as EconomicNode[];
 }
 
 async function fetchAlignmentMatrix(): Promise<AlignmentNode[]> {
   const apiBase = getApiBase();
-  const res = await fetch(`${apiBase}/api/v2/alignment-matrix`, { credentials: 'include' });
+  const res = await fetch(`${apiBase}/api/v2/alignment-matrix`, getDashboardRequestInit());
   if (!res.ok) throw new Error(await res.text() || res.statusText);
   return (await res.json()) as AlignmentNode[];
 }
 
 async function fetchPhaseTransition(): Promise<PhaseTransitionData> {
   const apiBase = getApiBase();
-  const res = await fetch(`${apiBase}/api/v2/phase-transition`, { credentials: 'include' });
+  const res = await fetch(`${apiBase}/api/v2/phase-transition`, getDashboardRequestInit());
   if (!res.ok) throw new Error(await res.text() || res.statusText);
   return (await res.json()) as PhaseTransitionData;
 }

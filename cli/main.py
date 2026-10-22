@@ -15,7 +15,6 @@ Commands:
 
 import argparse
 import asyncio
-import json
 import os
 import signal
 import sys
@@ -605,33 +604,35 @@ async def cmd_run(args):
                         "current_phase": swarm_metrics["current_phase"],
                     }
 
+                    from shared.utils.remote_logger import (
+                        build_dashboard_auth_headers,
+                        post_dashboard_json_sync,
+                    )
+
+                    hb_url = f"{dashboard_url}/api/swarm/heartbeat"
+                    hb_headers = build_dashboard_auth_headers()
                     if use_aiohttp:
                         async with aiohttp.ClientSession() as session:
                             async with session.post(
-                                f"{dashboard_url}/api/swarm/heartbeat",
-                                json=payload,
-                                timeout=aiohttp.ClientTimeout(total=2)
-                            ):
-                                pass  # Just send, don't care about response
-                    else:
-                        # Fallback to synchronous urllib in thread pool
-                        def sync_post(p):
-                            import urllib.parse
-
-                            hb_url = f"{dashboard_url}/api/swarm/heartbeat"
-                            if urllib.parse.urlparse(hb_url).scheme not in {"http", "https"}:
-                                return
-                            req = urllib.request.Request(
                                 hb_url,
-                                data=json.dumps(p).encode('utf-8'),
-                                headers={'Content-Type': 'application/json'},
-                                method='POST'
-                            )
-                            try:
-                                urllib.request.urlopen(req, timeout=2)  # nosec B310
-                            except (urllib.error.URLError, OSError):
-                                pass
-                        await asyncio.get_event_loop().run_in_executor(None, sync_post, payload)
+                                json=payload,
+                                headers=hb_headers,
+                                timeout=aiohttp.ClientTimeout(total=2),
+                            ) as resp:
+                                if resp.status >= 400:
+                                    sys.stderr.write(
+                                        f"[heartbeat] {hb_url} rejected heartbeat with HTTP {resp.status}\n"
+                                    )
+                    else:
+                        await asyncio.get_running_loop().run_in_executor(
+                            None,
+                            lambda u=hb_url, p=payload: post_dashboard_json_sync(
+                                u,
+                                p,
+                                timeout=2.0,
+                                error_stream=sys.stderr,
+                            ),
+                        )
 
                 except Exception:
                     pass  # Ignore errors - dashboard might not be running
