@@ -1693,6 +1693,53 @@ Example:
         sanitized["GIT_TERMINAL_PROMPT"] = "0"
         return sanitized
 
+    async def _terminate_subprocess_tree(self, proc: object) -> None:
+        """Terminate, kill if needed, and reap a timed-out or cancelled subprocess group."""
+        pid = getattr(proc, "pid", None)
+        returncode = getattr(proc, "returncode", None)
+        if returncode is not None:
+            return
+
+        killed_group = False
+        if isinstance(pid, int) and pid > 0 and hasattr(os, "killpg"):
+            try:
+                os.killpg(pid, signal.SIGTERM)
+                killed_group = True
+            except (ProcessLookupError, PermissionError, OSError):
+                pass
+        if not killed_group:
+            terminate = getattr(proc, "terminate", None)
+            if callable(terminate):
+                try:
+                    terminate()
+                except ProcessLookupError:
+                    return
+
+        wait_fn = getattr(proc, "wait", None)
+        if callable(wait_fn):
+            try:
+                await asyncio.wait_for(wait_fn(), timeout=1.0)
+                return
+            except (TimeoutError, Exception):
+                pass
+
+        if isinstance(pid, int) and pid > 0 and hasattr(os, "killpg"):
+            try:
+                os.killpg(pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError, OSError):
+                pass
+        kill_fn = getattr(proc, "kill", None)
+        if callable(kill_fn):
+            try:
+                kill_fn()
+            except ProcessLookupError:
+                pass
+        if callable(wait_fn):
+            try:
+                await asyncio.wait_for(wait_fn(), timeout=2.0)
+            except Exception:
+                pass
+
     async def _run_command(
         self,
         command: str,
@@ -1702,6 +1749,7 @@ Example:
         """
         Run shell command and return (success, output).
         """
+        proc = None
         try:
             resolved_command = command
             try:
@@ -1732,6 +1780,7 @@ Example:
                 stderr=asyncio.subprocess.STDOUT,
                 cwd=cwd,
                 env=self._build_sanitized_command_env(cwd),
+                start_new_session=True,
             )
 
             stdout, _ = await asyncio.wait_for(
@@ -1745,8 +1794,16 @@ Example:
             return success, output[:5000]  # Truncate long outputs
 
         except TimeoutError:
+            if proc is not None:
+                await self._terminate_subprocess_tree(proc)
             return False, f"Command timed out after {timeout}s"
+        except asyncio.CancelledError:
+            if proc is not None:
+                await self._terminate_subprocess_tree(proc)
+            raise
         except Exception as e:
+            if proc is not None:
+                await self._terminate_subprocess_tree(proc)
             return False, self._describe_exception(e, context="command execution failed")
 
     async def _repo_has_changes(self, repo: object, changed_files: list[str]) -> bool:
