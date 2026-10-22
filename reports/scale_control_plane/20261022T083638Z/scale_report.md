@@ -1,0 +1,24 @@
+# MX Scale Control-Plane Report
+
+- generated_at: `2026-10-22T08:36:38.579620+00:00`
+- run_id: `scale-control-plane-20261022t083638z`
+- logical_lanes: `50`
+- phase: `control_plane_hybrid`
+- passed: `True`
+- verified_landings: `42`
+- total_terminal_tasks: `100`
+- false_success_rate: `0.0`
+- blocked_dependency_ratio: `0.0`
+- convergence_time_seconds: `45.0`
+- batch_wall_clock_seconds: `0.014207`
+- throughput_tasks_per_minute: `422327.021891`
+- governor_interventions: `5`
+- cost_per_success_usd: `0.04790270447819355`
+- queue_depth_p95: `60.0`
+- sink_settlement_latency_p95_s: `30.5`
+- retry_cascade_count: `4`
+- dlq_volume: `56`
+- zombie_blocked_tasks: `0`
+- unstable_governor_oscillation_count: `0`
+- verdict_reasons: `[]`
+- governor_summary: `{'recommendation_counts': {'DEPENDENCY_DRAIN': 5}, 'rigs_observed': 20}`

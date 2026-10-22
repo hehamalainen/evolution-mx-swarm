@@ -1,0 +1,65 @@
+{
+  "generated_at": "2026-10-22T09:02:35.741897+00:00",
+  "slice_key": "jsonpeek",
+  "frontier_llm": {
+    "provider": "gemini",
+    "model": "gemini-2.5-flash",
+    "api_key": "secret:GEMINI_API_KEY",
+    "max_tokens": 8192,
+    "temperature": 0.2,
+    "input_cost_per_million_usd": 0.3,
+    "output_cost_per_million_usd": 2.5
+  },
+  "result": {
+    "status": "failed",
+    "model_tier": "frontier",
+    "estimated_cost_bucket": "high",
+    "false_success_rate": 0.0,
+    "duplicate_settlement_events": 0,
+    "queue_depth_end": 0,
+    "dead_letter_depth_end": 0,
+    "run_dir": "<temp_dir>/mx_gate2_run_1_gokj0pfj",
+    "log_path": "<repo_root>/reports/frontier_smoke/20261022T090226Z/run_1.log",
+    "slices": [
+      {
+        "key": "jsonpeek",
+        "task_id": "d4dcdfac",
+        "goal": "Implement Jsonpeek CLI using only the strict file targets",
+        "prerequisite_keys": [],
+        "prerequisite_task_ids": [],
+        "terminal_state": "settled_ack",
+        "terminal_reason": null,
+        "branch_name": "task/d4dcdfac-implement-jsonpeek-cli-using-o",
+        "submission_id": "1",
+        "submission_url": "http://localhost/mock/hehamalainen/evolution-mx-swarm/pull/1",
+        "settled_at": "2026-10-22T09:02:34.188751+00:00",
+        "verification_passed": false,
+        "changed_files": [],
+        "blocked_event_count": 0,
+        "last_blocked_reason": null,
+        "failure_reason": "unexpected branch diff: []"
+      }
+    ]
+  },
+  "budget_snapshot": {
+    "total_spend_today_usd": 0,
+    "frontier_spend_today_usd": 0,
+    "control_plane_spend_today_usd": 0,
+    "bulk_lane_spend_today_usd": 0.0,
+    "frontier_claims_last_hour": 0,
+    "active_frontier_claims": 0,
+    "successful_settlements_today": 0,
+    "cost_per_success_usd": 0,
+    "daily_cap_usd": 25.0,
+    "frontier_daily_cap_usd": 10.0,
+    "total_budget_pct": 0.0,
+    "frontier_budget_pct": 0.0,
+    "throttle_threshold_pct": 85.0,
+    "freeze_threshold_pct": 100.0,
+    "cost_per_success_ceiling_usd": 5.0,
+    "freeze_mode": "frontier_only",
+    "frontier_spend_ratio": 0.0,
+    "frontier_frozen": false,
+    "total_frozen": false
+  }
+}

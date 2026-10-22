@@ -1,0 +1,131 @@
+{
+  "manifest": {
+    "run_id": "scale-worker-load-20261022t085958z",
+    "phase": "worker_load_canned",
+    "generated_at": "2026-10-22T09:00:23.203364+00:00",
+    "seed": 0,
+    "logical_lanes": 0,
+    "logical_workers": 50,
+    "active_concurrency": 10,
+    "sink_mode": "mock_github",
+    "model_mix": {
+      "gemini-2.5-flash_smoke_qualified": 0.02,
+      "canned_fixture": 0.98
+    },
+    "lane_mix": {
+      "deterministic_pct": 0.75,
+      "noise_pct": 0.2,
+      "sampled_pct": 0.05
+    },
+    "scenario": {
+      "dependency_depth_max": 4,
+      "invalid_contract_pct": 0.03,
+      "transient_failure_pct": 0.08,
+      "deterministic_failure_pct": 0.06,
+      "escalation_failure_pct": 0.03,
+      "settlement_delay_pct": 0.07
+    },
+    "topology": {
+      "slice": "jsonpeek",
+      "isolation_mode": "per-proof"
+    }
+  },
+  "metrics": {
+    "verified_landings": 0,
+    "total_terminal_tasks": 50,
+    "false_success_rate": 0.0,
+    "blocked_dependency_ratio": 0.0,
+    "convergence_time_seconds": 6.82461,
+    "batch_wall_clock_seconds": 24.622396,
+    "throughput_tasks_per_minute": 121.840295,
+    "governor_interventions": 0,
+    "cost_per_success_usd": 0.0,
+    "queue_depth_p95": 0.0,
+    "sink_settlement_latency_p95_s": 6.659029,
+    "retry_cascade_count": 0,
+    "dlq_volume": 50,
+    "duplicate_terminal_settlements": 0,
+    "zombie_blocked_tasks": 0,
+    "sink_truth_divergence_count": 0,
+    "unstable_governor_oscillation_count": 0
+  },
+  "verdict": {
+    "passed": false,
+    "reasons": [
+      "worker-007: jsonpeek failed verification: terminal state was dead_letter",
+      "worker-004: jsonpeek failed verification: terminal state was dead_letter",
+      "worker-003: jsonpeek failed verification: terminal state was dead_letter",
+      "worker-001: jsonpeek failed verification: terminal state was dead_letter",
+      "worker-005: jsonpeek failed verification: terminal state was dead_letter",
+      "worker-008: jsonpeek failed verification: terminal state was dead_letter",
+      "worker-009: jsonpeek failed verification: terminal state was dead_letter",
+      "worker-006: jsonpeek failed verification: terminal state was dead_letter",
+      "worker-000: jsonpeek failed verification: terminal state was dead_letter",
+      "worker-002: jsonpeek failed verification: terminal state was dead_letter",
+      "worker-010: jsonpeek failed verification: terminal state was dead_letter",
+      "worker-011: jsonpeek failed verification: terminal state was dead_letter",
+      "worker-014: jsonpeek failed verification: terminal state was dead_letter",
+      "worker-015: jsonpeek failed verification: terminal state was dead_letter",
+      "worker-013: jsonpeek failed verification: terminal state was dead_letter",
+      "worker-017: jsonpeek failed verification: terminal state was dead_letter",
+      "worker-019: jsonpeek failed verification: terminal state was dead_letter",
+      "worker-016: jsonpeek failed verification: terminal state was dead_letter",
+      "worker-012: jsonpeek failed verification: terminal state was dead_letter",
+      "worker-018: jsonpeek failed verification: terminal state was dead_letter",
+      "worker-020: jsonpeek failed verification: terminal state was dead_letter",
+      "worker-021: jsonpeek failed verification: terminal state was dead_letter",
+      "worker-022: jsonpeek failed verification: terminal state was dead_letter",
+      "worker-023: jsonpeek failed verification: terminal state was dead_letter",
+      "worker-024: jsonpeek failed verification: terminal state was dead_letter",
+      "worker-026: jsonpeek failed verification: terminal state was dead_letter",
+      "worker-030: jsonpeek failed verification: terminal state was dead_letter",
+      "worker-025: jsonpeek failed verification: terminal state was dead_letter",
+      "worker-028: jsonpeek failed verification: terminal state was dead_letter",
+      "worker-029: jsonpeek failed verification: terminal state was dead_letter",
+      "worker-027: jsonpeek failed verification: terminal state was dead_letter",
+      "worker-031: jsonpeek failed verification: terminal state was dead_letter",
+      "worker-032: jsonpeek failed verification: terminal state was dead_letter",
+      "worker-033: jsonpeek failed verification: terminal state was dead_letter",
+      "worker-036: jsonpeek failed verification: terminal state was dead_letter",
+      "worker-034: jsonpeek failed verification: terminal state was dead_letter",
+      "worker-035: jsonpeek failed verification: terminal state was dead_letter",
+      "worker-037: jsonpeek failed verification: terminal state was dead_letter",
+      "worker-038: jsonpeek failed verification: terminal state was dead_letter",
+      "worker-039: jsonpeek failed verification: terminal state was dead_letter",
+      "worker-040: jsonpeek failed verification: terminal state was dead_letter",
+      "worker-041: jsonpeek failed verification: terminal state was dead_letter",
+      "worker-042: jsonpeek failed verification: terminal state was dead_letter",
+      "worker-043: jsonpeek failed verification: terminal state was dead_letter",
+      "worker-044: jsonpeek failed verification: terminal state was dead_letter",
+      "worker-046: jsonpeek failed verification: terminal state was dead_letter",
+      "worker-045: jsonpeek failed verification: terminal state was dead_letter",
+      "worker-047: jsonpeek failed verification: terminal state was dead_letter",
+      "worker-048: jsonpeek failed verification: terminal state was dead_letter",
+      "worker-049: jsonpeek failed verification: terminal state was dead_letter"
+    ]
+  },
+  "capability_delta": {
+    "lanes_observed": 0,
+    "lanes_updated": 0,
+    "avg_pass_rate": 0.0,
+    "avg_escalation_rate": 0.0,
+    "avg_transient_failure_rate": 0.0
+  },
+  "hold_reason_distribution": {},
+  "latency_by_lane": {},
+  "queue_depth_distribution": {},
+  "governor_summary": {
+    "mode": "not_applicable"
+  },
+  "sink_summary": {
+    "mode": "mock_github",
+    "verified_landings": 0
+  },
+  "artifacts": {
+    "worker_artifacts": "[\"<temp_dir>/mx_gate2_run_1_vnefsj0a\", \"<temp_dir>/mx_gate2_run_1_byyt0wka\", \"<temp_dir>/mx_gate2_run_1_xxiyt4qy\", \"<temp_dir>/mx_gate2_run_1_94xw26p0\", \"<temp_dir>/mx_gate2_run_1_5scgfio2\", \"<temp_dir>/mx_gate2_run_1_8isleu6_\", \"<temp_dir>/mx_gate2_run_1_hjthfcsr\", \"<temp_dir>/mx_gate2_run_1_uphgxblw\", \"<temp_dir>/mx_gate2_run_1_4yfgm9ce\", \"<temp_dir>/mx_gate2_run_1_htby_7ul\"]"
+  },
+  "notes": [
+    "50-worker load harness exercises real MX worker git branch, patch, pytest verification, and settlement plumbing.",
+    "Paired with live 1-agent Gemini 2.5 Flash frontier smoke proof."
+  ]
+}

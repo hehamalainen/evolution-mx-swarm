@@ -1,0 +1,80 @@
+{
+  "manifest": {
+    "run_id": "scale-worker-load-20261022t092213z",
+    "phase": "worker_load_canned",
+    "generated_at": "2026-10-22T09:22:48.347081+00:00",
+    "seed": 0,
+    "logical_lanes": 0,
+    "logical_workers": 50,
+    "active_concurrency": 10,
+    "sink_mode": "mock_github",
+    "model_mix": {
+      "gemini-2.5-flash_smoke_qualified": 0.02,
+      "canned_fixture": 0.98
+    },
+    "lane_mix": {
+      "deterministic_pct": 0.75,
+      "noise_pct": 0.2,
+      "sampled_pct": 0.05
+    },
+    "scenario": {
+      "dependency_depth_max": 4,
+      "invalid_contract_pct": 0.03,
+      "transient_failure_pct": 0.08,
+      "deterministic_failure_pct": 0.06,
+      "escalation_failure_pct": 0.03,
+      "settlement_delay_pct": 0.07
+    },
+    "topology": {
+      "slice": "jsonpeek",
+      "isolation_mode": "per-proof"
+    }
+  },
+  "metrics": {
+    "verified_landings": 50,
+    "total_terminal_tasks": 50,
+    "false_success_rate": 0.0,
+    "blocked_dependency_ratio": 0.0,
+    "convergence_time_seconds": 8.041296,
+    "batch_wall_clock_seconds": 35.241819,
+    "throughput_tasks_per_minute": 85.126139,
+    "governor_interventions": 0,
+    "cost_per_success_usd": 0.0,
+    "queue_depth_p95": 0.0,
+    "sink_settlement_latency_p95_s": 7.927865,
+    "retry_cascade_count": 0,
+    "dlq_volume": 0,
+    "duplicate_terminal_settlements": 0,
+    "zombie_blocked_tasks": 0,
+    "sink_truth_divergence_count": 0,
+    "unstable_governor_oscillation_count": 0
+  },
+  "verdict": {
+    "passed": true,
+    "reasons": []
+  },
+  "capability_delta": {
+    "lanes_observed": 0,
+    "lanes_updated": 0,
+    "avg_pass_rate": 0.0,
+    "avg_escalation_rate": 0.0,
+    "avg_transient_failure_rate": 0.0
+  },
+  "hold_reason_distribution": {},
+  "latency_by_lane": {},
+  "queue_depth_distribution": {},
+  "governor_summary": {
+    "mode": "not_applicable"
+  },
+  "sink_summary": {
+    "mode": "mock_github",
+    "verified_landings": 50
+  },
+  "artifacts": {
+    "worker_artifacts": "[\"<temp_dir>/mx_gate2_run_1_11o7z1qq\", \"<temp_dir>/mx_gate2_run_1_krvb6nm7\", \"<temp_dir>/mx_gate2_run_1_qzai36gw\", \"<temp_dir>/mx_gate2_run_1_t5j93rfm\", \"<temp_dir>/mx_gate2_run_1_mju6sc17\", \"<temp_dir>/mx_gate2_run_1_vuw1_fg1\", \"<temp_dir>/mx_gate2_run_1_ni9n2t_o\", \"<temp_dir>/mx_gate2_run_1_6resx0pj\", \"<temp_dir>/mx_gate2_run_1_qwhc3icg\", \"<temp_dir>/mx_gate2_run_1_h_ayw435\"]"
+  },
+  "notes": [
+    "50-worker load harness exercises real MX worker git branch, patch, pytest verification, and settlement plumbing.",
+    "Paired with live 1-agent Gemini 2.5 Flash frontier smoke proof."
+  ]
+}

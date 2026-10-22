@@ -1,0 +1,87 @@
+{
+  "manifest": {
+    "run_id": "scale-worker-load-20260427t044157z",
+    "phase": "worker_load_canned",
+    "generated_at": "2026-04-27T04:41:57.245210+00:00",
+    "seed": 0,
+    "logical_lanes": 0,
+    "logical_workers": 25,
+    "active_concurrency": 4,
+    "sink_mode": "aether",
+    "model_mix": {
+      "canned_fixture": 1.0
+    },
+    "lane_mix": {
+      "deterministic_pct": 0.75,
+      "noise_pct": 0.2,
+      "sampled_pct": 0.05
+    },
+    "scenario": {
+      "dependency_depth_max": 4,
+      "invalid_contract_pct": 0.03,
+      "transient_failure_pct": 0.08,
+      "deterministic_failure_pct": 0.06,
+      "escalation_failure_pct": 0.03,
+      "settlement_delay_pct": 0.07
+    },
+    "topology": {
+      "slice": "jsonpeek",
+      "isolation_mode": "per-proof"
+    }
+  },
+  "metrics": {
+    "verified_landings": 25,
+    "total_terminal_tasks": 25,
+    "dead_letter_ratio": 0.0,
+    "expected_dead_letter_floor": 0.0,
+    "dead_letter_ratio_limit": 0.0,
+    "false_success_rate": 0.0,
+    "blocked_dependency_ratio": 0.0,
+    "convergence_time_seconds": 5.507464,
+    "batch_wall_clock_seconds": 69.990936,
+    "throughput_tasks_per_minute": 21.431346,
+    "governor_interventions": 0,
+    "cost_per_success_usd": 0.0,
+    "queue_depth_p95": 0.0,
+    "sink_settlement_latency_p95_s": 5.340817299999999,
+    "retry_cascade_count": 0,
+    "dlq_volume": 0,
+    "duplicate_terminal_settlements": 0,
+    "zombie_blocked_tasks": 0,
+    "sink_truth_divergence_count": 0,
+    "unstable_governor_oscillation_count": 0
+  },
+  "verdict": {
+    "passed": true,
+    "structural_pass": true,
+    "loss_budget_pass": true,
+    "reasons": [],
+    "structural_reasons": [],
+    "loss_budget_reasons": []
+  },
+  "capability_delta": {
+    "lanes_observed": 0,
+    "lanes_updated": 0,
+    "avg_pass_rate": 0.0,
+    "avg_escalation_rate": 0.0,
+    "avg_transient_failure_rate": 0.0
+  },
+  "hold_reason_distribution": {},
+  "dead_letter_reason_distribution": {},
+  "latency_by_lane": {},
+  "queue_depth_distribution": {},
+  "governor_summary": {
+    "mode": "not_applicable"
+  },
+  "sink_summary": {
+    "mode": "aether",
+    "verified_landings": 25
+  },
+  "artifacts": {
+    "worker_artifacts": "[\"<repo_root>/reports/scale_worker_load/scale-worker-load-20260427t044157z/workers/scale-worker-load-20260427t044157z-w002/20260427T044157Z/aether_live_proof.json\", \"<repo_root>/reports/scale_worker_load/scale-worker-load-20260427t044157z/workers/scale-worker-load-20260427t044157z-w003/20260427T044157Z/aether_live_proof.json\", \"<repo_root>/reports/scale_worker_load/scale-worker-load-20260427t044157z/workers/scale-worker-load-20260427t044157z-w001/20260427T044157Z/aether_live_proof.json\", \"<repo_root>/reports/scale_worker_load/scale-worker-load-20260427t044157z/workers/scale-worker-load-20260427t044157z-w000/20260427T044157Z/aether_live_proof.json\", \"<repo_root>/reports/scale_worker_load/scale-worker-load-20260427t044157z/workers/scale-worker-load-20260427t044157z-w004/20260427T044207Z/aether_live_proof.json\", \"<repo_root>/reports/scale_worker_load/scale-worker-load-20260427t044157z/workers/scale-worker-load-20260427t044157z-w006/20260427T044207Z/aether_live_proof.json\", \"<repo_root>/reports/scale_worker_load/scale-worker-load-20260427t044157z/workers/scale-worker-load-20260427t044157z-w005/20260427T044207Z/aether_live_proof.json\", \"<repo_root>/reports/scale_worker_load/scale-worker-load-20260427t044157z/workers/scale-worker-load-20260427t044157z-w007/20260427T044207Z/aether_live_proof.json\", \"<repo_root>/reports/scale_worker_load/scale-worker-load-20260427t044157z/workers/scale-worker-load-20260427t044157z-w010/20260427T044217Z/aether_live_proof.json\", \"<repo_root>/reports/scale_worker_load/scale-worker-load-20260427t044157z/workers/scale-worker-load-20260427t044157z-w011/20260427T044217Z/aether_live_proof.json\", \"<repo_root>/reports/scale_worker_load/scale-worker-load-20260427t044157z/workers/scale-worker-load-20260427t044157z-w009/20260427T044217Z/aether_live_proof.json\", \"<repo_root>/reports/scale_worker_load/scale-worker-load-20260427t044157z/workers/scale-worker-load-20260427t044157z-w008/20260427T044217Z/aether_live_proof.json\", \"<repo_root>/reports/scale_worker_load/scale-worker-load-20260427t044157z/workers/scale-worker-load-20260427t044157z-w013/20260427T044227Z/aether_live_proof.json\", \"<repo_root>/reports/scale_worker_load/scale-worker-load-20260427t044157z/workers/scale-worker-load-20260427t044157z-w012/20260427T044227Z/aether_live_proof.json\", \"<repo_root>/reports/scale_worker_load/scale-worker-load-20260427t044157z/workers/scale-worker-load-20260427t044157z-w015/20260427T044227Z/aether_live_proof.json\", \"<repo_root>/reports/scale_worker_load/scale-worker-load-20260427t044157z/workers/scale-worker-load-20260427t044157z-w014/20260427T044227Z/aether_live_proof.json\", \"<repo_root>/reports/scale_worker_load/scale-worker-load-20260427t044157z/workers/scale-worker-load-20260427t044157z-w017/20260427T044237Z/aether_live_proof.json\", \"<repo_root>/reports/scale_worker_load/scale-worker-load-20260427t044157z/workers/scale-worker-load-20260427t044157z-w018/20260427T044237Z/aether_live_proof.json\", \"<repo_root>/reports/scale_worker_load/scale-worker-load-20260427t044157z/workers/scale-worker-load-20260427t044157z-w019/20260427T044237Z/aether_live_proof.json\", \"<repo_root>/reports/scale_worker_load/scale-worker-load-20260427t044157z/workers/scale-worker-load-20260427t044157z-w016/20260427T044237Z/aether_live_proof.json\", \"<repo_root>/reports/scale_worker_load/scale-worker-load-20260427t044157z/workers/scale-worker-load-20260427t044157z-w023/20260427T044247Z/aether_live_proof.json\", \"<repo_root>/reports/scale_worker_load/scale-worker-load-20260427t044157z/workers/scale-worker-load-20260427t044157z-w021/20260427T044247Z/aether_live_proof.json\", \"<repo_root>/reports/scale_worker_load/scale-worker-load-20260427t044157z/workers/scale-worker-load-20260427t044157z-w020/20260427T044247Z/aether_live_proof.json\", \"<repo_root>/reports/scale_worker_load/scale-worker-load-20260427t044157z/workers/scale-worker-load-20260427t044157z-w022/20260427T044247Z/aether_live_proof.json\", \"<repo_root>/reports/scale_worker_load/scale-worker-load-20260427t044157z/workers/scale-worker-load-20260427t044157z-w024/20260427T044257Z/aether_live_proof.json\"]"
+  },
+  "notes": [
+    "Worker load harness exercises real worker plumbing through isolated canned worker proofs.",
+    "This first version stresses branch/workspace/sink plumbing rather than a shared in-memory queue."
+  ]
+}

@@ -157,6 +157,8 @@ async def test_run_isolated_worker_load_detects_sink_divergence_and_false_succes
 
 
 def test_public_scale_reports_disclose_attempt_populations_and_unmeasured_metrics() -> None:
+    import re
+
     repo_root = Path(__file__).resolve().parents[1]
     brief = (repo_root / "reports" / "MX_CLOUD_AGENT_50_WORKER_DEMO_BRIEF_2026-10-22.md").read_text(encoding="utf-8")
     gate_status = (repo_root / "reports" / "MX_SCALE_GATE_STATUS_2026-04-27.md").read_text(encoding="utf-8")
@@ -168,8 +170,54 @@ def test_public_scale_reports_disclose_attempt_populations_and_unmeasured_metric
         "0 / 4",
         "control_plane_loss_budget_fail",
         "unmeasured",
+        "35.241819",
+        "85.126139",
+        "7.927865",
+        "0.4405",
+        "20261022T092200Z",
+        "20261022T092213Z",
     ):
         assert required_token in brief
     assert "unmeasured" in gate_status
     assert "control_plane_loss_budget_fail" in gate_status
+
+    # Every referenced reports/... or scripts/... path in both reports must exist and be tracked in git
+    import subprocess
+
+    tracked = set(
+        subprocess.run(
+            ["git", "ls-files"],
+            cwd=repo_root,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.splitlines()
+    )
+    referenced_paths = set(
+        re.findall(r"`((?:reports|scripts)/[A-Za-z0-9_./-]+)`", brief + "\n" + gate_status)
+    )
+    assert referenced_paths
+    for rel_path in referenced_paths:
+        target = repo_root / rel_path
+        assert target.exists(), f"Missing referenced artifact or script: {rel_path}"
+        assert rel_path in tracked, f"Referenced artifact or script is not tracked in git: {rel_path}"
+
+    # Verify the primary 50-worker October artifacts match the summary figures
+    worker_50 = json.loads(
+        (repo_root / "reports/scale_worker_load/20261022T092213Z/scale_report.json").read_text(encoding="utf-8")
+    )
+    assert worker_50["metrics"]["verified_landings"] == 50
+    assert worker_50["metrics"]["batch_wall_clock_seconds"] == pytest.approx(35.241819)
+    assert worker_50["metrics"]["throughput_tasks_per_minute"] == pytest.approx(85.126139)
+    assert worker_50["metrics"]["sink_settlement_latency_p95_s"] == pytest.approx(7.927865)
+
+    hybrid_50 = json.loads(
+        (repo_root / "reports/scale_sampled_real_hybrid/20261022T092213Z/scale_report.json").read_text(encoding="utf-8")
+    )
+    assert hybrid_50["manifest"]["sampled_real_workers"] == 50
+    assert hybrid_50["overall_verdict"]["passed"] is False
+    assert hybrid_50["control_plane"]["structural_pass"] is True
+    assert hybrid_50["control_plane"]["loss_budget_pass"] is False
+    assert hybrid_50["control_plane"]["dead_letter_ratio"] == pytest.approx(0.4405)
+
 

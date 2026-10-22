@@ -1,0 +1,55 @@
+{
+  "generated_at": "2026-10-22T09:21:03.868477+00:00",
+  "manifest": {
+    "phase": "sampled_real_hybrid",
+    "logical_lanes": 1000,
+    "seed": 23,
+    "sampled_real_workers": 50,
+    "sampled_real_share": 0.05,
+    "active_concurrency": 10,
+    "slice": "jsonpeek",
+    "timeout_seconds": 120,
+    "sink_mode": "mock_github",
+    "sampled_real_settlement_p95_limit": 15.0
+  },
+  "overall_verdict": {
+    "passed": false,
+    "reasons": [
+      "control_plane_loss_budget_fail",
+      "sampled_real_worker_batch_fail",
+      "sampled_real_dlq_detected:50"
+    ]
+  },
+  "control_plane": {
+    "run_id": "scale-control-plane-20261022t092103z",
+    "structural_pass": true,
+    "loss_budget_pass": false,
+    "verified_landings": 1061,
+    "total_terminal_tasks": 2000,
+    "dead_letter_ratio": 0.4405,
+    "dead_letter_ratio_limit": 0.14,
+    "dlq_volume": 881,
+    "hold_reason_distribution": {
+      "NO_ELIGIBLE_LANE": 1990
+    },
+    "dead_letter_reason_distribution": {
+      "RETRY_EXHAUSTED": 881
+    }
+  },
+  "sampled_real": {
+    "run_id": "scale-worker-load-20261022t092032z",
+    "passed": false,
+    "verified_landings": 0,
+    "total_terminal_tasks": 50,
+    "dlq_volume": 50,
+    "dead_letter_ratio": 1.0,
+    "sink_settlement_latency_p95_s": 7.906867,
+    "batch_wall_clock_seconds": 30.265162,
+    "throughput_tasks_per_minute": 99.123871,
+    "sink_truth_divergence_count": 0
+  },
+  "artifacts": {
+    "control_plane_run_id": "scale-control-plane-20261022t092103z",
+    "sampled_real_run_id": "scale-worker-load-20261022t092032z"
+  }
+}

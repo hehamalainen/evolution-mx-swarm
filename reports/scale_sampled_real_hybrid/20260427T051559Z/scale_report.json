@@ -1,0 +1,57 @@
+{
+  "generated_at": "2026-04-27T05:15:59.689570+00:00",
+  "manifest": {
+    "phase": "sampled_real_hybrid",
+    "logical_lanes": 2000,
+    "seed": 31,
+    "sampled_real_workers": 100,
+    "sampled_real_share": 0.05,
+    "active_concurrency": 4,
+    "slice": "jsonpeek",
+    "timeout_seconds": 1200,
+    "sink_mode": "aether",
+    "sampled_real_settlement_p95_limit": 10.0
+  },
+  "overall_verdict": {
+    "passed": false,
+    "reasons": [
+      "sampled_real_settlement_latency_exceeded:10.410133>10.000000"
+    ]
+  },
+  "control_plane": {
+    "run_id": "scale-control-plane-20260427t051054z",
+    "structural_pass": true,
+    "loss_budget_pass": true,
+    "verified_landings": 3429,
+    "total_terminal_tasks": 4000,
+    "dead_letter_ratio": 0.1045,
+    "dead_letter_ratio_limit": 0.13999999999999999,
+    "dlq_volume": 418,
+    "hold_reason_distribution": {
+      "NO_ELIGIBLE_LANE": 354,
+      "NO_CAPACITY": 2044
+    },
+    "dead_letter_reason_distribution": {
+      "ERR_PREREQUISITE_FAILED": 266,
+      "ERR_CHECK_FAIL": 20,
+      "ERR_REFUSAL": 14,
+      "NO_ELIGIBLE_LANE": 118
+    }
+  },
+  "sampled_real": {
+    "run_id": "scale-worker-load-20260427t051058z",
+    "passed": true,
+    "verified_landings": 100,
+    "total_terminal_tasks": 100,
+    "dlq_volume": 0,
+    "dead_letter_ratio": 0.0,
+    "sink_settlement_latency_p95_s": 10.410133,
+    "batch_wall_clock_seconds": 301.057902,
+    "throughput_tasks_per_minute": 19.929721,
+    "sink_truth_divergence_count": 0
+  },
+  "artifacts": {
+    "control_plane_run_id": "scale-control-plane-20260427t051054z",
+    "sampled_real_run_id": "scale-worker-load-20260427t051058z"
+  }
+}

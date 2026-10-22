@@ -1,0 +1,41 @@
+{
+  "generated_at": "2026-10-22T08:28:23.027217+00:00",
+  "corpus_path": "<repo_root>/qualification/corpora/gate2_local_open_weight.json",
+  "plan": {
+    "gate": "A",
+    "project_id": "otterboard-f08f8",
+    "topic_id": "mx-gate-a-20261022082823",
+    "subscription_id": "mx-gate-a-20261022082823",
+    "worker_count": 100,
+    "duration_minutes": 60,
+    "corpus_name": "gate2_local_open_weight",
+    "slice_keys": [
+      "jsonpeek",
+      "envpeek",
+      "tomlpeek"
+    ],
+    "queue_provider": "gcp",
+    "keda_polling_interval_seconds": 15,
+    "keda_cooldown_period_seconds": 120,
+    "keda_target_backlog_per_pod": 1,
+    "deployment_min_replicas": 10,
+    "deployment_max_replicas": 100,
+    "validation": {
+      "credentials_present": true,
+      "project_id_present": true,
+      "pubsub_library_installed": false,
+      "queue_provider_supported": true,
+      "frontier_llm_configured": true,
+      "frontier_llm_is_gemini": true,
+      "frontier_budget_configured": true,
+      "frontier_concurrency_configured": true,
+      "freeze_mode_valid": true
+    }
+  },
+  "deployment_env": {
+    "MX_QUEUE_PROVIDER": "gcp",
+    "MX_GCP_PROJECT_ID": "otterboard-f08f8",
+    "MX_GCP_TOPIC_ID": "mx-gate-a-20261022082823",
+    "MX_GCP_SUBSCRIPTION_ID": "mx-gate-a-20261022082823"
+  }
+}

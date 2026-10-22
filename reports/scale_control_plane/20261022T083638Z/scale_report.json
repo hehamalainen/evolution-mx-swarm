@@ -1,0 +1,114 @@
+{
+  "manifest": {
+    "run_id": "scale-control-plane-20261022t083638z",
+    "phase": "control_plane_hybrid",
+    "generated_at": "2026-10-22T08:36:38.579620+00:00",
+    "seed": 7,
+    "logical_lanes": 50,
+    "logical_workers": 0,
+    "active_concurrency": 0,
+    "sink_mode": "simulated",
+    "model_mix": {
+      "local_open_weight": 1.0
+    },
+    "lane_mix": {
+      "deterministic_pct": 0.75,
+      "noise_pct": 0.2,
+      "sampled_pct": 0.05
+    },
+    "scenario": {
+      "dependency_depth_max": 4,
+      "invalid_contract_pct": 0.03,
+      "transient_failure_pct": 0.08,
+      "deterministic_failure_pct": 0.06,
+      "escalation_failure_pct": 0.03,
+      "settlement_delay_pct": 0.07
+    },
+    "topology": {
+      "rig_count": 20,
+      "toolchain": "python"
+    }
+  },
+  "metrics": {
+    "verified_landings": 42,
+    "total_terminal_tasks": 100,
+    "false_success_rate": 0.0,
+    "blocked_dependency_ratio": 0.0,
+    "convergence_time_seconds": 45.0,
+    "batch_wall_clock_seconds": 0.014207,
+    "throughput_tasks_per_minute": 422327.021891,
+    "governor_interventions": 5,
+    "cost_per_success_usd": 0.04790270447819355,
+    "queue_depth_p95": 60.0,
+    "sink_settlement_latency_p95_s": 30.5,
+    "retry_cascade_count": 4,
+    "dlq_volume": 56,
+    "duplicate_terminal_settlements": 0,
+    "zombie_blocked_tasks": 0,
+    "sink_truth_divergence_count": 0,
+    "unstable_governor_oscillation_count": 0
+  },
+  "verdict": {
+    "passed": true,
+    "reasons": []
+  },
+  "capability_delta": {
+    "lanes_observed": 80,
+    "lanes_updated": 80,
+    "avg_pass_rate": 0.8912707180948525,
+    "avg_escalation_rate": 0.036587165587514174,
+    "avg_transient_failure_rate": 0.00375
+  },
+  "hold_reason_distribution": {
+    "NO_ELIGIBLE_LANE": 56
+  },
+  "latency_by_lane": {
+    "rig-00:feature:feature.00:local_open_weight:shadow": 8.516,
+    "rig-00:feature:feature.01:local_open_weight:shadow": 7.907,
+    "rig-00:qa:qa.00:local_open_weight:shadow": 7.123,
+    "rig-00:qa:qa.01:local_open_weight:shadow": 9.739,
+    "rig-01:feature:feature.00:local_open_weight:shadow": 9.489,
+    "rig-01:feature:feature.01:local_open_weight:shadow": 9.219,
+    "rig-01:qa:qa.00:local_open_weight:shadow": 7.739,
+    "rig-01:qa:qa.01:local_open_weight:shadow": 7.138,
+    "rig-02:feature:feature.00:local_open_weight:shadow": 8.376,
+    "rig-02:feature:feature.01:local_open_weight:shadow": 8.719,
+    "rig-02:qa:qa.00:local_open_weight:shadow": 7.091,
+    "rig-02:qa:qa.01:local_open_weight:shadow": 8.341,
+    "rig-03:feature:feature.00:local_open_weight:shadow": 7.772,
+    "rig-03:feature:feature.01:local_open_weight:shadow": 10.515,
+    "rig-03:qa:qa.00:local_open_weight:shadow": 8.236,
+    "rig-03:qa:qa.01:local_open_weight:shadow": 8.343,
+    "rig-04:feature:feature.00:local_open_weight:shadow": 5.251,
+    "rig-04:feature:feature.01:local_open_weight:shadow": 8.704,
+    "rig-04:qa:qa.00:local_open_weight:shadow": 9.096,
+    "rig-04:qa:qa.01:local_open_weight:shadow": 9.421,
+    "rig-05:feature:feature.00:local_open_weight:shadow": 6.742,
+    "rig-05:feature:feature.01:local_open_weight:shadow": 6.781,
+    "rig-05:qa:qa.00:local_open_weight:shadow": 7.577,
+    "rig-05:qa:qa.01:local_open_weight:shadow": 8.9,
+    "rig-06:feature:feature.00:local_open_weight:shadow": 5.44
+  },
+  "queue_depth_distribution": {
+    "min": 0,
+    "p50": 0,
+    "p95": 60,
+    "max": 60
+  },
+  "governor_summary": {
+    "recommendation_counts": {
+      "DEPENDENCY_DRAIN": 5
+    },
+    "rigs_observed": 20
+  },
+  "sink_summary": {
+    "mode": "simulated",
+    "verified_landings": 42,
+    "terminal_tasks": 100
+  },
+  "artifacts": {},
+  "notes": [
+    "Hybrid control-plane run uses real routing, dependency blocking, capability updates, and passive governor recommendations.",
+    "Sampled lanes are seeded from empirical local-proof-like latency/cost envelopes, not live model calls."
+  ]
+}

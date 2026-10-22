@@ -569,6 +569,14 @@ def run_hybrid_control_plane_simulation(
     duplicate_settlements = sum(
         count - 1 for count in terminal_settlement_counts.values() if count > 1
     )
+    dlq_volume = terminal_counter[TaskState.DEAD_LETTER.value]
+    dead_letter_ratio = round(dlq_volume / max(terminal_tasks, 1), 6)
+    dead_letter_ratio_limit = 0.14
+    dead_letter_reasons: Counter[str] = Counter(
+        str(task.terminal_reason or "UNKNOWN")
+        for task in tasks.values()
+        if task.state == TaskState.DEAD_LETTER
+    )
     batch_wall_clock_seconds = round(time.perf_counter() - wall_clock_started, 6)
     capability_values = [lane.capabilities for lane in lanes]
     metrics = ScaleMetricsSummary(
@@ -587,7 +595,9 @@ def run_hybrid_control_plane_simulation(
         queue_depth_p95=float(queue_p95),
         sink_settlement_latency_p95_s=float(settle_p95),
         retry_cascade_count=retry_cascade_count,
-        dlq_volume=terminal_counter[TaskState.DEAD_LETTER.value],
+        dlq_volume=dlq_volume,
+        dead_letter_ratio=dead_letter_ratio,
+        dead_letter_ratio_limit=dead_letter_ratio_limit,
         duplicate_terminal_settlements=duplicate_settlements,
         zombie_blocked_tasks=zombies,
         sink_truth_divergence_count=None,
@@ -609,11 +619,18 @@ def run_hybrid_control_plane_simulation(
         verdict_reasons.append("governor_oscillation_detected")
     if terminal_tasks < len(tasks):
         verdict_reasons.append("run_failed_to_converge")
+    structural_pass = not verdict_reasons
+    loss_budget_pass = dead_letter_ratio <= dead_letter_ratio_limit
 
     report = ScaleRunReport(
         manifest=manifest,
         metrics=metrics,
-        verdict=ScaleFailureVerdict(passed=not verdict_reasons, reasons=verdict_reasons),
+        verdict=ScaleFailureVerdict(
+            passed=structural_pass,
+            reasons=verdict_reasons,
+            structural_pass=structural_pass,
+            loss_budget_pass=loss_budget_pass,
+        ),
         capability_delta=ScaleCapabilityDelta(
             lanes_observed=len(lanes),
             lanes_updated=len([cap for cap in capability_values if cap.last_updated_ts > 0]),
@@ -622,6 +639,7 @@ def run_hybrid_control_plane_simulation(
             avg_transient_failure_rate=statistics.fmean(cap.transient_failure_rate for cap in capability_values),
         ),
         hold_reason_distribution=dict(hold_reasons),
+        dead_letter_reason_distribution=dict(dead_letter_reasons),
         latency_by_lane={
             lane.lane_key: round(lane.capabilities.settlement_latency_ema_s, 3)
             for lane in lanes[: min(25, len(lanes))]
@@ -766,6 +784,8 @@ async def run_isolated_worker_load(
         ),
         retry_cascade_count=None,
         dlq_volume=len(failures),
+        dead_letter_ratio=round(len(failures) / max(logical_workers, 1), 6),
+        dead_letter_ratio_limit=0.0,
         duplicate_terminal_settlements=None,
         zombie_blocked_tasks=None,
         sink_truth_divergence_count=sink_divergence_count,

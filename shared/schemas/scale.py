@@ -68,6 +68,8 @@ class ScaleRunManifest:
 class ScaleFailureVerdict:
     passed: bool
     reasons: list[str] = field(default_factory=list)
+    structural_pass: bool = True
+    loss_budget_pass: bool = True
 
 
 @dataclass(slots=True)
@@ -85,6 +87,8 @@ class ScaleMetricsSummary:
     sink_settlement_latency_p95_s: float = 0.0
     retry_cascade_count: int | None = None
     dlq_volume: int = 0
+    dead_letter_ratio: float = 0.0
+    dead_letter_ratio_limit: float = 0.14
     duplicate_terminal_settlements: int | None = None
     zombie_blocked_tasks: int | None = None
     sink_truth_divergence_count: int | None = None
@@ -108,6 +112,7 @@ class ScaleRunReport:
     verdict: ScaleFailureVerdict
     capability_delta: ScaleCapabilityDelta
     hold_reason_distribution: dict[str, int] = field(default_factory=dict)
+    dead_letter_reason_distribution: dict[str, int] = field(default_factory=dict)
     latency_by_lane: dict[str, float] = field(default_factory=dict)
     queue_depth_distribution: dict[str, int] = field(default_factory=dict)
     governor_summary: dict[str, Any] = field(default_factory=dict)
@@ -122,6 +127,7 @@ class ScaleRunReport:
             "verdict": asdict(self.verdict),
             "capability_delta": asdict(self.capability_delta),
             "hold_reason_distribution": dict(self.hold_reason_distribution),
+            "dead_letter_reason_distribution": dict(self.dead_letter_reason_distribution),
             "latency_by_lane": dict(self.latency_by_lane),
             "queue_depth_distribution": dict(self.queue_depth_distribution),
             "governor_summary": dict(self.governor_summary),
