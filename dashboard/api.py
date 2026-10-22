@@ -10,6 +10,7 @@ FastAPI backend providing:
 """
 
 import asyncio
+import hmac
 import json
 import os
 import random
@@ -20,6 +21,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from urllib.parse import urlparse
 
 # Load .env file for GITHUB_TOKEN and other secrets
 try:
@@ -30,8 +32,8 @@ except ImportError:
 from collections import deque
 from enum import Enum
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -1016,6 +1018,65 @@ app = FastAPI(
     version="2.0.0",
     lifespan=lifespan,
 )
+
+LOOPBACK_BIND_HOSTS: frozenset[str] = frozenset({"127.0.0.1", "::1", "localhost"})
+LOOPBACK_CLIENT_HOSTS: frozenset[str] = frozenset({"127.0.0.1", "::1", "localhost", "testclient"})
+MUTATING_HTTP_METHODS: frozenset[str] = frozenset({"POST", "PUT", "DELETE", "PATCH"})
+
+
+def assert_dashboard_bind_safe(host: str) -> None:
+    """Require MX_DASHBOARD_TOKEN before binding the dashboard to non-loopback interfaces."""
+    normalized_host = (host or "").strip().lower()
+    if normalized_host in LOOPBACK_BIND_HOSTS:
+        return
+    if not os.environ.get("MX_DASHBOARD_TOKEN", "").strip():
+        raise RuntimeError(
+            f"Refusing to bind dashboard to non-loopback host {host!r} without "
+            "MX_DASHBOARD_TOKEN configured."
+        )
+
+
+def _extract_dashboard_token(request: Request) -> str:
+    auth_header = request.headers.get("authorization", "").strip()
+    if auth_header.lower().startswith("bearer "):
+        return auth_header[7:].strip()
+    return request.headers.get("x-mx-dashboard-token", "").strip()
+
+
+@app.middleware("http")
+async def enforce_control_route_security(request: Request, call_next):
+    if request.method.upper() not in MUTATING_HTTP_METHODS:
+        return await call_next(request)
+
+    expected_token = os.environ.get("MX_DASHBOARD_TOKEN", "").strip()
+    provided_token = _extract_dashboard_token(request)
+    if expected_token:
+        if not provided_token or not hmac.compare_digest(provided_token, expected_token):
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "Valid MX_DASHBOARD_TOKEN required for control operations"},
+            )
+        return await call_next(request)
+
+    client_host = (request.client.host if request.client else "").strip().lower()
+    forwarded = request.headers.get("x-forwarded-for") or request.headers.get("forwarded")
+    if client_host not in LOOPBACK_CLIENT_HOSTS or forwarded:
+        return JSONResponse(
+            status_code=403,
+            content={"detail": "Remote control requests require MX_DASHBOARD_TOKEN authentication"},
+        )
+
+    origin = request.headers.get("origin", "").strip()
+    if origin:
+        parsed_origin = urlparse(origin)
+        if (parsed_origin.hostname or "").lower() not in LOOPBACK_BIND_HOSTS:
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "Cross-origin control request rejected"},
+            )
+
+    return await call_next(request)
+
 
 v2_dist_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "dashboard_v2", "dist"))
 if os.path.isdir(v2_dist_path):
@@ -2192,9 +2253,13 @@ async def simulate_activity():
 # Run
 # ============================================================================
 
-def main():
+def main() -> None:
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8080)
+
+    host = os.environ.get("MX_DASHBOARD_HOST", "127.0.0.1").strip() or "127.0.0.1"
+    port = int(os.environ.get("MX_DASHBOARD_PORT", "8080"))
+    assert_dashboard_bind_safe(host)
+    uvicorn.run(app, host=host, port=port)
 
 
 if __name__ == "__main__":

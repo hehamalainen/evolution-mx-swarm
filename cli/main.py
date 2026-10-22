@@ -1218,8 +1218,9 @@ async def cmd_dashboard(args):
     """Start the monitoring dashboard."""
     import uvicorn
 
-    from dashboard.api import app
+    from dashboard.api import app, assert_dashboard_bind_safe
 
+    assert_dashboard_bind_safe(args.host)
     print_banner()
     print(f"Starting MX Swarm Dashboard on http://{args.host}:{args.port}")
     print("Press Ctrl+C to stop.")
