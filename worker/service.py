@@ -11,6 +11,9 @@ Workers are the execution engines of MX Swarm:
 
 import ast
 import asyncio
+from collections.abc import Callable
+import contextlib
+import fcntl
 import json
 import os
 import re
@@ -1480,7 +1483,19 @@ Example:
             },
         )
 
-    def _load_reconciliation_backlog(self) -> list[dict]:
+    @contextlib.contextmanager
+    def _reconciliation_lock(self):
+        lock_dir = os.path.dirname(self._reconciliation_path) or "."
+        os.makedirs(lock_dir, exist_ok=True)
+        lock_path = f"{self._reconciliation_path}.lock"
+        with open(lock_path, "a+") as lock_handle:
+            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+
+    def _load_reconciliation_backlog_unlocked(self) -> list[dict]:
         if not os.path.exists(self._reconciliation_path):
             return []
         try:
@@ -1492,10 +1507,50 @@ Example:
             return []
         return []
 
+    def _load_reconciliation_backlog(self) -> list[dict]:
+        with self._reconciliation_lock():
+            return self._load_reconciliation_backlog_unlocked()
+
+    def _save_reconciliation_backlog_unlocked(self, backlog: list[dict]) -> None:
+        target_dir = os.path.dirname(self._reconciliation_path) or "."
+        os.makedirs(target_dir, exist_ok=True)
+        fd, tmp_path = tempfile.mkstemp(
+            prefix=".reconciliation_backlog_",
+            suffix=".tmp",
+            dir=target_dir,
+        )
+        try:
+            with os.fdopen(fd, "w") as handle:
+                json.dump(backlog, handle, indent=2)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(tmp_path, self._reconciliation_path)
+        finally:
+            if os.path.exists(tmp_path):
+                with contextlib.suppress(OSError):
+                    os.unlink(tmp_path)
+
     def _save_reconciliation_backlog(self, backlog: list[dict]) -> None:
-        os.makedirs(os.path.dirname(self._reconciliation_path), exist_ok=True)
-        with open(self._reconciliation_path, "w") as handle:
-            json.dump(backlog, handle, indent=2)
+        with self._reconciliation_lock():
+            self._save_reconciliation_backlog_unlocked(backlog)
+
+    def _update_reconciliation_backlog(
+        self,
+        mutator: Callable[[list[dict]], bool],
+    ) -> list[dict]:
+        with self._reconciliation_lock():
+            backlog = self._load_reconciliation_backlog_unlocked()
+            if mutator(backlog):
+                self._save_reconciliation_backlog_unlocked(backlog)
+            return backlog
+
+    @staticmethod
+    def _reconciliation_item_key(item: dict) -> tuple[str, str, str]:
+        return (
+            str(item.get("task_id") or ""),
+            str(item.get("attempt_id") or ""),
+            str(item.get("submission_id") or ""),
+        )
 
     async def _enqueue_reconciliation_item(
         self,
@@ -1504,26 +1559,28 @@ Example:
         detail: str,
         affected_paths: list[str] | None = None,
     ) -> None:
-        backlog = self._load_reconciliation_backlog()
         now = datetime.now(UTC).isoformat()
-        backlog.append(
-            {
-                "task_id": task.id,
-                "trace_id": task.trace_id,
-                "attempt_id": task.attempt_id,
-                "submission_id": submission_id,
-                "state": TaskState.SUBMITTED_PENDING_LEDGER.value,
-                "status": "pending",
-                "attempts": 0,
-                "reason": NackReason.ERR_LEDGER_UNAVAILABLE.value,
-                "detail": detail,
-                "affected_paths": list(affected_paths or []),
-                "created_at": now,
-                "updated_at": now,
-                "actor_id": self.worker_id,
-            }
-        )
-        self._save_reconciliation_backlog(backlog)
+        new_entry = {
+            "task_id": task.id,
+            "trace_id": task.trace_id,
+            "attempt_id": task.attempt_id,
+            "submission_id": submission_id,
+            "state": TaskState.SUBMITTED_PENDING_LEDGER.value,
+            "status": "pending",
+            "attempts": 0,
+            "reason": NackReason.ERR_LEDGER_UNAVAILABLE.value,
+            "detail": detail,
+            "affected_paths": list(affected_paths or []),
+            "created_at": now,
+            "updated_at": now,
+            "actor_id": self.worker_id,
+        }
+
+        def _append(backlog: list[dict]) -> bool:
+            backlog.append(new_entry)
+            return True
+
+        self._update_reconciliation_backlog(_append)
 
     async def _reconcile_backlog_once(self) -> None:
         backlog = self._load_reconciliation_backlog()
@@ -1531,6 +1588,7 @@ Example:
             return
 
         changed = False
+        updated_items: dict[tuple[str, str, str], dict] = {}
         max_attempts = max(1, self.config.vcs.settlement_retry_max)
         accepted = {"accepted", "committed", "merged", "settled_ack", "complete", "completed"}
         rejected = {"rejected", "failed", "settled_nack", "denied"}
@@ -1538,11 +1596,13 @@ Example:
         for item in backlog:
             if item.get("status") != "pending":
                 continue
+            item_key = self._reconciliation_item_key(item)
             submission_id = str(item.get("submission_id") or "").strip()
             if not submission_id:
                 item["status"] = "dead_letter"
                 item["reason"] = NackReason.ERR_RECON_DIVERGENCE.value
                 item["updated_at"] = datetime.now(UTC).isoformat()
+                updated_items[item_key] = dict(item)
                 changed = True
                 continue
 
@@ -1552,6 +1612,7 @@ Example:
             item["attempts"] = attempts
             item["last_status"] = normalized or "unknown"
             item["updated_at"] = datetime.now(UTC).isoformat()
+            changed = True
 
             if normalized in accepted:
                 if self.config.vcs.post_landing_verification_required:
@@ -1579,24 +1640,34 @@ Example:
                     item["status"] = "settled_ack"
                     item["state"] = TaskState.SETTLED_ACK.value
                     item["reason"] = None
-                changed = True
+                updated_items[item_key] = dict(item)
                 continue
 
             if normalized in rejected:
                 item["status"] = "settled_nack"
                 item["state"] = TaskState.SETTLED_NACK.value
                 item["reason"] = NackReason.ERR_RECON_DIVERGENCE.value
-                changed = True
+                updated_items[item_key] = dict(item)
                 continue
 
             if attempts >= max_attempts:
                 item["status"] = "dead_letter"
                 item["state"] = TaskState.DEAD_LETTER.value
                 item["reason"] = NackReason.ERR_LEDGER_UNAVAILABLE.value
-                changed = True
+
+            updated_items[item_key] = dict(item)
 
         if changed:
-            self._save_reconciliation_backlog(backlog)
+            def _merge_updates(current_backlog: list[dict]) -> bool:
+                mutated = False
+                for idx, existing in enumerate(current_backlog):
+                    key = self._reconciliation_item_key(existing)
+                    if key in updated_items:
+                        current_backlog[idx] = updated_items[key]
+                        mutated = True
+                return mutated
+
+            self._update_reconciliation_backlog(_merge_updates)
 
     async def _reconciliation_loop(self) -> None:
         interval = max(5, self.config.vcs.reconciliation_interval_seconds)
