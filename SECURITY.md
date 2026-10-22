@@ -8,7 +8,7 @@ MX Swarm is an **experimental research prototype** and is **not certified for un
 
 Please **do not** report security vulnerabilities or exposed credentials in public GitHub issues or pull requests.
 
-- **Preferred Private Channel:** Use [GitHub Private Vulnerability Reporting (Security Advisories)](https://github.com/hehamalainen/Evolution-Coding/security/advisories/new) on the repository.
+- **Preferred Private Channel:** Use [GitHub Private Vulnerability Reporting (Security Advisories)](https://github.com/hehamalainen/evolution-mx-swarm/security/advisories/new) on the repository.
 - Include:
   1. Affected commit SHA and file/line references
   2. Minimal reproduction steps or proof-of-concept
@@ -24,9 +24,9 @@ MX Swarm workers execute LLM-generated code and acceptance commands (`pytest`, `
 2. **Sanitized Acceptance Command Environment:**
    - Acceptance commands (`_run_command`) run with a sanitized environment (`_build_sanitized_command_env`) that strips host API keys and tokens (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `GOOGLE_API_KEY`, `GITHUB_TOKEN`, `AETHER_TOKEN`, `MX_DASHBOARD_TOKEN`, etc.) and isolates `HOME` and `TMPDIR` inside the workspace.
 3. **Process-Group Termination on Timeout:**
-   - Acceptance commands launch in a dedicated session/process group (`start_new_session=True`). On timeout or cancellation, the worker sends `SIGTERM` followed by `SIGKILL` to the entire process group (`os.killpg`) and reaps the child before returning.
-4. **Loopback-Default Dashboard & Control-Route Protection:**
-   - The FastAPI dashboard binds to `127.0.0.1` by default (`MX_DASHBOARD_HOST=127.0.0.1`). Binding to a non-loopback interface fails closed unless `MX_DASHBOARD_TOKEN` is set. Mutating requests require a valid token (`Authorization: Bearer <token>` or `X-MX-Dashboard-Token`) when configured and reject unauthenticated non-loopback or proxied requests.
+   - Acceptance commands launch in a dedicated session/process group (`start_new_session=True`). On timeout or cancellation, the worker sends `SIGTERM` followed by `SIGKILL` to the entire process group (`os.killpg`) and reaps surviving descendants even if the direct parent shell exited early or a child ignores `SIGTERM`.
+4. **Loopback-Default Dashboard, API & WebSocket Protection:**
+   - The FastAPI dashboard binds to `127.0.0.1` by default (`MX_DASHBOARD_HOST=127.0.0.1`). Binding to a non-loopback interface fails closed unless `MX_DASHBOARD_TOKEN` is set. All `/api/*` endpoints (both reads and mutations) and `/ws` WebSocket connections reject cross-origin requests from non-loopback `Origin` headers, reject unauthenticated non-loopback or proxied requests, and require a valid `MX_DASHBOARD_TOKEN` when configured.
 
 ### Not Enforced by Python Alone (Requires OS/Container Sandboxing)
 - **Arbitrary Code Execution Inside Acceptance Checks:** When a worker runs `pytest` on LLM-generated Python files, the generated code executes with the OS privileges of the worker process. While environment variables are sanitized and Worker file APIs enforce workspace containment, arbitrary Python code inside a test process can still make syscalls permitted by the OS user.

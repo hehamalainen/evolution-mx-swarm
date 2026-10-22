@@ -62,9 +62,9 @@ all = [
 mx = "cli.main:main"
 
 [project.urls]
-Homepage = "https://github.com/hehamalainen/Evolution-Coding"
-Documentation = "https://github.com/hehamalainen/Evolution-Coding/mx-swarm"
-Repository = "https://github.com/hehamalainen/Evolution-Coding"
+Homepage = "https://github.com/hehamalainen/evolution-mx-swarm"
+Documentation = "https://github.com/hehamalainen/evolution-mx-swarm/blob/main/README.md"
+Repository = "https://github.com/hehamalainen/evolution-mx-swarm"
 
 [tool.setuptools.packages.find]
 include = ["shared*", "planner*", "worker*", "judge*", "cli*"]

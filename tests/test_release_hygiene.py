@@ -102,4 +102,20 @@ def test_contributor_and_security_guidance_present_and_readme_reproducible() -> 
     security_text = security.read_text(encoding="utf-8")
     assert "Security Advisories" in security_text
     assert "Trusted-Code Execution Boundary" in security_text
+    assert "evolution-mx-swarm/security/advisories/new" in security_text
+    assert "Evolution-Coding" not in security_text
+    assert "Evolution-Coding" not in (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+
+    import re
+
+    referenced_paths = set(
+        re.findall(
+            r"`((?:docs|scripts|cli|planner|worker|judge|shared|dashboard|dashboard_v2|proof_fixtures)/[A-Za-z0-9_./-]*)`",
+            contributing_text + "\n" + security_text,
+        )
+    )
+    assert referenced_paths
+    for rel_path in referenced_paths:
+        assert (REPO_ROOT / rel_path).exists(), f"Broken path reference in docs: {rel_path}"
+
 

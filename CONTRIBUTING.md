@@ -69,11 +69,11 @@ The modules under `tools/` (`jsonpeek.py`, `envpeek.py`, `tomlpeek.py`, `namecor
 | Area | Entry Point | Documentation |
 | --- | --- | --- |
 | CLI & Preflight | `cli/main.py` | `README.md`, `AGENTS.md` |
-| Planner (PRD -> `SPEC.json` -> `TaskContract`) | `planner/service.py` | `docs/architecture/control_plane_stage_gates.md` |
-| Worker (Ralph Wiggum Loop, Containment, Reconciliation) | `worker/service.py` | `docs/architecture/aether_reconciliation_state_machine.md` |
-| Judge & Quality Assessment | `judge/service.py` | `docs/architecture/control_plane_stage_gates.md` |
-| Control Plane, Routing & Governor | `shared/utils/control_plane.py`, `shared/utils/routing.py` | `docs/architecture/mx_scaling_execution_plan_1000_agents.md` |
-| VCS Adapters (`github`, `aether`) | `shared/adapters/` | `docs/architecture/vcs_adapter.md` |
+| Planner (PRD -> `SPEC.json` -> `TaskContract`) | `planner/service.py` | `docs/reliability/stage_gate_criteria.md` |
+| Worker (Ralph Wiggum Loop, Containment, Reconciliation) | `worker/service.py` | `docs/reliability/delivery_chain_contract.md` |
+| Judge & Quality Assessment | `judge/service.py` | `docs/reliability/stage_gate_criteria.md` |
+| Control Plane, Routing & Governor | `shared/utils/control_plane.py`, `shared/utils/routing.py` | `docs/architecture/scaling_to_1000.md` |
+| VCS Adapters (`github`, `aether`) | `shared/adapters/` | `docs/architecture/aether_sink_contract.md` |
 | Dashboard (`/` and `/v2/`) | `dashboard/api.py`, `dashboard_v2/` | `AGENTS.md` |
 
 ### Execution Mode Distinctions
