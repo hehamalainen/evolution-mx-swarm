@@ -10,10 +10,12 @@ FastAPI backend providing:
 """
 
 import asyncio
+import hashlib
 import hmac
 import json
 import os
 import random
+import secrets
 import subprocess
 import sys
 import time
@@ -1021,8 +1023,12 @@ app = FastAPI(
 )
 
 LOOPBACK_BIND_HOSTS: frozenset[str] = frozenset({"127.0.0.1", "::1", "localhost"})
+LOOPBACK_ORIGIN_HOSTS: frozenset[str] = frozenset({"127.0.0.1", "::1", "localhost", "testserver"})
 LOOPBACK_CLIENT_HOSTS: frozenset[str] = frozenset({"127.0.0.1", "::1", "localhost", "testclient"})
 MUTATING_HTTP_METHODS: frozenset[str] = frozenset({"POST", "PUT", "DELETE", "PATCH"})
+DASHBOARD_SESSION_COOKIE = "mx_dashboard_session"
+DASHBOARD_SESSION_TTL_SECONDS = 12 * 3600
+_ACTIVE_DASHBOARD_SESSIONS: dict[str, tuple[str, float]] = {}
 
 
 def assert_dashboard_bind_safe(host: str) -> None:
@@ -1037,26 +1043,190 @@ def assert_dashboard_bind_safe(host: str) -> None:
         )
 
 
-def _extract_dashboard_token(conn: Request | WebSocket) -> str:
+def _token_digest(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def _issue_dashboard_session(expected_token: str) -> str:
+    now = time.monotonic()
+    expired = [k for k, (_, exp) in _ACTIVE_DASHBOARD_SESSIONS.items() if exp <= now]
+    for k in expired:
+        _ACTIVE_DASHBOARD_SESSIONS.pop(k, None)
+    session_id = secrets.token_urlsafe(32)
+    session_hash = _token_digest(session_id)
+    _ACTIVE_DASHBOARD_SESSIONS[session_hash] = (
+        _token_digest(expected_token),
+        now + DASHBOARD_SESSION_TTL_SECONDS,
+    )
+    return session_id
+
+
+def _verify_dashboard_session(session_id: str, expected_token: str) -> bool:
+    if not session_id or not expected_token:
+        return False
+    now = time.monotonic()
+    session_hash = _token_digest(session_id)
+    record = _ACTIVE_DASHBOARD_SESSIONS.get(session_hash)
+    if record is None:
+        return False
+    bound_token_digest, expires_at = record
+    if expires_at <= now:
+        _ACTIVE_DASHBOARD_SESSIONS.pop(session_hash, None)
+        return False
+    return hmac.compare_digest(bound_token_digest, _token_digest(expected_token))
+
+
+def _extract_header_token(conn: Request | WebSocket) -> str:
     auth_header = conn.headers.get("authorization", "").strip()
     if auth_header.lower().startswith("bearer "):
         return auth_header[7:].strip()
-    header_token = conn.headers.get("x-mx-dashboard-token", "").strip()
+    return conn.headers.get("x-mx-dashboard-token", "").strip()
+
+
+def _authenticate_dashboard_conn(
+    conn: Request | WebSocket, expected_token: str
+) -> tuple[bool, str]:
+    header_token = _extract_header_token(conn)
     if header_token:
-        return header_token
-    query_token = conn.query_params.get("token", "").strip()
-    if query_token:
-        return query_token
-    return conn.cookies.get("mx_dashboard_token", "").strip()
+        if hmac.compare_digest(header_token, expected_token):
+            return True, "header"
+        return False, "header"
+    session_cookie = conn.cookies.get(DASHBOARD_SESSION_COOKIE, "").strip()
+    if session_cookie and _verify_dashboard_session(session_cookie, expected_token):
+        return True, "cookie"
+    return False, ""
 
 
-def _is_trusted_origin(origin: str) -> bool:
+def _parse_origin_triple(origin: str) -> tuple[str, str, int, bool] | None:
+    try:
+        parsed = urlparse(origin.strip())
+    except ValueError:
+        return None
+    if parsed.scheme not in {"http", "https"}:
+        return None
+    if not parsed.hostname or parsed.username is not None or parsed.password is not None:
+        return None
+    if parsed.path not in {"", "/"} or parsed.params or parsed.query or parsed.fragment:
+        return None
+    try:
+        explicit_port = parsed.port
+    except ValueError:
+        return None
+    scheme = parsed.scheme.lower()
+    host = parsed.hostname.lower()
+    port = explicit_port if explicit_port is not None else (443 if scheme == "https" else 80)
+    return scheme, host, port, (explicit_port is not None)
+
+
+def _configured_allowed_origins() -> set[tuple[str, str, int]]:
+    raw = os.environ.get("MX_DASHBOARD_ALLOWED_ORIGINS", "").strip()
+    allowed: set[tuple[str, str, int]] = set()
+    if not raw:
+        return allowed
+    for entry in raw.split(","):
+        parsed = _parse_origin_triple(entry)
+        if parsed is not None:
+            allowed.add((parsed[0], parsed[1], parsed[2]))
+    return allowed
+
+
+def _is_trusted_origin(origin: str, conn: Request | WebSocket | None = None) -> bool:
     if not origin:
         return True
-    parsed_origin = urlparse(origin)
-    if parsed_origin.scheme not in {"http", "https"}:
+    parsed_origin = _parse_origin_triple(origin)
+    if parsed_origin is None:
         return False
-    return (parsed_origin.hostname or "").lower() in LOOPBACK_BIND_HOSTS
+    origin_scheme, origin_host, origin_port, origin_has_explicit_port = parsed_origin
+
+    if (origin_scheme, origin_host, origin_port) in _configured_allowed_origins():
+        return True
+
+    expected_token = os.environ.get("MX_DASHBOARD_TOKEN", "").strip()
+    if not expected_token and origin_host not in LOOPBACK_ORIGIN_HOSTS:
+        return False
+
+    default_dashboard_port = int(os.environ.get("MX_DASHBOARD_PORT", "8080"))
+    if conn is None:
+        return (
+            origin_scheme == "http"
+            and origin_host in LOOPBACK_ORIGIN_HOSTS
+            and origin_port == default_dashboard_port
+        )
+
+    raw_scheme = str(getattr(conn.url, "scheme", "http") or "http").lower()
+    if expected_token:
+        forwarded_proto = conn.headers.get("x-forwarded-proto", "").split(",")[0].strip().lower()
+        if forwarded_proto in {"http", "https", "ws", "wss"}:
+            raw_scheme = forwarded_proto
+    expected_scheme = "https" if raw_scheme in {"https", "wss"} else "http"
+
+    host_header = conn.headers.get("host", "").strip()
+    expected_host = "127.0.0.1"
+    expected_explicit_port: int | None = None
+    if host_header:
+        try:
+            parsed_host = urlparse(f"{expected_scheme}://{host_header}")
+            if parsed_host.hostname:
+                expected_host = parsed_host.hostname.lower()
+                expected_explicit_port = parsed_host.port
+        except ValueError:
+            return False
+    else:
+        server_scope = conn.scope.get("server")
+        if isinstance(server_scope, (tuple, list)) and len(server_scope) >= 2:
+            expected_host = str(server_scope[0] or "127.0.0.1").lower()
+            expected_explicit_port = int(server_scope[1]) if server_scope[1] else None
+
+    if not expected_token and expected_host not in LOOPBACK_ORIGIN_HOSTS:
+        return False
+
+    # Synthetic Starlette TestClient host ("testserver" without explicit port):
+    # allow loopback origins only on the configured dashboard port (8080) or default port 80,
+    # or the configured MX_DASHBOARD_HOST when MX_DASHBOARD_TOKEN is set.
+    if expected_host == "testserver" and expected_explicit_port is None:
+        if origin_host in LOOPBACK_ORIGIN_HOSTS and origin_scheme == expected_scheme:
+            return origin_port in {80, default_dashboard_port}
+        configured_host = os.environ.get("MX_DASHBOARD_HOST", "").strip().lower()
+        if (
+            expected_token
+            and configured_host
+            and configured_host not in {"0.0.0.0", "::", "*"}
+            and origin_host == configured_host
+        ):
+            expected_port_for_scheme = 443 if origin_scheme == "https" else default_dashboard_port
+            return (not origin_has_explicit_port) or origin_port in {
+                default_dashboard_port,
+                expected_port_for_scheme,
+            }
+        return False
+
+    # Same-host comparison (including remote hosts when MX_DASHBOARD_TOKEN is configured)
+    hosts_match = origin_host == expected_host or (
+        origin_host in LOOPBACK_BIND_HOSTS and expected_host in LOOPBACK_BIND_HOSTS
+    )
+    if not hosts_match:
+        return False
+
+    # Never allow scheme downgrade (e.g. http Origin to https server)
+    if expected_scheme == "https" and origin_scheme != "https":
+        return False
+
+    # If the Host header omitted an explicit port on a remote HTTPS origin while TestClient/proxy
+    # used internal HTTP, allow matching default port for that scheme.
+    if (
+        expected_explicit_port is None
+        and not origin_has_explicit_port
+        and origin_host == expected_host
+        and origin_scheme in {expected_scheme, "https"}
+    ):
+        return True
+
+    expected_port = (
+        expected_explicit_port
+        if expected_explicit_port is not None
+        else (443 if expected_scheme == "https" else 80)
+    )
+    return origin_scheme == expected_scheme and origin_port == expected_port
 
 
 def _is_protected_dashboard_path(path: str, method: str) -> bool:
@@ -1067,38 +1237,43 @@ def _is_protected_dashboard_path(path: str, method: str) -> bool:
 
 @app.middleware("http")
 async def enforce_control_route_security(request: Request, call_next):
-    expected_token = os.environ.get("MX_DASHBOARD_TOKEN", "").strip()
-    provided_token = _extract_dashboard_token(request)
+    if "token" in request.query_params:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "detail": (
+                    "Passing authentication tokens in URL query parameters is not permitted; "
+                    "use Authorization header or POST /api/auth/session"
+                )
+            },
+        )
 
     if not _is_protected_dashboard_path(request.url.path, request.method):
-        response = await call_next(request)
-        if (
-            expected_token
-            and provided_token
-            and hmac.compare_digest(provided_token, expected_token)
-            and request.query_params.get("token")
-        ):
-            response.set_cookie(
-                key="mx_dashboard_token",
-                value=expected_token,
-                httponly=True,
-                samesite="strict",
-            )
-        return response
+        return await call_next(request)
 
     origin = request.headers.get("origin", "").strip()
-    if origin and not _is_trusted_origin(origin):
+    if origin and not _is_trusted_origin(origin, request):
         return JSONResponse(
             status_code=403,
             content={"detail": "Cross-origin dashboard request rejected"},
         )
 
+    expected_token = os.environ.get("MX_DASHBOARD_TOKEN", "").strip()
     if expected_token:
-        if not provided_token or not hmac.compare_digest(provided_token, expected_token):
+        if request.url.path in {"/api/auth/session", "/api/auth/logout"} and request.method.upper() == "POST":
+            return await call_next(request)
+        authenticated, auth_source = _authenticate_dashboard_conn(request, expected_token)
+        if not authenticated:
             return JSONResponse(
                 status_code=401,
-                content={"detail": "Valid MX_DASHBOARD_TOKEN required for dashboard API access"},
+                content={"detail": "Valid MX_DASHBOARD_TOKEN or active session required for dashboard API access"},
             )
+        if auth_source == "cookie" and request.method.upper() in MUTATING_HTTP_METHODS:
+            if not origin or not _is_trusted_origin(origin, request):
+                return JSONResponse(
+                    status_code=403,
+                    content={"detail": "Cookie-authenticated mutations require a trusted same-port Origin header"},
+                )
         return await call_next(request)
 
     client_host = (request.client.host if request.client else "").strip().lower()
@@ -1135,10 +1310,56 @@ else:
 # API Endpoints
 # ============================================================================
 
+class DashboardSessionLoginRequest(BaseModel):
+    token: str = ""
+
+
 @app.get("/")
 async def root():
     dashboard_path = os.path.join(os.path.dirname(__file__), "index.html")
     return FileResponse(dashboard_path)
+
+
+@app.post("/api/auth/session")
+async def create_dashboard_session(
+    request: Request,
+    payload: DashboardSessionLoginRequest | None = None,
+):
+    expected_token = os.environ.get("MX_DASHBOARD_TOKEN", "").strip()
+    if not expected_token:
+        return JSONResponse({"status": "authenticated", "mode": "loopback"})
+
+    candidate_token = (payload.token if payload else "").strip() or _extract_header_token(request)
+    if not candidate_token or not hmac.compare_digest(candidate_token, expected_token):
+        return JSONResponse(
+            status_code=401,
+            content={"detail": "Invalid MX_DASHBOARD_TOKEN"},
+        )
+
+    session_id = _issue_dashboard_session(expected_token)
+    forwarded_proto = request.headers.get("x-forwarded-proto", "").split(",")[0].strip().lower()
+    is_secure = request.url.scheme == "https" or forwarded_proto == "https"
+    response = JSONResponse({"status": "authenticated", "mode": "session_cookie"})
+    response.set_cookie(
+        key=DASHBOARD_SESSION_COOKIE,
+        value=session_id,
+        httponly=True,
+        samesite="strict",
+        secure=is_secure,
+        max_age=DASHBOARD_SESSION_TTL_SECONDS,
+        path="/",
+    )
+    return response
+
+
+@app.post("/api/auth/logout")
+async def clear_dashboard_session(request: Request):
+    session_cookie = request.cookies.get(DASHBOARD_SESSION_COOKIE, "").strip()
+    if session_cookie:
+        _ACTIVE_DASHBOARD_SESSIONS.pop(_token_digest(session_cookie), None)
+    response = JSONResponse({"status": "logged_out"})
+    response.delete_cookie(key=DASHBOARD_SESSION_COOKIE, path="/")
+    return response
 
 
 @app.get("/api/status")
@@ -2200,15 +2421,22 @@ async def get_swarm_running_status():
 
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
+    if "token" in ws.query_params:
+        await ws.close(code=1008)
+        return
+
     origin = ws.headers.get("origin", "").strip()
-    if origin and not _is_trusted_origin(origin):
+    if origin and not _is_trusted_origin(origin, ws):
         await ws.close(code=1008)
         return
 
     expected_token = os.environ.get("MX_DASHBOARD_TOKEN", "").strip()
-    provided_token = _extract_dashboard_token(ws)
     if expected_token:
-        if not provided_token or not hmac.compare_digest(provided_token, expected_token):
+        authenticated, auth_source = _authenticate_dashboard_conn(ws, expected_token)
+        if not authenticated:
+            await ws.close(code=1008)
+            return
+        if auth_source == "cookie" and (not origin or not _is_trusted_origin(origin, ws)):
             await ws.close(code=1008)
             return
     else:

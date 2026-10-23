@@ -1367,47 +1367,31 @@
         let ws = null;
         let reconnectAttempts = 0;
 
-        function getDashboardToken() {
-            try {
-                const params = new URLSearchParams(window.location.search);
-                const urlToken = (params.get('token') || '').trim();
-                if (urlToken) {
-                    sessionStorage.setItem('mx_dashboard_token', urlToken);
-                    return urlToken;
-                }
-                return (
-                    sessionStorage.getItem('mx_dashboard_token') ||
-                    localStorage.getItem('mx_dashboard_token') ||
-                    ''
-                ).trim();
-            } catch (_err) {
-                return '';
-            }
+        async function loginDashboardSession(token) {
+            const cleaned = (token || '').trim();
+            if (!cleaned) return false;
+            const res = await fetch('/api/auth/session', {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ token: cleaned }),
+            });
+            return res.ok;
         }
 
         const _nativeFetch = window.fetch.bind(window);
         window.fetch = function(input, init = {}) {
             const url = typeof input === 'string' ? input : (input && input.url) || '';
-            const token = getDashboardToken();
-            if (token && (url.startsWith('/api') || url.includes('/api/'))) {
-                const headers = new Headers(init.headers || {});
-                if (!headers.has('Authorization')) {
-                    headers.set('Authorization', `Bearer ${token}`);
-                }
-                if (!headers.has('X-MX-Dashboard-Token')) {
-                    headers.set('X-MX-Dashboard-Token', token);
-                }
-                init = { ...init, headers, credentials: init.credentials || 'same-origin' };
+            if (url.startsWith('/api') || url.includes('/api/')) {
+                init = { ...init, credentials: init.credentials || 'same-origin' };
             }
             return _nativeFetch(input, init);
         };
 
-        // WebSocket connection
+        // WebSocket connection (authenticated via HttpOnly SameSite=Strict session cookie)
         function connectWebSocket() {
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const token = getDashboardToken();
-            const tokenQuery = token ? `?token=${encodeURIComponent(token)}` : '';
-            ws = new WebSocket(`${protocol}//${window.location.host}/ws${tokenQuery}`);
+            ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
 
             ws.onopen = () => {
                 console.log('WebSocket connected');

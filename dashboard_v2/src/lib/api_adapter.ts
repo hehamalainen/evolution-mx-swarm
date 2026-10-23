@@ -490,30 +490,19 @@ function getApiBase() {
   return rawBase.endsWith('/') ? rawBase.slice(0, -1) : rawBase;
 }
 
+export async function loginDashboardSession(token: string): Promise<boolean> {
+  const apiBase = getApiBase();
+  const res = await fetch(`${apiBase}/api/auth/session`, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token: token.trim() }),
+  });
+  return res.ok;
+}
+
 function getDashboardRequestInit(): RequestInit {
-  const headers: Record<string, string> = {};
-  try {
-    if (typeof window !== 'undefined') {
-      const params = new URLSearchParams(window.location.search);
-      const urlToken = (params.get('token') ?? '').trim();
-      if (urlToken) {
-        window.sessionStorage.setItem('mx_dashboard_token', urlToken);
-      }
-      const token = (
-        urlToken ||
-        window.sessionStorage.getItem('mx_dashboard_token') ||
-        window.localStorage.getItem('mx_dashboard_token') ||
-        ''
-      ).trim();
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
-        headers['X-MX-Dashboard-Token'] = token;
-      }
-    }
-  } catch {
-    // Ignore storage access errors in restricted contexts
-  }
-  return { credentials: 'include', headers };
+  return { credentials: 'same-origin' };
 }
 
 async function fetchSwarmStatus(): Promise<SwarmStatus> {

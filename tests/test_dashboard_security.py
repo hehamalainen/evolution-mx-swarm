@@ -112,16 +112,19 @@ def test_dashboard_websocket_enforces_token_and_origin_validation(monkeypatch) -
             pass
     assert exc_info.value.code == 1008
 
-    # 2. Untrusted website Origin is rejected even if token is supplied
+    # 2. Untrusted website Origin is rejected even if token header is supplied
     with pytest.raises(WebSocketDisconnect) as exc_info_origin:
         with client.websocket_connect(
-            "/ws?token=ws-secret-token",
-            headers={"Origin": "https://evil.example"},
+            "/ws",
+            headers={
+                "Authorization": "Bearer ws-secret-token",
+                "Origin": "https://evil.example",
+            },
         ):
             pass
     assert exc_info_origin.value.code == 1008
 
-    # 3. Authenticated WebSocket with loopback Origin succeeds and receives initial status
+    # 3. Authenticated WebSocket with loopback Origin on matching port succeeds and receives initial status
     with client.websocket_connect(
         "/ws",
         headers={
@@ -141,6 +144,140 @@ def test_dashboard_websocket_enforces_token_and_origin_validation(monkeypatch) -
         ):
             pass
     assert exc_info_no_token_evil.value.code == 1008
+
+
+def test_dashboard_session_cookie_login_rejects_cross_port_and_url_query_tokens(
+    monkeypatch,
+) -> None:
+    from pathlib import Path
+
+    monkeypatch.setenv("MX_DASHBOARD_TOKEN", "session-secret-token")
+    client = TestClient(dashboard_api.app, base_url="http://127.0.0.1:8080")
+
+    # Reusable secret in URL query parameters is rejected on HTTP and WebSocket
+    assert client.get("/?token=session-secret-token").status_code == 400
+    assert client.get("/api/status?token=session-secret-token").status_code == 400
+    with pytest.raises(WebSocketDisconnect) as ws_query_exc:
+        with client.websocket_connect(
+            "/ws?token=session-secret-token",
+            headers={"Origin": "http://127.0.0.1:8080"},
+        ):
+            pass
+    assert ws_query_exc.value.code == 1008
+
+    # Exchange credential via POST /api/auth/session for an opaque HttpOnly session cookie
+    login_resp = client.post(
+        "/api/auth/session",
+        json={"token": "session-secret-token"},
+        headers={"Origin": "http://127.0.0.1:8080"},
+    )
+    assert login_resp.status_code == 200
+    cookie_val = client.cookies.get("mx_dashboard_session")
+    assert cookie_val
+    assert cookie_val != "session-secret-token"
+
+    # Same-port loopback Origin succeeds with session cookie on HTTP mutation and WebSocket
+    same_port_hb = client.post(
+        "/api/swarm/heartbeat",
+        json={"workers_active": 2, "queue_depth": 0, "is_running": True},
+        headers={"Origin": "http://127.0.0.1:8080"},
+    )
+    assert same_port_hb.status_code == 200
+
+    with client.websocket_connect(
+        "ws://127.0.0.1:8080/ws",
+        headers={"Origin": "http://127.0.0.1:8080"},
+    ) as ws:
+        msg = ws.receive_json()
+        assert msg["type"] == "status"
+
+    # Cross-port localhost Origin (http://127.0.0.1:9999) is rejected even with valid session cookie
+    cross_port_hb = client.post(
+        "/api/swarm/heartbeat",
+        json={"workers_active": 2, "queue_depth": 0, "is_running": True},
+        headers={"Origin": "http://127.0.0.1:9999"},
+    )
+    assert cross_port_hb.status_code == 403
+
+    with pytest.raises(WebSocketDisconnect) as ws_cross_port_exc:
+        with client.websocket_connect(
+            "ws://127.0.0.1:8080/ws",
+            headers={"Origin": "http://127.0.0.1:9999"},
+        ):
+            pass
+    assert ws_cross_port_exc.value.code == 1008
+
+    # Verify frontend sources do not read or append ?token= in URLs
+    repo_root = Path(__file__).resolve().parents[1]
+    index_html = (repo_root / "dashboard" / "index.html").read_text(encoding="utf-8")
+    v2_adapter = (repo_root / "dashboard_v2" / "src" / "lib" / "api_adapter.ts").read_text(
+        encoding="utf-8"
+    )
+    assert "?token=" not in index_html
+    assert "params.get('token')" not in index_html
+    assert "params.get('token')" not in v2_adapter
+
+
+def test_dashboard_allows_legitimate_remote_same_origin_and_rejects_mismatched_remote_origins(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("MX_DASHBOARD_TOKEN", "remote-secret-token")
+    remote_client = TestClient(dashboard_api.app, base_url="https://dashboard.example")
+
+    login = remote_client.post(
+        "/api/auth/session",
+        json={"token": "remote-secret-token"},
+        headers={"Origin": "https://dashboard.example"},
+    )
+    assert login.status_code == 200
+
+    status_resp = remote_client.get(
+        "/api/status",
+        headers={"Origin": "https://dashboard.example"},
+    )
+    assert status_resp.status_code == 200
+
+    hb_resp = remote_client.post(
+        "/api/swarm/heartbeat",
+        json={"workers_active": 1, "queue_depth": 0, "is_running": True},
+        headers={"Origin": "https://dashboard.example"},
+    )
+    assert hb_resp.status_code == 200
+
+    with remote_client.websocket_connect(
+        "wss://dashboard.example/ws",
+        headers={"Origin": "https://dashboard.example"},
+    ) as ws:
+        msg = ws.receive_json()
+        assert msg["type"] == "status"
+
+    # Also verify header-authenticated WebSocket with Host: dashboard.example on relative /ws
+    with remote_client.websocket_connect(
+        "/ws",
+        headers={
+            "Host": "dashboard.example",
+            "Origin": "https://dashboard.example",
+            "Authorization": "Bearer remote-secret-token",
+        },
+    ) as ws2:
+        msg2 = ws2.receive_json()
+        assert msg2["type"] == "status"
+
+    # Scheme downgrade (http://dashboard.example) and cross-port (https://dashboard.example:9443) are rejected
+    downgrade = remote_client.post(
+        "/api/swarm/heartbeat",
+        json={"workers_active": 1},
+        headers={"Origin": "http://dashboard.example"},
+    )
+    assert downgrade.status_code == 403
+
+    remote_cross_port = remote_client.post(
+        "/api/swarm/heartbeat",
+        json={"workers_active": 1},
+        headers={"Origin": "https://dashboard.example:9443"},
+    )
+    assert remote_cross_port.status_code == 403
+
 
 
 @pytest.mark.asyncio
