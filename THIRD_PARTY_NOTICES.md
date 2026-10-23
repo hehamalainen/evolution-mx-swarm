@@ -13,18 +13,21 @@ and `dashboard_v2/package-lock.json`.
   - Copyright (c) 2026 Heikki Hämäläinen and MX Swarm Contributors.
   - Licensed under the [MIT License](LICENSE).
 - **Dashboard V2 (`dashboard_v2/`)**
-  - Imported and adapted from the internal `temp_analysis/gas_town_ui_poc/client`
-    research prototype created within the same project workspace.
-  - Unverified third-party brand assets previously present in the prototype
+  - Copyright (c) 2026 Heikki Hämäläinen and MX Swarm Contributors.
+  - Licensed under the [MIT License](LICENSE).
+  - **Provenance and Release Authority Confirmation:** The repository owner and
+    maintainer (Heikki Hämäläinen) confirms that `dashboard_v2/` (adapted from the
+    internal `temp_analysis/gas_town_ui_poc/client` prototype authored within the
+    Project MX workspace) is original/authorized first-party work and is approved
+    for public release under the repository's [MIT License](LICENSE).
+  - Third-party UI library primitives and icons used by `dashboard_v2/` (React,
+    Radix UI, Lucide, Tailwind CSS, Vite, Three.js / Force Graph) are declared in
+    `dashboard_v2/package.json` and `dashboard_v2/package-lock.json` and remain
+    governed by their respective upstream licenses noted in Section 2 below.
+  - Placeholder brand assets previously present in early prototype commits
     (`dashboard_v2/public/x-logo.png`, `dashboard_v2/public/xai-logo.png`, and
-    `dashboard_v2/public/opengraph.jpg`) have been removed from the release tree,
-    and template metadata in `dashboard_v2/index.html` and
-    `dashboard_v2/src/components/VoiceAI.tsx` has been replaced with neutral
-    MX Swarm identifiers.
-  - **Remaining release gate:** Before changing repository visibility to public,
-    the repository owner must confirm final copyright/release authority for all
-    retained `dashboard_v2/` source files and purge removed binary logo blobs
-    from git history if a clean history is required.
+    `dashboard_v2/public/opengraph.jpg`) have been removed from the release tree
+    and purged from the sanitized publication history.
 
 ---
 

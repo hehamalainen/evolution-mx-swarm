@@ -148,6 +148,45 @@ def scan_tracked_credentials(repo_root: Path = REPO_ROOT) -> list[dict[str, obje
     return findings
 
 
+EXPLICIT_FORBIDDEN_PATHS: frozenset[str] = frozenset(
+    {
+        *FORBIDDEN_CREDENTIAL_PATHS,
+        "dashboard_v2/public/x-logo.png",
+        "dashboard_v2/public/xai-logo.png",
+        "dashboard_v2/public/opengraph.jpg",
+    }
+)
+
+
+def is_path_allowed(rel_path: str, allowlist: dict[str, object]) -> tuple[bool, str]:
+    """Return (allowed, violation_kind) for a repository-relative path."""
+    allowed_root = set(allowlist.get("allowed_root_files", []))  # type: ignore[arg-type]
+    allowed_dirs = set(allowlist.get("allowed_top_level_directories", []))  # type: ignore[arg-type]
+    allowed_reports = set(allowlist.get("allowed_reports", []))  # type: ignore[arg-type]
+    forbidden_exts = tuple(allowlist.get("forbidden_extensions", []))  # type: ignore[arg-type]
+    forbidden_prefixes = tuple(allowlist.get("forbidden_path_prefixes", []))  # type: ignore[arg-type]
+
+    if rel_path in EXPLICIT_FORBIDDEN_PATHS:
+        return False, "forbidden_credential_or_asset_file"
+    if any(rel_path.endswith(str(ext)) for ext in forbidden_exts):
+        return False, "forbidden_extension"
+    if any(rel_path.startswith(str(prefix)) for prefix in forbidden_prefixes):
+        return False, "forbidden_prefix"
+    if "/" not in rel_path:
+        if rel_path not in allowed_root:
+            return False, "unapproved_root_file"
+        return True, ""
+
+    top_dir = rel_path.split("/", 1)[0]
+    if top_dir == "reports":
+        if rel_path not in allowed_reports:
+            return False, "unapproved_report_file"
+        return True, ""
+    if top_dir not in allowed_dirs:
+        return False, "unapproved_directory"
+    return True, ""
+
+
 def scan_release_boundary(
     repo_root: Path = REPO_ROOT,
     allowlist_path: Path | None = None,
@@ -158,29 +197,11 @@ def scan_release_boundary(
         return [{"path": "RELEASE_ALLOWLIST.json", "line": 1, "kind": "missing_allowlist"}]
 
     allowlist = json.loads(target_allowlist.read_text(encoding="utf-8"))
-    allowed_root = set(allowlist.get("allowed_root_files", []))
-    allowed_dirs = set(allowlist.get("allowed_top_level_directories", []))
-    allowed_reports = set(allowlist.get("allowed_reports", []))
-    forbidden_exts = tuple(allowlist.get("forbidden_extensions", []))
-    forbidden_prefixes = tuple(allowlist.get("forbidden_path_prefixes", []))
-
     findings: list[dict[str, object]] = []
     for rel_path in list_tracked_files(repo_root):
-        if any(rel_path.endswith(ext) for ext in forbidden_exts):
-            findings.append({"path": rel_path, "line": 1, "kind": "forbidden_extension"})
-        if any(rel_path.startswith(prefix) for prefix in forbidden_prefixes):
-            findings.append({"path": rel_path, "line": 1, "kind": "forbidden_prefix"})
-
-        if "/" not in rel_path:
-            if rel_path not in allowed_root:
-                findings.append({"path": rel_path, "line": 1, "kind": "unapproved_root_file"})
-        else:
-            top_dir = rel_path.split("/", 1)[0]
-            if top_dir == "reports":
-                if rel_path not in allowed_reports:
-                    findings.append({"path": rel_path, "line": 1, "kind": "unapproved_report_file"})
-            elif top_dir not in allowed_dirs:
-                findings.append({"path": rel_path, "line": 1, "kind": "unapproved_directory"})
+        ok, kind = is_path_allowed(rel_path, allowlist)
+        if not ok:
+            findings.append({"path": rel_path, "line": 1, "kind": kind})
 
         file_path = repo_root / rel_path
         if not file_path.is_file():
@@ -196,6 +217,88 @@ def scan_release_boundary(
     return findings
 
 
+def scan_git_history(
+    repo_root: Path = REPO_ROOT,
+    allowlist_path: Path | None = None,
+) -> list[dict[str, object]]:
+    """Scan all reachable git commits and blobs for disallowed paths, credentials, and private paths."""
+    target_allowlist = allowlist_path or (repo_root / "RELEASE_ALLOWLIST.json")
+    if not target_allowlist.is_file():
+        return [{"path": "RELEASE_ALLOWLIST.json", "line": 1, "kind": "missing_allowlist"}]
+    allowlist = json.loads(target_allowlist.read_text(encoding="utf-8"))
+
+    rev_proc = subprocess.run(
+        ["git", "-C", str(repo_root), "rev-list", "--all", "--objects"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    findings: list[dict[str, object]] = []
+    seen_path_kinds: set[tuple[str, str]] = set()
+    blob_to_path: dict[str, str] = {}
+
+    for line in rev_proc.stdout.splitlines():
+        parts = line.strip().split(" ", 1)
+        if len(parts) != 2:
+            continue
+        oid, rel_path = parts[0].strip(), parts[1].strip()
+        if not rel_path:
+            continue
+        blob_to_path.setdefault(oid, rel_path)
+
+    if not blob_to_path:
+        return findings
+
+    batch_input = "".join(f"{oid}\n" for oid in blob_to_path).encode("utf-8")
+    batch_proc = subprocess.run(
+        ["git", "-C", str(repo_root), "cat-file", "--batch"],
+        input=batch_input,
+        check=True,
+        capture_output=True,
+    )
+    stream = batch_proc.stdout
+    pos = 0
+    total_len = len(stream)
+    while pos < total_len:
+        nl = stream.find(b"\n", pos)
+        if nl == -1:
+            break
+        header = stream[pos:nl].decode("utf-8", errors="replace").strip()
+        pos = nl + 1
+        header_parts = header.split()
+        if len(header_parts) < 3:
+            continue
+        oid, obj_type, size_str = header_parts[0], header_parts[1], header_parts[2]
+        size = int(size_str)
+        payload = stream[pos : pos + size]
+        pos += size + 1  # skip trailing newline
+        if obj_type != "blob":
+            continue
+        rel_path = blob_to_path.get(oid, "")
+        ok, kind = is_path_allowed(rel_path, allowlist)
+        if not ok and (rel_path, kind) not in seen_path_kinds:
+            seen_path_kinds.add((rel_path, kind))
+            findings.append({"path": rel_path, "line": 1, "kind": f"history_{kind}"})
+        try:
+            text = payload.decode("utf-8")
+        except UnicodeDecodeError:
+            continue
+        for item in scan_text_for_credentials(text, f"{oid[:8]}:{rel_path}"):
+            findings.append(item)
+        for line_no, text_line in enumerate(text.splitlines(), start=1):
+            if PRIVATE_PATH_PATTERN.search(text_line):
+                findings.append(
+                    {
+                        "path": f"{oid[:8]}:{rel_path}",
+                        "line": line_no,
+                        "kind": "history_private_path",
+                    }
+                )
+                break
+
+    return findings
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Verify MX-Swarm release credential and boundary hygiene.")
     parser.add_argument(
@@ -203,12 +306,18 @@ def main(argv: list[str] | None = None) -> int:
         default=str(REPO_ROOT),
         help="Repository root to scan.",
     )
+    parser.add_argument(
+        "--scan-history",
+        action="store_true",
+        help="Also scan all reachable git history objects and paths.",
+    )
     args = parser.parse_args(argv)
     repo_root = Path(args.repo_root).resolve()
 
     cred_findings = scan_tracked_credentials(repo_root)
     boundary_findings = scan_release_boundary(repo_root)
-    findings = [*cred_findings, *boundary_findings]
+    history_findings = scan_git_history(repo_root) if args.scan_history else []
+    findings = [*cred_findings, *boundary_findings, *history_findings]
     if findings:
         print(json.dumps({"ok": False, "findings": findings}, indent=2))
         return 1
