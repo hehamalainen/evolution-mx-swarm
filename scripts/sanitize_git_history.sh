@@ -22,27 +22,69 @@ EOF
   exit 2
 fi
 
-SOURCE_REPO="${2:?source repository path required}"
-OUTPUT_REPO="${3:?output repository path required}"
+SOURCE_REPO="${2:-}"
+OUTPUT_REPO="${3:-}"
+if [[ -z "$SOURCE_REPO" || -z "$OUTPUT_REPO" ]]; then
+  echo "Both <source-repo> and <output-repo-dir> arguments are required." >&2
+  exit 2
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 ALLOWLIST_FILE="${REPO_ROOT}/RELEASE_ALLOWLIST.json"
 
-rm -rf "$OUTPUT_REPO"
-mkdir -p "$OUTPUT_REPO"
-git init -q "$OUTPUT_REPO"
-
 python3 - "$SOURCE_REPO" "$OUTPUT_REPO" "$ALLOWLIST_FILE" "$REPO_ROOT" <<'PY'
 import json
+import os
 import re
 import subprocess
 import sys
 from pathlib import Path
 
-source_repo = Path(sys.argv[1]).resolve()
-output_repo = Path(sys.argv[2]).resolve()
+raw_source = sys.argv[1]
+raw_output = sys.argv[2]
+source_repo = Path(raw_source).expanduser().resolve(strict=False)
+output_repo = Path(raw_output).expanduser().resolve(strict=False)
 allowlist_path = Path(sys.argv[3]).resolve()
 scanner_root = Path(sys.argv[4]).resolve()
+
+if not source_repo.exists() or not source_repo.is_dir():
+    print(f"Source repository does not exist or is not a directory: {source_repo}", file=sys.stderr)
+    raise SystemExit(2)
+
+if (
+    output_repo == source_repo
+    or source_repo.is_relative_to(output_repo)
+    or output_repo.is_relative_to(source_repo)
+    or output_repo == scanner_root
+    or scanner_root.is_relative_to(output_repo)
+    or output_repo.is_relative_to(scanner_root)
+):
+    print(
+        f"Refusing overlapping source/output repository paths: source={source_repo} output={output_repo}",
+        file=sys.stderr,
+    )
+    raise SystemExit(2)
+
+if os.path.lexists(raw_output) or output_repo.exists() or output_repo.is_symlink():
+    print(
+        f"Refusing to overwrite existing output path (must not exist): {output_repo}",
+        file=sys.stderr,
+    )
+    raise SystemExit(2)
+
+git_check = subprocess.run(
+    ["git", "-C", str(source_repo), "rev-parse", "--git-dir"],
+    check=False,
+    capture_output=True,
+    text=True,
+)
+if git_check.returncode != 0:
+    print(f"Source path is not a valid git repository: {source_repo}", file=sys.stderr)
+    raise SystemExit(2)
+
+output_repo.mkdir(parents=True, exist_ok=False)
+subprocess.run(["git", "init", "-q", str(output_repo)], check=True)
 
 sys.path.insert(0, str(scanner_root))
 from scripts.check_release_hygiene import (  # noqa: E402

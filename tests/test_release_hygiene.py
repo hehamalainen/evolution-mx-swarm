@@ -58,6 +58,76 @@ def test_sanitize_git_history_script_requires_explicit_owner_approval() -> None:
     assert "Refusing to rewrite git history without explicit approval" in proc.stderr
 
 
+def test_sanitize_git_history_rejects_existing_or_overlapping_paths_without_data_loss(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    source_repo = workspace / "source_repo"
+    source_repo.mkdir(parents=True)
+    ancestor_sentinel = workspace / "keep_ancestor.txt"
+    ancestor_sentinel.write_text("ancestor-data\n", encoding="utf-8")
+
+    git_env = {
+        "PATH": "/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin",
+        "GIT_AUTHOR_NAME": "Test Author",
+        "GIT_AUTHOR_EMAIL": "test@example.com",
+        "GIT_COMMITTER_NAME": "Test Author",
+        "GIT_COMMITTER_EMAIL": "test@example.com",
+    }
+    subprocess.run(["git", "init", "-q", str(source_repo)], check=True, env=git_env)
+    source_file = source_repo / "README.md"
+    source_file.write_text("# Source Repo Intact\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(source_repo), "add", "README.md"], check=True, env=git_env)
+    subprocess.run(
+        ["git", "-C", str(source_repo), "commit", "-q", "-m", "initial commit"],
+        check=True,
+        env=git_env,
+    )
+    head_before = subprocess.run(
+        ["git", "-C", str(source_repo), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+    existing_output = tmp_path / "existing_output"
+    existing_output.mkdir()
+    output_sentinel = existing_output / "sentinel.txt"
+    output_sentinel.write_text("do-not-delete\n", encoding="utf-8")
+
+    nested_output = source_repo / "subdir" / "nested_output"
+    script = REPO_ROOT / "scripts" / "sanitize_git_history.sh"
+
+    for invalid_output, expected_msg in (
+        (source_repo, "Refusing overlapping source/output repository paths"),
+        (workspace, "Refusing overlapping source/output repository paths"),
+        (nested_output, "Refusing overlapping source/output repository paths"),
+        (existing_output, "Refusing to overwrite existing output path"),
+    ):
+        proc = subprocess.run(
+            ["bash", str(script), "--i-have-owner-approval", str(source_repo), str(invalid_output)],
+            cwd=str(REPO_ROOT),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert proc.returncode == 2
+        assert expected_msg in proc.stderr
+
+    # Verify source repository, ancestor directory, and existing output directory remain completely intact
+    assert source_file.read_text(encoding="utf-8") == "# Source Repo Intact\n"
+    assert ancestor_sentinel.read_text(encoding="utf-8") == "ancestor-data\n"
+    assert output_sentinel.read_text(encoding="utf-8") == "do-not-delete\n"
+    assert not nested_output.exists()
+    head_after = subprocess.run(
+        ["git", "-C", str(source_repo), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert head_after == head_before
+
+
 def test_license_and_third_party_notices_present_and_brand_logos_removed() -> None:
     license_path = REPO_ROOT / "LICENSE"
     notices_path = REPO_ROOT / "THIRD_PARTY_NOTICES.md"
