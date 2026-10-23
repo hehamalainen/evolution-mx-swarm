@@ -74,7 +74,7 @@ jobs:
         run: bandit -r shared planner worker judge cli -ll -ii
 
       - name: Run release hygiene check
-        run: python scripts/check_release_hygiene.py
+        run: python scripts/check_release_hygiene.py --scan-history
 
       - name: Audit Python dependencies
         run: pip-audit --requirement requirements.txt

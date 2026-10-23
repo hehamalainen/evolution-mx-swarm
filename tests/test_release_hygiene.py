@@ -16,6 +16,8 @@ def test_reg_output_removed_and_tracked_tree_has_no_credentials() -> None:
     assert not (REPO_ROOT / "reg_output.txt").exists()
     findings = scan_tracked_credentials(REPO_ROOT)
     assert findings == []
+    history_findings = scan_git_history(REPO_ROOT)
+    assert history_findings == []
 
 
 def test_credential_scanner_detects_provider_tokens_claim_urls_and_private_keys() -> None:
