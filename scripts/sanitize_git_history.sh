@@ -253,6 +253,18 @@ for old_commit in rev_list:
     if new_tree_oid == last_tree_oid and last_new_commit is not None:
         continue
 
+    clean_message = PRIVATE_PATH_PATTERN.sub("<REDACTED_LOCAL_PATH>", message)
+    if scan_text_for_credentials(clean_message, f"commit:{old_commit[:8]}"):
+        msg_lines = []
+        for msg_line in clean_message.splitlines():
+            if scan_text_for_credentials(msg_line, f"commit:{old_commit[:8]}"):
+                msg_lines.append("[REDACTED HISTORICAL CREDENTIAL IN COMMIT MESSAGE]")
+            else:
+                msg_lines.append(msg_line)
+        clean_message = "\n".join(msg_lines) + "\n"
+        if scan_text_for_credentials(clean_message, f"commit:{old_commit[:8]}"):
+            clean_message = "Sanitized historical commit message\n"
+
     cmd = ["git", "-C", str(output_repo), "commit-tree", new_tree_oid]
     if last_new_commit is not None:
         cmd.extend(["-p", last_new_commit])
@@ -268,7 +280,7 @@ for old_commit in rev_list:
     }
     last_new_commit = subprocess.run(
         cmd,
-        input=message,
+        input=clean_message,
         check=True,
         capture_output=True,
         text=True,

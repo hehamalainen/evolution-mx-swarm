@@ -243,22 +243,64 @@ def scan_git_history(
         capture_output=True,
         text=True,
     )
+    raw_log_proc = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repo_root),
+            "log",
+            "--all",
+            "--raw",
+            "--no-abbrev",
+            "-m",
+            "--root",
+            "--pretty=format:",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
     seen_path_kinds: set[tuple[str, str]] = set()
-    blob_to_path: dict[str, str] = {}
+    historical_paths: set[str] = set()
+    oid_to_paths: dict[str, set[str]] = {}
+    all_oids: list[str] = []
+    seen_oids: set[str] = set()
 
     for line in rev_proc.stdout.splitlines():
-        parts = line.strip().split(" ", 1)
-        if len(parts) != 2:
+        stripped = line.strip()
+        if not stripped:
             continue
-        oid, rel_path = parts[0].strip(), parts[1].strip()
-        if not rel_path:
-            continue
-        blob_to_path.setdefault(oid, rel_path)
+        parts = stripped.split(" ", 1)
+        oid = parts[0].strip()
+        if oid and oid not in seen_oids:
+            seen_oids.add(oid)
+            all_oids.append(oid)
+        if len(parts) == 2:
+            rel_path = parts[1].strip()
+            if rel_path:
+                oid_to_paths.setdefault(oid, set()).add(rel_path)
 
-    if not blob_to_path:
+    for line in raw_log_proc.stdout.splitlines():
+        stripped = line.strip()
+        if not stripped or not stripped.startswith(":"):
+            continue
+        meta_part, sep, path_part = stripped.partition("\t")
+        if not sep or not path_part:
+            continue
+        # Handle rename/copy tab-separated paths (status R/C has old_path\tnew_path)
+        paths_in_entry = [p.strip() for p in path_part.split("\t") if p.strip()]
+        meta_tokens = meta_part.split()
+        # Format: :<old_mode> <new_mode> <old_oid> <new_oid> <status>
+        entry_oids = [tok for tok in meta_tokens[2:4] if set(tok) != {"0"}]
+        for rel_path in paths_in_entry:
+            historical_paths.add(rel_path)
+            for entry_oid in entry_oids:
+                oid_to_paths.setdefault(entry_oid, set()).add(rel_path)
+
+    if not all_oids:
         return findings
 
-    batch_input = "".join(f"{oid}\n" for oid in blob_to_path).encode("utf-8")
+    batch_input = "".join(f"{oid}\n" for oid in all_oids).encode("utf-8")
     batch_proc = subprocess.run(
         ["git", "-C", str(repo_root), "cat-file", "--batch"],
         input=batch_input,
@@ -281,29 +323,39 @@ def scan_git_history(
         size = int(size_str)
         payload = stream[pos : pos + size]
         pos += size + 1  # skip trailing newline
-        if obj_type != "blob":
+        if obj_type == "blob":
+            for rel_path in oid_to_paths.get(oid, set()):
+                historical_paths.add(rel_path)
+            primary_path = sorted(oid_to_paths.get(oid, {""}))[0]
+            label = f"{oid[:8]}:{primary_path}"
+            try:
+                text = payload.decode("utf-8")
+            except UnicodeDecodeError:
+                continue
+        elif obj_type in ("commit", "tag"):
+            label = f"{obj_type}:{oid[:8]}"
+            text = payload.decode("utf-8", errors="replace")
+        else:
             continue
-        rel_path = blob_to_path.get(oid, "")
-        ok, kind = is_path_allowed(rel_path, allowlist)
-        if not ok and (rel_path, kind) not in seen_path_kinds:
-            seen_path_kinds.add((rel_path, kind))
-            findings.append({"path": rel_path, "line": 1, "kind": f"history_{kind}"})
-        try:
-            text = payload.decode("utf-8")
-        except UnicodeDecodeError:
-            continue
-        for item in scan_text_for_credentials(text, f"{oid[:8]}:{rel_path}"):
+
+        for item in scan_text_for_credentials(text, label):
             findings.append(item)
         for line_no, text_line in enumerate(text.splitlines(), start=1):
             if PRIVATE_PATH_PATTERN.search(text_line):
                 findings.append(
                     {
-                        "path": f"{oid[:8]}:{rel_path}",
+                        "path": label,
                         "line": line_no,
                         "kind": "history_private_path",
                     }
                 )
                 break
+
+    for rel_path in sorted(historical_paths):
+        ok, kind = is_path_allowed(rel_path, allowlist)
+        if not ok and (rel_path, kind) not in seen_path_kinds:
+            seen_path_kinds.add((rel_path, kind))
+            findings.append({"path": rel_path, "line": 1, "kind": f"history_{kind}"})
 
     return findings
 

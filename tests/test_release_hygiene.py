@@ -279,6 +279,66 @@ def test_scan_git_history_rejects_shallow_clone_instead_of_reporting_success(
     assert hygiene_main(["--repo-root", str(shallow_repo), "--scan-history"]) == 1
 
 
+def test_scan_git_history_detects_duplicate_blob_forbidden_path_and_commit_message_credentials(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "dup_and_commit_msg_repo"
+    repo.mkdir()
+
+    git_env = {
+        "PATH": "/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin",
+        "GIT_AUTHOR_NAME": "Test Author",
+        "GIT_AUTHOR_EMAIL": "test@example.com",
+        "GIT_COMMITTER_NAME": "Test Author",
+        "GIT_COMMITTER_EMAIL": "test@example.com",
+    }
+    subprocess.run(["git", "init", "-q", str(repo)], check=True, env=git_env)
+    (repo / "RELEASE_ALLOWLIST.json").write_text(
+        (REPO_ROOT / "RELEASE_ALLOWLIST.json").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+
+    shared_content = "# Identical content across allowed and forbidden paths\n"
+    (repo / "README.md").write_text(shared_content, encoding="utf-8")
+    (repo / "reg_output.txt").write_text(shared_content, encoding="utf-8")
+    subprocess.run(["git", "-C", str(repo), "add", "README.md", "reg_output.txt"], check=True, env=git_env)
+    subprocess.run(
+        ["git", "-C", str(repo), "commit", "-q", "-m", "commit 1 with duplicate-blob forbidden path"],
+        check=True,
+        env=git_env,
+    )
+
+    # Commit 2 deletes reg_output.txt (so README.md shares the same blob OID in HEAD)
+    # and embeds a synthetic credential in the commit message itself.
+    (repo / "reg_output.txt").unlink()
+    subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True, env=git_env)
+    synthetic_commit_key = "_".join(("moltbook", "sk", "6" * 32))
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repo),
+            "commit",
+            "-q",
+            "-m",
+            f"commit 2 removing file but leaking {synthetic_commit_key} in message",
+        ],
+        check=True,
+        env=git_env,
+    )
+
+    findings = scan_git_history(repo)
+    assert any(
+        item["path"] == "reg_output.txt"
+        and item["kind"] == "history_forbidden_credential_or_asset_file"
+        for item in findings
+    ), f"Expected duplicate-blob forbidden path finding, got: {findings}"
+    assert any(
+        str(item["path"]).startswith("commit:") and item["kind"] == "moltbook_api_key"
+        for item in findings
+    ), f"Expected commit-message credential finding, got: {findings}"
+
+
 
 def test_release_boundary_allowlist_and_private_path_hygiene() -> None:
     assert (REPO_ROOT / "RELEASE_ALLOWLIST.json").is_file()
