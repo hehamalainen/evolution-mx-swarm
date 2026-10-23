@@ -1262,6 +1262,8 @@ async def enforce_control_route_security(request: Request, call_next):
     if expected_token:
         if request.url.path in {"/api/auth/session", "/api/auth/logout"} and request.method.upper() == "POST":
             return await call_next(request)
+        if request.url.path == "/api/auth/status" and request.method.upper() == "GET":
+            return await call_next(request)
         authenticated, auth_source = _authenticate_dashboard_conn(request, expected_token)
         if not authenticated:
             return JSONResponse(
@@ -1318,6 +1320,27 @@ class DashboardSessionLoginRequest(BaseModel):
 async def root():
     dashboard_path = os.path.join(os.path.dirname(__file__), "index.html")
     return FileResponse(dashboard_path)
+
+
+@app.get("/api/auth/status")
+async def get_dashboard_auth_status(request: Request):
+    expected_token = os.environ.get("MX_DASHBOARD_TOKEN", "").strip()
+    if not expected_token:
+        return JSONResponse(
+            {
+                "requires_auth": False,
+                "authenticated": True,
+                "mode": "loopback",
+            }
+        )
+    authenticated, auth_source = _authenticate_dashboard_conn(request, expected_token)
+    return JSONResponse(
+        {
+            "requires_auth": True,
+            "authenticated": authenticated,
+            "mode": auth_source if authenticated else "unauthenticated",
+        }
+    )
 
 
 @app.post("/api/auth/session")

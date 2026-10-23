@@ -218,6 +218,239 @@ def test_dashboard_session_cookie_login_rejects_cross_port_and_url_query_tokens(
     assert "params.get('token')" not in v2_adapter
 
 
+def test_dashboard_sign_in_flow_status_session_expiry_and_frontend_wiring(
+    monkeypatch,
+) -> None:
+    from pathlib import Path
+
+    repo_root = Path(__file__).resolve().parents[1]
+
+    # 1. Without MX_DASHBOARD_TOKEN configured, loopback session is immediately authenticated
+    monkeypatch.delenv("MX_DASHBOARD_TOKEN", raising=False)
+    loopback_client = TestClient(dashboard_api.app, base_url="http://127.0.0.1:8080")
+    no_token_status = loopback_client.get("/api/auth/status")
+    assert no_token_status.status_code == 200
+    assert no_token_status.json() == {
+        "requires_auth": False,
+        "authenticated": True,
+        "mode": "loopback",
+    }
+
+    # 2. With MX_DASHBOARD_TOKEN configured, fresh browser session is unauthenticated on /api/auth/status
+    monkeypatch.setenv("MX_DASHBOARD_TOKEN", "browser-flow-secret")
+    browser_client = TestClient(dashboard_api.app, base_url="http://127.0.0.1:8080")
+    pre_login_status = browser_client.get("/api/auth/status")
+    assert pre_login_status.status_code == 200
+    assert pre_login_status.json() == {
+        "requires_auth": True,
+        "authenticated": False,
+        "mode": "unauthenticated",
+    }
+    assert browser_client.get("/api/status").status_code == 401
+
+    # 3. Wrong token via login form fails and leaves session unauthenticated
+    bad_login = browser_client.post(
+        "/api/auth/session",
+        json={"token": "wrong-token"},
+        headers={"Origin": "http://127.0.0.1:8080"},
+    )
+    assert bad_login.status_code == 401
+    assert browser_client.get("/api/auth/status").json()["authenticated"] is False
+
+    # 4. Valid token via login form establishes cookie session and unlocks /api/status + /ws
+    good_login = browser_client.post(
+        "/api/auth/session",
+        json={"token": "browser-flow-secret"},
+        headers={"Origin": "http://127.0.0.1:8080"},
+    )
+    assert good_login.status_code == 200
+    post_login_status = browser_client.get("/api/auth/status")
+    assert post_login_status.status_code == 200
+    assert post_login_status.json() == {
+        "requires_auth": True,
+        "authenticated": True,
+        "mode": "cookie",
+    }
+    assert browser_client.get("/api/status").status_code == 200
+
+    # 5. Session expiry / logout returns /api/auth/status to authenticated=False and /api/status to 401
+    dashboard_api._ACTIVE_DASHBOARD_SESSIONS.clear()
+    expired_status = browser_client.get("/api/auth/status")
+    assert expired_status.status_code == 200
+    assert expired_status.json()["authenticated"] is False
+    assert browser_client.get("/api/status").status_code == 401
+
+    # 6. Verify both dashboard frontends wire token sign-in forms to loginDashboardSession,
+    # gate startup on /api/auth/status, and recover from 401/1008 session expiry
+    index_html = (repo_root / "dashboard" / "index.html").read_text(encoding="utf-8")
+    assert 'id="dashboard-auth-form"' in index_html
+    assert 'id="dashboard-token-input"' in index_html
+    assert "submitDashboardLogin" in index_html
+    assert "await loginDashboardSession(token)" in index_html
+    assert "checkDashboardAuthStatus()" in index_html
+    assert "initDashboard();" in index_html
+    assert "res.status === 401" in index_html
+    assert "event.code === 1008" in index_html
+
+    v2_app = (repo_root / "dashboard_v2" / "src" / "App.tsx").read_text(encoding="utf-8")
+    v2_adapter = (repo_root / "dashboard_v2" / "src" / "lib" / "api_adapter.ts").read_text(
+        encoding="utf-8"
+    )
+    assert 'id="v2-dashboard-auth-form"' in v2_app
+    assert 'id="v2-dashboard-token-input"' in v2_app
+    assert "await loginDashboardSession(tokenInput)" in v2_app
+    assert "useDashboardAuthStatusQuery()" in v2_app
+    assert "AUTH_REQUIRED_EVENT" in v2_app
+    assert "notifyAuthRequiredIfUnauthorized(res)" in v2_adapter
+
+    # 7. Execute the actual bundled JavaScript from dashboard/index.html in a fresh browser VM
+    import shutil
+    import subprocess
+
+    node_bin = shutil.which("node")
+    if node_bin:
+        script_body = index_html.split("<script>", 1)[1].rsplit("</script>", 1)[0]
+        harness = r"""
+const fs = require('fs');
+const vm = require('vm');
+const scriptCode = fs.readFileSync(process.argv[1], 'utf8');
+
+let authCookieValid = false;
+const apiCalls = [];
+const wsInstances = [];
+const elements = {};
+function getEl(id) {
+  if (!elements[id]) {
+    elements[id] = {
+      id,
+      value: '',
+      textContent: '',
+      innerHTML: '',
+      className: '',
+      style: {},
+      addEventListener() {},
+      removeEventListener() {},
+      classes: new Set(),
+      classList: {
+        add(c) { elements[id].classes.add(c); },
+        remove(c) { elements[id].classes.delete(c); },
+        contains(c) { return elements[id].classes.has(c); },
+      },
+      getContext() {
+        return {
+          clearRect() {}, beginPath() {}, moveTo() {}, lineTo() {}, stroke() {}, fill() {},
+          createLinearGradient() { return { addColorStop() {} }; },
+        };
+      },
+    };
+  }
+  return elements[id];
+}
+
+class FakeWebSocket {
+  constructor(url) {
+    this.url = url;
+    this.readyState = 1;
+    this.closed = false;
+    wsInstances.push(this);
+  }
+  send() {}
+  close() { this.closed = true; this.readyState = 3; }
+}
+FakeWebSocket.OPEN = 1;
+
+async function fakeFetch(url, init = {}) {
+  apiCalls.push({ url, method: init.method || 'GET' });
+  if (url === '/api/auth/status') {
+    return {
+      ok: true,
+      status: 200,
+      async json() { return { requires_auth: true, authenticated: authCookieValid, mode: authCookieValid ? 'cookie' : 'unauthenticated' }; },
+    };
+  }
+  if (url === '/api/auth/session') {
+    const body = JSON.parse(init.body || '{}');
+    if (body.token === 'browser-flow-secret') {
+      authCookieValid = true;
+      return { ok: true, status: 200, async json() { return { status: 'authenticated' }; } };
+    }
+    return { ok: false, status: 401, async json() { return { detail: 'Invalid token' }; } };
+  }
+  if (!authCookieValid) {
+    return { ok: false, status: 401, async json() { return { detail: 'Unauthorized' }; } };
+  }
+  return { ok: true, status: 200, async json() { return {}; } };
+}
+
+const windowObj = {
+  location: { protocol: 'http:', host: '127.0.0.1:8080' },
+  fetch: fakeFetch,
+};
+const sandbox = {
+  window: windowObj,
+  fetch: (...args) => windowObj.fetch(...args),
+  WebSocket: FakeWebSocket,
+  document: {
+    getElementById: getEl,
+    querySelectorAll: () => [],
+  },
+  console: { log() {}, error() {}, warn() {} },
+  setInterval: () => 1,
+  clearInterval: () => {},
+  setTimeout: () => 1,
+  Date,
+  Math,
+  JSON,
+};
+
+(async () => {
+  vm.runInNewContext(scriptCode, sandbox);
+  await new Promise((r) => setTimeout(r, 20));
+
+  // Fresh unauthenticated session: modal is active, no WebSocket opened, no /api/status fetched
+  if (!getEl('auth-modal').classList.contains('active')) throw new Error('Expected auth-modal active on unauthenticated load');
+  if (wsInstances.length !== 0) throw new Error('Expected 0 WebSockets before login');
+
+  // Wrong token keeps modal active
+  getEl('dashboard-token-input').value = 'wrong-token';
+  await sandbox.submitDashboardLogin({ preventDefault() {} });
+  if (!getEl('auth-modal').classList.contains('active')) throw new Error('Expected auth-modal to remain active on wrong token');
+  if (wsInstances.length !== 0) throw new Error('Expected 0 WebSockets after wrong token');
+
+  // Valid token logs in, hides modal, opens WebSocket, and starts polling
+  getEl('dashboard-token-input').value = 'browser-flow-secret';
+  await sandbox.submitDashboardLogin({ preventDefault() {} });
+  await new Promise((r) => setTimeout(r, 20));
+  if (getEl('auth-modal').classList.contains('active')) throw new Error('Expected auth-modal hidden after valid login');
+  if (wsInstances.length !== 1) throw new Error('Expected 1 WebSocket after valid login');
+  if (!apiCalls.some((c) => c.url === '/api/status')) throw new Error('Expected /api/status fetch after login');
+
+  // Simulate session expiry: next /api/status returns 401 -> re-opens auth-modal and closes WebSocket
+  authCookieValid = false;
+  await sandbox.window.fetch('/api/status');
+  if (!getEl('auth-modal').classList.contains('active')) throw new Error('Expected auth-modal to reopen on 401 session expiry');
+  if (!wsInstances[0].closed) throw new Error('Expected WebSocket to close on session expiry');
+  console.log('FRONTEND_VM_OK');
+})().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});
+"""
+        import tempfile
+
+        with tempfile.NamedTemporaryFile("w", suffix=".js", encoding="utf-8") as f:
+            f.write(script_body)
+            f.flush()
+            proc = subprocess.run(
+                [node_bin, "-e", harness, f.name],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        assert proc.returncode == 0, f"Frontend VM test failed: {proc.stderr}\n{proc.stdout}"
+        assert "FRONTEND_VM_OK" in proc.stdout
+
+
 def test_dashboard_allows_legitimate_remote_same_origin_and_rejects_mismatched_remote_origins(
     monkeypatch,
 ) -> None:

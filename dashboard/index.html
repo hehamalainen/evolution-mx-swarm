@@ -1363,14 +1363,43 @@
         </div>
     </div>
 
+    <div class="modal-overlay" id="auth-modal">
+        <div class="modal" style="max-width: 440px;">
+            <div class="modal-title">🔐 Dashboard Sign In</div>
+            <p id="auth-modal-message" style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 1rem;">
+                Enter <code>MX_DASHBOARD_TOKEN</code> to establish an authenticated session.
+            </p>
+            <form id="dashboard-auth-form" onsubmit="return submitDashboardLogin(event)">
+                <div class="control-group" style="margin-bottom: 1rem;">
+                    <label class="control-label" for="dashboard-token-input">Access Token</label>
+                    <input
+                        type="password"
+                        class="control-input"
+                        id="dashboard-token-input"
+                        name="token"
+                        placeholder="Enter MX_DASHBOARD_TOKEN..."
+                        autocomplete="current-password"
+                        required
+                    />
+                </div>
+                <div class="modal-actions">
+                    <button type="submit" class="btn btn-primary" id="dashboard-auth-submit">Sign In</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <script>
         let ws = null;
+        let wsPingIntervalId = null;
+        let pollingIntervalId = null;
         let reconnectAttempts = 0;
+        let isAuthenticatedSession = false;
 
         async function loginDashboardSession(token) {
             const cleaned = (token || '').trim();
             if (!cleaned) return false;
-            const res = await fetch('/api/auth/session', {
+            const res = await _nativeFetch('/api/auth/session', {
                 method: 'POST',
                 credentials: 'same-origin',
                 headers: { 'Content-Type': 'application/json' },
@@ -1379,17 +1408,108 @@
             return res.ok;
         }
 
+        async function checkDashboardAuthStatus() {
+            try {
+                const res = await _nativeFetch('/api/auth/status', {
+                    method: 'GET',
+                    credentials: 'same-origin',
+                });
+                if (!res.ok) {
+                    return { requires_auth: true, authenticated: false };
+                }
+                return await res.json();
+            } catch (err) {
+                console.error('Error checking auth status:', err);
+                return { requires_auth: true, authenticated: false };
+            }
+        }
+
+        function stopDashboardPolling() {
+            if (pollingIntervalId !== null) {
+                clearInterval(pollingIntervalId);
+                pollingIntervalId = null;
+            }
+            if (wsPingIntervalId !== null) {
+                clearInterval(wsPingIntervalId);
+                wsPingIntervalId = null;
+            }
+            if (ws) {
+                ws.onclose = null;
+                ws.close();
+                ws = null;
+            }
+        }
+
+        function showAuthModal(message) {
+            isAuthenticatedSession = false;
+            stopDashboardPolling();
+            const modal = document.getElementById('auth-modal');
+            const msgEl = document.getElementById('auth-modal-message');
+            if (msgEl && message) {
+                msgEl.textContent = message;
+            }
+            if (modal) {
+                modal.classList.add('active');
+            }
+            const statusEl = document.getElementById('connection-status');
+            if (statusEl) {
+                statusEl.innerHTML = '<span class="disconnected-dot"></span> Auth Required';
+                statusEl.className = 'status-indicator status-stopped';
+            }
+        }
+
+        function hideAuthModal() {
+            const modal = document.getElementById('auth-modal');
+            if (modal) {
+                modal.classList.remove('active');
+            }
+            const input = document.getElementById('dashboard-token-input');
+            if (input) {
+                input.value = '';
+            }
+        }
+
+        async function submitDashboardLogin(event) {
+            if (event) event.preventDefault();
+            const input = document.getElementById('dashboard-token-input');
+            const token = input ? input.value : '';
+            const ok = await loginDashboardSession(token);
+            if (!ok) {
+                showAuthModal('Invalid MX_DASHBOARD_TOKEN. Please verify your token and try again.');
+                return false;
+            }
+            hideAuthModal();
+            startDashboardSession();
+            return false;
+        }
+
         const _nativeFetch = window.fetch.bind(window);
-        window.fetch = function(input, init = {}) {
+        window.fetch = async function(input, init = {}) {
             const url = typeof input === 'string' ? input : (input && input.url) || '';
-            if (url.startsWith('/api') || url.includes('/api/')) {
+            const isApiCall = url.startsWith('/api') || url.includes('/api/');
+            if (isApiCall) {
                 init = { ...init, credentials: init.credentials || 'same-origin' };
             }
-            return _nativeFetch(input, init);
+            const res = await _nativeFetch(input, init);
+            if (
+                isApiCall &&
+                res.status === 401 &&
+                !url.includes('/api/auth/session') &&
+                !url.includes('/api/auth/status')
+            ) {
+                showAuthModal('Dashboard session expired or unauthorized. Please sign in with MX_DASHBOARD_TOKEN.');
+            }
+            return res;
         };
 
         // WebSocket connection (authenticated via HttpOnly SameSite=Strict session cookie)
         function connectWebSocket() {
+            if (!isAuthenticatedSession) return;
+            if (ws) {
+                ws.onclose = null;
+                ws.close();
+                ws = null;
+            }
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
             ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
 
@@ -1409,13 +1529,23 @@
                 }
             };
 
-            ws.onclose = () => {
+            ws.onclose = async (event) => {
                 console.log('WebSocket disconnected');
                 document.getElementById('connection-status').innerHTML = '<span class="disconnected-dot"></span> Disconnected';
                 document.getElementById('connection-status').className = 'status-indicator status-stopped';
 
+                if (event && event.code === 1008) {
+                    showAuthModal('WebSocket authentication required or session expired. Please sign in.');
+                    return;
+                }
+                const authStatus = await checkDashboardAuthStatus();
+                if (!authStatus.authenticated) {
+                    showAuthModal('Dashboard session expired. Please sign in again.');
+                    return;
+                }
+
                 // Reconnect with backoff
-                if (reconnectAttempts < 10) {
+                if (isAuthenticatedSession && reconnectAttempts < 10) {
                     setTimeout(() => {
                         reconnectAttempts++;
                         connectWebSocket();
@@ -1427,8 +1557,10 @@
                 console.error('WebSocket error:', error);
             };
 
-            // Keep alive ping
-            setInterval(() => {
+            if (wsPingIntervalId !== null) {
+                clearInterval(wsPingIntervalId);
+            }
+            wsPingIntervalId = setInterval(() => {
                 if (ws && ws.readyState === WebSocket.OPEN) {
                     ws.send('ping');
                 }
@@ -2468,19 +2600,11 @@
             }
         }
 
-        // Initialize
-        connectWebSocket();
-
-        // Fetch initial status
-        fetch('/api/status')
-            .then(r => r.json())
-            .then(updateStatus)
-            .catch(console.error);
-
         // Fetch telemetry and update Worker Scaling card
         async function fetchTelemetry() {
             try {
                 const response = await fetch('/api/telemetry/snapshot');
+                if (!response.ok) return;
                 const data = await response.json();
 
                 document.getElementById('workers-active-lg').textContent = data.workers_active || 0;
@@ -2499,6 +2623,7 @@
         async function fetchGovernorAdjustments() {
             try {
                 const response = await fetch('/api/governor/adjustments');
+                if (!response.ok) return;
                 const data = await response.json();
 
                 const feed = document.getElementById('gov-adjustments-feed');
@@ -2532,6 +2657,7 @@
         async function fetchEscalations() {
             try {
                 const response = await fetch('/api/escalations');
+                if (!response.ok) return;
                 const data = await response.json();
 
                 const list = document.getElementById('escalations-list');
@@ -2566,19 +2692,45 @@
             }
         }
 
-        // Periodic refresh of telemetry data
-        setInterval(() => {
+        function startDashboardSession() {
+            isAuthenticatedSession = true;
+            connectWebSocket();
+
+            fetch('/api/status')
+                .then(r => (r.ok ? r.json() : null))
+                .then(data => {
+                    if (data) updateStatus(data);
+                })
+                .catch(console.error);
+
             fetchTelemetry();
             fetchGovernorAdjustments();
             fetchEscalations();
             fetchDecisions();
-        }, 5000);
 
-        // Initial fetch
-        fetchTelemetry();
-        fetchGovernorAdjustments();
-        fetchEscalations();
-        fetchDecisions();
+            if (pollingIntervalId !== null) {
+                clearInterval(pollingIntervalId);
+            }
+            pollingIntervalId = setInterval(() => {
+                if (!isAuthenticatedSession) return;
+                fetchTelemetry();
+                fetchGovernorAdjustments();
+                fetchEscalations();
+                fetchDecisions();
+            }, 5000);
+        }
+
+        async function initDashboard() {
+            const authStatus = await checkDashboardAuthStatus();
+            if (authStatus && authStatus.authenticated) {
+                hideAuthModal();
+                startDashboardSession();
+            } else {
+                showAuthModal('Enter MX_DASHBOARD_TOKEN to establish an authenticated dashboard session.');
+            }
+        }
+
+        initDashboard();
     </script>
 </body>
 

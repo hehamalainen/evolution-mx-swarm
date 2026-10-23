@@ -490,6 +490,29 @@ function getApiBase() {
   return rawBase.endsWith('/') ? rawBase.slice(0, -1) : rawBase;
 }
 
+export interface DashboardAuthStatus {
+  requires_auth: boolean;
+  authenticated: boolean;
+  mode: string;
+}
+
+export const AUTH_REQUIRED_EVENT = 'mx-dashboard-auth-required';
+
+function notifyAuthRequiredIfUnauthorized(res: Response) {
+  if (res.status === 401 && typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent(AUTH_REQUIRED_EVENT));
+  }
+}
+
+export async function fetchDashboardAuthStatus(): Promise<DashboardAuthStatus> {
+  const apiBase = getApiBase();
+  const res = await fetch(`${apiBase}/api/auth/status`, getDashboardRequestInit());
+  if (!res.ok) {
+    return { requires_auth: true, authenticated: false, mode: 'unauthenticated' };
+  }
+  return (await res.json()) as DashboardAuthStatus;
+}
+
 export async function loginDashboardSession(token: string): Promise<boolean> {
   const apiBase = getApiBase();
   const res = await fetch(`${apiBase}/api/auth/session`, {
@@ -509,6 +532,7 @@ async function fetchSwarmStatus(): Promise<SwarmStatus> {
   const apiBase = getApiBase();
   const res = await fetch(`${apiBase}/api/status`, getDashboardRequestInit());
   if (!res.ok) {
+    notifyAuthRequiredIfUnauthorized(res);
     const text = await res.text();
     throw new Error(text || res.statusText);
   }
@@ -522,6 +546,7 @@ async function fetchEventSourcedMetrics(windowMinutes = 60): Promise<EventSource
     getDashboardRequestInit(),
   );
   if (!res.ok) {
+    notifyAuthRequiredIfUnauthorized(res);
     const text = await res.text();
     throw new Error(text || res.statusText);
   }
@@ -532,6 +557,7 @@ async function fetchTraceSpans(limit = 200): Promise<TraceListResponse> {
   const apiBase = getApiBase();
   const res = await fetch(`${apiBase}/api/traces?limit=${limit}`, getDashboardRequestInit());
   if (!res.ok) {
+    notifyAuthRequiredIfUnauthorized(res);
     const text = await res.text();
     throw new Error(text || res.statusText);
   }
@@ -545,6 +571,7 @@ async function fetchTraceBundle(traceId: string, limit = 500): Promise<TraceBund
     getDashboardRequestInit(),
   );
   if (!res.ok) {
+    notifyAuthRequiredIfUnauthorized(res);
     const text = await res.text();
     throw new Error(text || res.statusText);
   }
@@ -558,6 +585,7 @@ async function fetchRecentSubmissions(limit = 12): Promise<RecentSubmissionsResp
     getDashboardRequestInit(),
   );
   if (!res.ok) {
+    notifyAuthRequiredIfUnauthorized(res);
     const text = await res.text();
     throw new Error(text || res.statusText);
   }
@@ -571,22 +599,39 @@ async function fetchRecentSubmissions(limit = 12): Promise<RecentSubmissionsResp
 async function fetchEconomicFlow(): Promise<EconomicNode[]> {
   const apiBase = getApiBase();
   const res = await fetch(`${apiBase}/api/v2/economic-flow`, getDashboardRequestInit());
-  if (!res.ok) throw new Error(await res.text() || res.statusText);
+  if (!res.ok) {
+    notifyAuthRequiredIfUnauthorized(res);
+    throw new Error((await res.text()) || res.statusText);
+  }
   return (await res.json()) as EconomicNode[];
 }
 
 async function fetchAlignmentMatrix(): Promise<AlignmentNode[]> {
   const apiBase = getApiBase();
   const res = await fetch(`${apiBase}/api/v2/alignment-matrix`, getDashboardRequestInit());
-  if (!res.ok) throw new Error(await res.text() || res.statusText);
+  if (!res.ok) {
+    notifyAuthRequiredIfUnauthorized(res);
+    throw new Error((await res.text()) || res.statusText);
+  }
   return (await res.json()) as AlignmentNode[];
 }
 
 async function fetchPhaseTransition(): Promise<PhaseTransitionData> {
   const apiBase = getApiBase();
   const res = await fetch(`${apiBase}/api/v2/phase-transition`, getDashboardRequestInit());
-  if (!res.ok) throw new Error(await res.text() || res.statusText);
+  if (!res.ok) {
+    notifyAuthRequiredIfUnauthorized(res);
+    throw new Error((await res.text()) || res.statusText);
+  }
   return (await res.json()) as PhaseTransitionData;
+}
+
+export function useDashboardAuthStatusQuery() {
+  return useQuery({
+    queryKey: ['dashboard-auth-status'],
+    queryFn: fetchDashboardAuthStatus,
+    retry: false,
+  });
 }
 
 export function useSwarmQuery() {
