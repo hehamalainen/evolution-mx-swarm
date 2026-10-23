@@ -10,6 +10,9 @@ from scripts.check_release_hygiene import (
     scan_text_for_credentials,
     scan_tracked_credentials,
 )
+from scripts.check_release_hygiene import (
+    main as hygiene_main,
+)
 
 
 def test_reg_output_removed_and_tracked_tree_has_no_credentials() -> None:
@@ -223,6 +226,57 @@ def test_sanitize_git_history_purges_disallowed_paths_and_scrubs_allowed_path_hi
     )
     assert proc.returncode == 0, f"Sanitizer failed: {proc.stderr}\n{proc.stdout}"
     assert scan_git_history(output_repo) == []
+
+
+def test_scan_git_history_rejects_shallow_clone_instead_of_reporting_success(
+    tmp_path: Path,
+) -> None:
+    full_repo = tmp_path / "full_repo"
+    shallow_repo = tmp_path / "shallow_repo"
+    full_repo.mkdir()
+
+    git_env = {
+        "PATH": "/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin",
+        "GIT_AUTHOR_NAME": "Test Author",
+        "GIT_AUTHOR_EMAIL": "test@example.com",
+        "GIT_COMMITTER_NAME": "Test Author",
+        "GIT_COMMITTER_EMAIL": "test@example.com",
+    }
+    subprocess.run(["git", "init", "-q", str(full_repo)], check=True, env=git_env)
+    (full_repo / "RELEASE_ALLOWLIST.json").write_text(
+        (REPO_ROOT / "RELEASE_ALLOWLIST.json").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    synthetic_key = "_".join(("moltbook", "sk", "7" * 32))
+    (full_repo / "README.md").write_text(f"leaked={synthetic_key}\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(full_repo), "add", "."], check=True, env=git_env)
+    subprocess.run(
+        ["git", "-C", str(full_repo), "commit", "-q", "-m", "commit 1 with secret"],
+        check=True,
+        env=git_env,
+    )
+
+    (full_repo / "README.md").write_text("# Clean README\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(full_repo), "add", "README.md"], check=True, env=git_env)
+    subprocess.run(
+        ["git", "-C", str(full_repo), "commit", "-q", "-m", "commit 2 clean"],
+        check=True,
+        env=git_env,
+    )
+
+    # Full checkout detects the historical credential
+    full_findings = scan_git_history(full_repo)
+    assert any(item["kind"] == "moltbook_api_key" for item in full_findings)
+
+    # Shallow clone (--depth 1) must be rejected by scan_git_history rather than reporting success
+    subprocess.run(
+        ["git", "clone", "-q", "--depth", "1", f"file://{full_repo}", str(shallow_repo)],
+        check=True,
+        env=git_env,
+    )
+    shallow_findings = scan_git_history(shallow_repo)
+    assert any(item["kind"] == "shallow_repository_history" for item in shallow_findings)
+    assert hygiene_main(["--repo-root", str(shallow_repo), "--scan-history"]) == 1
 
 
 

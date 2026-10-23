@@ -227,13 +227,22 @@ def scan_git_history(
         return [{"path": "RELEASE_ALLOWLIST.json", "line": 1, "kind": "missing_allowlist"}]
     allowlist = json.loads(target_allowlist.read_text(encoding="utf-8"))
 
+    findings: list[dict[str, object]] = []
+    shallow_proc = subprocess.run(
+        ["git", "-C", str(repo_root), "rev-parse", "--is-shallow-repository"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    if shallow_proc.stdout.strip().lower() == "true" or (repo_root / ".git" / "shallow").exists():
+        findings.append({"path": ".git/shallow", "line": 1, "kind": "shallow_repository_history"})
+
     rev_proc = subprocess.run(
         ["git", "-C", str(repo_root), "rev-list", "--all", "--objects"],
         check=True,
         capture_output=True,
         text=True,
     )
-    findings: list[dict[str, object]] = []
     seen_path_kinds: set[tuple[str, str]] = set()
     blob_to_path: dict[str, str] = {}
 

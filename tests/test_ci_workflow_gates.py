@@ -29,6 +29,23 @@ def test_ci_workflow_has_no_failure_swallowing_fallbacks() -> None:
                 )
 
 
+def test_ci_history_scanning_jobs_fetch_full_git_history() -> None:
+    """CI jobs that run pytest or check_release_hygiene.py --scan-history must configure fetch-depth: 0."""
+    parsed = yaml.safe_load(CI_WORKFLOW.read_text(encoding="utf-8"))
+    jobs = parsed["jobs"]
+    for job_name in ("test", "security"):
+        steps = jobs[job_name]["steps"]
+        checkout_steps = [
+            step for step in steps if str(step.get("uses", "")).startswith("actions/checkout@")
+        ]
+        assert checkout_steps, f"Job {job_name} is missing actions/checkout step"
+        for step in checkout_steps:
+            with_cfg = step.get("with") or {}
+            assert with_cfg.get("fetch-depth") == 0, (
+                f"Job {job_name} checkout must set fetch-depth: 0 so full history is scanned"
+            )
+
+
 def test_deliberately_failing_checks_exit_nonzero(tmp_path: Path) -> None:
     """Deliberately failing pytest and bandit invocations must fail with non-zero exit codes."""
     bad_test = tmp_path / "test_deliberate_fail.py"
