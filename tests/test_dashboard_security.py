@@ -283,6 +283,9 @@ def test_dashboard_sign_in_flow_status_session_expiry_and_frontend_wiring(
     # 6. Verify both dashboard frontends wire token sign-in forms to loginDashboardSession,
     # gate startup on /api/auth/status, and recover from 401/1008 session expiry
     index_html = (repo_root / "dashboard" / "index.html").read_text(encoding="utf-8")
+    assert '<div class="modal" id="auth-modal">' in index_html
+    assert '<div class="modal-content" style="max-width: 440px;">' in index_html
+    assert "modal-overlay" not in index_html
     assert 'id="dashboard-auth-form"' in index_html
     assert 'id="dashboard-token-input"' in index_html
     assert "submitDashboardLogin" in index_html
@@ -449,6 +452,288 @@ const sandbox = {
             )
         assert proc.returncode == 0, f"Frontend VM test failed: {proc.stderr}\n{proc.stdout}"
         assert "FRONTEND_VM_OK" in proc.stdout
+
+
+@pytest.mark.asyncio
+async def test_original_dashboard_real_browser_sign_in_visibility_and_expiry_recovery(
+    tmp_path,
+) -> None:
+    import asyncio
+    import json
+    import os
+    import shutil
+    import socket
+    import subprocess
+    import sys
+    import urllib.request
+    from pathlib import Path
+
+    node_bin = shutil.which("node")
+    chrome_candidates = [
+        shutil.which("google-chrome"),
+        shutil.which("chromium"),
+        shutil.which("chromium-browser"),
+        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        "/Applications/Chromium.app/Contents/MacOS/Chromium",
+    ]
+    chrome_bin = next((c for c in chrome_candidates if c and os.path.exists(c)), None)
+    if not chrome_bin or not node_bin:
+        pytest.skip("Real Chromium/Chrome browser binary or node not available in environment")
+
+    def get_free_port() -> int:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind(("127.0.0.1", 0))
+            return int(s.getsockname()[1])
+
+    server_port = get_free_port()
+    cdp_port = get_free_port()
+    repo_root = Path(__file__).resolve().parents[1]
+
+    server_env = os.environ.copy()
+    server_env["MX_DASHBOARD_TOKEN"] = "real-browser-secret"
+    server_env["MX_DASHBOARD_PORT"] = str(server_port)
+    server_proc = subprocess.Popen(
+        [
+            sys.executable,
+            "-m",
+            "uvicorn",
+            "dashboard.api:app",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(server_port),
+            "--log-level",
+            "warning",
+        ],
+        cwd=str(repo_root),
+        env=server_env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+    import tempfile
+
+    chrome_proc = None
+    short_profile_dir = tempfile.mkdtemp(prefix="mx-chr-", dir="/tmp")
+    try:
+        # Wait for dashboard server to listen
+        server_ready = False
+        for _ in range(40):
+            try:
+                with urllib.request.urlopen(
+                    f"http://127.0.0.1:{server_port}/api/auth/status", timeout=0.5
+                ) as resp:
+                    if resp.status == 200:
+                        server_ready = True
+                        break
+            except Exception:
+                await asyncio.sleep(0.1)
+        assert server_ready, "Dashboard server failed to start for browser test"
+
+        chrome_proc = subprocess.Popen(
+            [
+                chrome_bin,
+                "--headless=new",
+                "--disable-gpu",
+                "--no-first-run",
+                "--no-default-browser-check",
+                "--remote-allow-origins=*",
+                f"--user-data-dir={short_profile_dir}",
+                f"--remote-debugging-port={cdp_port}",
+                f"http://127.0.0.1:{server_port}/",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        ws_debugger_url = None
+        for _ in range(50):
+            try:
+                with urllib.request.urlopen(
+                    f"http://127.0.0.1:{cdp_port}/json", timeout=0.5
+                ) as resp:
+                    targets = json.loads(resp.read().decode("utf-8"))
+                    page_target = next(
+                        (
+                            t
+                            for t in targets
+                            if t.get("type") == "page"
+                            and f"127.0.0.1:{server_port}" in t.get("url", "")
+                        ),
+                        None,
+                    )
+                    if page_target and page_target.get("webSocketDebuggerUrl"):
+                        ws_debugger_url = page_target["webSocketDebuggerUrl"]
+                        break
+            except Exception:
+                pass
+            await asyncio.sleep(0.1)
+        assert ws_debugger_url, "Failed to connect to headless Chrome CDP page target"
+
+        cdp_driver = r"""
+const wsUrl = process.argv[1];
+const ws = new WebSocket(wsUrl);
+let msgId = 0;
+const pending = new Map();
+
+ws.addEventListener('message', (event) => {
+  const payload = JSON.parse(event.data);
+  if (payload.id && pending.has(payload.id)) {
+    const { resolve, reject } = pending.get(payload.id);
+    pending.delete(payload.id);
+    const res = payload.result && payload.result.result;
+    if ((payload.result && payload.result.exceptionDetails) || (res && res.subtype === 'error')) {
+      reject(new Error(JSON.stringify(payload)));
+    } else {
+      resolve(res ? res.value : undefined);
+    }
+  }
+});
+
+function cdpEval(expression) {
+  return new Promise((resolve, reject) => {
+    msgId += 1;
+    pending.set(msgId, { resolve, reject });
+    ws.send(JSON.stringify({
+      id: msgId,
+      method: 'Runtime.evaluate',
+      params: { expression, awaitPromise: true, returnByValue: true },
+    }));
+  });
+}
+
+ws.addEventListener('open', async () => {
+  try {
+    let state = null;
+    for (let i = 0; i < 40; i++) {
+      state = await cdpEval(`(() => {
+        const modal = document.getElementById('auth-modal');
+        const input = document.getElementById('dashboard-token-input');
+        const btn = document.getElementById('dashboard-auth-submit');
+        if (!modal || !input || !btn) return null;
+        const modalStyle = window.getComputedStyle(modal);
+        const inputStyle = window.getComputedStyle(input);
+        const inputRect = input.getBoundingClientRect();
+        const btnRect = btn.getBoundingClientRect();
+        return {
+          modalActive: modal.classList.contains('active'),
+          modalDisplay: modalStyle.display,
+          inputDisplay: inputStyle.display,
+          inputVisibility: inputStyle.visibility,
+          inputWidth: inputRect.width,
+          inputHeight: inputRect.height,
+          btnWidth: btnRect.width,
+          btnHeight: btnRect.height,
+        };
+      })()`);
+      if (state && state.modalActive) break;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+
+    const badState = await cdpEval(`(async () => {
+      const input = document.getElementById('dashboard-token-input');
+      input.value = 'wrong-token';
+      await submitDashboardLogin(new Event('submit', { cancelable: true }));
+      const modal = document.getElementById('auth-modal');
+      const msg = document.getElementById('auth-modal-message');
+      const rect = input.getBoundingClientRect();
+      return {
+        modalDisplay: window.getComputedStyle(modal).display,
+        inputWidth: rect.width,
+        message: msg ? msg.textContent : '',
+      };
+    })()`);
+
+    const goodState = await cdpEval(`(async () => {
+      const input = document.getElementById('dashboard-token-input');
+      input.value = 'real-browser-secret';
+      await submitDashboardLogin(new Event('submit', { cancelable: true }));
+      for (let i = 0; i < 30; i++) {
+        const statusEl = document.getElementById('connection-status');
+        if (statusEl && statusEl.textContent.includes('Connected')) break;
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      const modal = document.getElementById('auth-modal');
+      const statusEl = document.getElementById('connection-status');
+      const rect = input.getBoundingClientRect();
+      return {
+        modalDisplay: window.getComputedStyle(modal).display,
+        inputWidth: rect.width,
+        statusText: statusEl ? statusEl.textContent.trim() : '',
+      };
+    })()`);
+
+    const expiredState = await cdpEval(`(async () => {
+      await fetch('/api/auth/logout', { method: 'POST' });
+      await window.fetch('/api/status');
+      const modal = document.getElementById('auth-modal');
+      const input = document.getElementById('dashboard-token-input');
+      const rect = input.getBoundingClientRect();
+      return {
+        modalDisplay: window.getComputedStyle(modal).display,
+        inputWidth: rect.width,
+        inputHeight: rect.height,
+      };
+    })()`);
+
+    console.log(JSON.stringify({ state, badState, goodState, expiredState }));
+    ws.close();
+    process.exit(0);
+  } catch (err) {
+    console.error(err);
+    process.exit(1);
+  }
+});
+"""
+        cdp_proc = subprocess.run(
+            [node_bin, "-e", cdp_driver, ws_debugger_url],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=20,
+        )
+        assert cdp_proc.returncode == 0, f"CDP browser check failed: {cdp_proc.stderr}\n{cdp_proc.stdout}"
+        results = json.loads(cdp_proc.stdout.strip().splitlines()[-1])
+
+        # 1. Fresh unauthenticated browser session: modal and input/submit are visibly rendered
+        state = results["state"]
+        assert state is not None
+        assert state["modalActive"] is True
+        assert state["modalDisplay"] == "flex"
+        assert state["inputDisplay"] != "none"
+        assert state["inputVisibility"] == "visible"
+        assert state["inputWidth"] > 0 and state["inputHeight"] > 0
+        assert state["btnWidth"] > 0 and state["btnHeight"] > 0
+
+        # 2. Invalid token rejected, modal and input remain visibly rendered
+        bad_state = results["badState"]
+        assert bad_state["modalDisplay"] == "flex"
+        assert bad_state["inputWidth"] > 0
+        assert "Invalid MX_DASHBOARD_TOKEN" in bad_state["message"]
+
+        # 3. Valid token hides modal (display: none, width: 0) and connects WebSocket
+        good_state = results["goodState"]
+        assert good_state["modalDisplay"] == "none"
+        assert good_state["inputWidth"] == 0
+        assert "Connected" in good_state["statusText"]
+
+        # 4. Session expiry re-opens modal and makes input visible again
+        expired_state = results["expiredState"]
+        assert expired_state["modalDisplay"] == "flex"
+        assert expired_state["inputWidth"] > 0 and expired_state["inputHeight"] > 0
+    finally:
+        if chrome_proc is not None:
+            chrome_proc.terminate()
+            try:
+                chrome_proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                chrome_proc.kill()
+        server_proc.terminate()
+        try:
+            server_proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            server_proc.kill()
+        shutil.rmtree(short_profile_dir, ignore_errors=True)
 
 
 def test_dashboard_allows_legitimate_remote_same_origin_and_rejects_mismatched_remote_origins(

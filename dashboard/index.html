@@ -1363,9 +1363,10 @@
         </div>
     </div>
 
-    <div class="modal-overlay" id="auth-modal">
-        <div class="modal" style="max-width: 440px;">
-            <div class="modal-title">🔐 Dashboard Sign In</div>
+    <!-- Auth Modal -->
+    <div class="modal" id="auth-modal">
+        <div class="modal-content" style="max-width: 440px;">
+            <h2 class="modal-title">🔐 Dashboard Sign In</h2>
             <p id="auth-modal-message" style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 1rem;">
                 Enter <code>MX_DASHBOARD_TOKEN</code> to establish an authenticated session.
             </p>
@@ -1513,7 +1514,9 @@
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
             ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
 
+            let wsOpened = false;
             ws.onopen = () => {
+                wsOpened = true;
                 console.log('WebSocket connected');
                 reconnectAttempts = 0;
                 document.getElementById('connection-status').innerHTML = '<span class="connected-dot"></span> Connected';
@@ -1531,8 +1534,10 @@
 
             ws.onclose = async (event) => {
                 console.log('WebSocket disconnected');
-                document.getElementById('connection-status').innerHTML = '<span class="disconnected-dot"></span> Disconnected';
-                document.getElementById('connection-status').className = 'status-indicator status-stopped';
+                if (wsOpened) {
+                    document.getElementById('connection-status').innerHTML = '<span class="disconnected-dot"></span> Disconnected';
+                    document.getElementById('connection-status').className = 'status-indicator status-stopped';
+                }
 
                 if (event && event.code === 1008) {
                     showAuthModal('WebSocket authentication required or session expired. Please sign in.');
@@ -2699,7 +2704,14 @@
             fetch('/api/status')
                 .then(r => (r.ok ? r.json() : null))
                 .then(data => {
-                    if (data) updateStatus(data);
+                    if (data) {
+                        updateStatus(data);
+                        const statusEl = document.getElementById('connection-status');
+                        if (statusEl && isAuthenticatedSession) {
+                            statusEl.innerHTML = '<span class="connected-dot"></span> Connected';
+                            statusEl.className = 'status-indicator status-running';
+                        }
+                    }
                 })
                 .catch(console.error);
 
