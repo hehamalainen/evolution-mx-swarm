@@ -9,6 +9,7 @@ from scripts.check_release_hygiene import (
     scan_release_boundary,
     scan_text_for_credentials,
     scan_tracked_credentials,
+    verify_publication_destination,
 )
 from scripts.check_release_hygiene import (
     main as hygiene_main,
@@ -382,5 +383,67 @@ def test_contributor_and_security_guidance_present_and_readme_reproducible() -> 
     assert referenced_paths
     for rel_path in referenced_paths:
         assert (REPO_ROOT / rel_path).exists(), f"Broken path reference in docs: {rel_path}"
+
+
+def test_verify_publication_destination_rejects_unapproved_or_stale_remote_refs(
+    tmp_path: Path,
+) -> None:
+    empty_remote = tmp_path / "empty_remote.git"
+    dirty_remote = tmp_path / "dirty_remote.git"
+    clean_remote = tmp_path / "clean_remote.git"
+    empty_remote.mkdir()
+    dirty_remote.mkdir()
+    clean_remote.mkdir()
+
+    git_env = {
+        "PATH": "/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin",
+        "GIT_AUTHOR_NAME": "Test Author",
+        "GIT_AUTHOR_EMAIL": "test@example.com",
+        "GIT_COMMITTER_NAME": "Test Author",
+        "GIT_COMMITTER_EMAIL": "test@example.com",
+    }
+    for r in (empty_remote, dirty_remote, clean_remote):
+        subprocess.run(["git", "init", "-q", "--bare", str(r)], check=True, env=git_env)
+
+    # 1. Empty destination remote is accepted as ready to receive the 3 approved refs
+    assert verify_publication_destination(REPO_ROOT, str(empty_remote)) == []
+
+    # 2. Remote with an unapproved branch or missing approved refs is rejected
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(REPO_ROOT),
+            "push",
+            "-q",
+            str(dirty_remote),
+            "HEAD:refs/heads/main",
+            "HEAD:refs/heads/legacy-unapproved-branch",
+        ],
+        check=True,
+        env=git_env,
+    )
+    dirty_findings = verify_publication_destination(REPO_ROOT, str(dirty_remote))
+    dirty_kinds = {str(item["kind"]) for item in dirty_findings}
+    assert "unapproved_remote_ref" in dirty_kinds
+    assert "missing_approved_remote_ref" in dirty_kinds
+
+    # 3. Remote containing exclusively the 3 approved refs at HEAD passes verification
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(REPO_ROOT),
+            "push",
+            "-q",
+            str(clean_remote),
+            "HEAD:refs/heads/main",
+            "HEAD:refs/heads/feature/aether-sprint-g-sync",
+            "HEAD:refs/heads/release/public-prototype-rc1",
+        ],
+        check=True,
+        env=git_env,
+    )
+    assert verify_publication_destination(REPO_ROOT, str(clean_remote)) == []
 
 

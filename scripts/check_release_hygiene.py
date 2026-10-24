@@ -157,6 +157,14 @@ EXPLICIT_FORBIDDEN_PATHS: frozenset[str] = frozenset(
     }
 )
 
+APPROVED_PUBLICATION_REFS: frozenset[str] = frozenset(
+    {
+        "refs/heads/main",
+        "refs/heads/feature/aether-sprint-g-sync",
+        "refs/heads/release/public-prototype-rc1",
+    }
+)
+
 
 def is_path_allowed(rel_path: str, allowlist: dict[str, object]) -> tuple[bool, str]:
     """Return (allowed, violation_kind) for a repository-relative path."""
@@ -360,6 +368,82 @@ def scan_git_history(
     return findings
 
 
+def verify_publication_destination(
+    repo_root: Path = REPO_ROOT,
+    remote: str = "origin",
+) -> list[dict[str, object]]:
+    """Verify that a publication remote is either empty or matches the exact 3 approved refs at HEAD."""
+    findings: list[dict[str, object]] = []
+    head_proc = subprocess.run(
+        ["git", "-C", str(repo_root), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    head_oid = head_proc.stdout.strip()
+
+    ls_remote = subprocess.run(
+        ["git", "-C", str(repo_root), "ls-remote", "--refs", remote],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if ls_remote.returncode != 0:
+        findings.append(
+            {
+                "path": remote,
+                "line": 1,
+                "kind": "unreachable_publication_remote",
+            }
+        )
+        return findings
+
+    remote_refs: dict[str, str] = {}
+    for line in ls_remote.stdout.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        parts = stripped.split()
+        if len(parts) >= 2:
+            oid, refname = parts[0].strip(), parts[1].strip()
+            remote_refs[refname] = oid
+
+    # An empty destination repository (0 refs) is ready to receive the 3 approved refs;
+    # a non-empty destination must contain exclusively APPROVED_PUBLICATION_REFS at HEAD.
+    if not remote_refs:
+        return findings
+
+    for refname, oid in sorted(remote_refs.items()):
+        if refname not in APPROVED_PUBLICATION_REFS:
+            findings.append(
+                {
+                    "path": f"{remote}:{refname}",
+                    "line": 1,
+                    "kind": "unapproved_remote_ref",
+                }
+            )
+        elif oid != head_oid:
+            findings.append(
+                {
+                    "path": f"{remote}:{refname}",
+                    "line": 1,
+                    "kind": "mismatched_remote_ref_oid",
+                }
+            )
+
+    for required_ref in sorted(APPROVED_PUBLICATION_REFS):
+        if required_ref not in remote_refs:
+            findings.append(
+                {
+                    "path": f"{remote}:{required_ref}",
+                    "line": 1,
+                    "kind": "missing_approved_remote_ref",
+                }
+            )
+
+    return findings
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Verify MX-Swarm release credential and boundary hygiene.")
     parser.add_argument(
@@ -372,13 +456,23 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Also scan all reachable git history objects and paths.",
     )
+    parser.add_argument(
+        "--verify-remote",
+        default=None,
+        help="Optional git remote name or URL to verify against the 3-ref publication scope.",
+    )
     args = parser.parse_args(argv)
     repo_root = Path(args.repo_root).resolve()
 
     cred_findings = scan_tracked_credentials(repo_root)
     boundary_findings = scan_release_boundary(repo_root)
     history_findings = scan_git_history(repo_root) if args.scan_history else []
-    findings = [*cred_findings, *boundary_findings, *history_findings]
+    remote_findings = (
+        verify_publication_destination(repo_root, args.verify_remote)
+        if args.verify_remote
+        else []
+    )
+    findings = [*cred_findings, *boundary_findings, *history_findings, *remote_findings]
     if findings:
         print(json.dumps({"ok": False, "findings": findings}, indent=2))
         return 1

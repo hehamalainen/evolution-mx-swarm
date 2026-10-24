@@ -89,3 +89,12 @@ When documenting or reporting results, always distinguish between:
 - Keep commits and PRs small and focused (`type: brief description`).
 - Do not commit secrets, `.env` files, or raw `.runtime/` / `reports/` directories outside `RELEASE_ALLOWLIST.json`.
 - Preserve third-party license notices in `LICENSE` and `THIRD_PARTY_NOTICES.md`.
+
+## Public Release Destination & Publication Plan
+
+- **Do not flip visibility on a legacy multi-branch working repository:** Deleting branch names on an existing GitHub remote does not guarantee that historical commits, pull-request refs, or cached objects are purged.
+- **Approved 3-Ref Publication Scope:** Public release is restricted to a freshly initialized destination repository (or verified clean remote) containing exclusively `refs/heads/main`, `refs/heads/feature/aether-sprint-g-sync`, and `refs/heads/release/public-prototype-rc1` pointing to the verified release candidate commit.
+- **Destination Preflight Verification:** Before and after pushing the three approved refs to an owner-approved destination remote, run:
+  ```bash
+  python scripts/check_release_hygiene.py --scan-history --verify-remote <destination-remote>
+  ```
