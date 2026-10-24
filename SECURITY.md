@@ -21,8 +21,9 @@ MX Swarm workers execute LLM-generated code and acceptance commands (`pytest`, `
 ### Enforced by MX Swarm (`worker/service.py` & `dashboard/api.py`)
 1. **Canonical Workspace Path Containment:**
    - Worker file reads, writes, overlays, and local landing materialization strip quote/backtick wrappers before validation, reject `.git` and traversal segments, reject any symlink component along the path (`os.path.islink`), and verify that `os.path.realpath(target)` stays strictly inside `os.path.realpath(workspace_root)`.
-2. **Sanitized Acceptance Command Environment:**
+2. **Sanitized Acceptance Command Environment & Ephemeral Git Authentication:**
    - Acceptance commands (`_run_command`) run with a sanitized environment (`_build_sanitized_command_env`) that strips host API keys and tokens (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `GOOGLE_API_KEY`, `GITHUB_TOKEN`, `AETHER_TOKEN`, `MX_DASHBOARD_TOKEN`, etc.) and isolates `HOME` and `TMPDIR` inside the workspace.
+   - `GitRepo` (`shared/utils/git.py`) never embeds `GITHUB_TOKEN` in repository URLs, command-line arguments, or `<workspace>/.git/config`. Remote Git operations (`clone`, `fetch`, `pull`, `push`) supply credentials exclusively via an ephemeral per-command `GIT_ASKPASS` / `GIT_CONFIG_*` helper directory that is removed in `finally:` and verified clean before acceptance checks execute.
 3. **Process-Group Termination on Timeout:**
    - Acceptance commands launch in a dedicated session/process group (`start_new_session=True`). On timeout or cancellation, the worker sends `SIGTERM` followed by `SIGKILL` to the entire process group (`os.killpg`) and reaps surviving descendants even if the direct parent shell exited early or a child ignores `SIGTERM`.
 4. **Loopback-Default Dashboard, API & WebSocket Protection:**

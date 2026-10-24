@@ -2376,6 +2376,8 @@ Example:
         task: TaskContract,
     ) -> list[tuple[str, bool, str]]:
         """Run acceptance check commands."""
+        if hasattr(repo, "scrub_workspace_credentials"):
+            repo.scrub_workspace_credentials()
         results = []
 
         for check in task.acceptance.checks:

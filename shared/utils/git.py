@@ -1,11 +1,35 @@
 """Git utilities for MX Swarm workers."""
 
 import asyncio
+import base64
 import os
+import re
 import shutil
+import stat
 import tempfile
 from dataclasses import dataclass
 from typing import Any, cast
+from urllib.parse import urlsplit, urlunsplit
+
+_URL_USERINFO_PATTERN = re.compile(r"(https?://)([^/\s@]+@)")
+
+
+def _strip_url_credentials(url: str) -> tuple[str, str | None]:
+    """Strip any embedded userinfo from an HTTP(S) URL and return (clean_url, extracted_secret)."""
+    if not url.startswith(("http://", "https://")):
+        return url, None
+    try:
+        parsed = urlsplit(url)
+    except ValueError:
+        return _URL_USERINFO_PATTERN.sub(r"\1", url), None
+    if parsed.username is None and parsed.password is None:
+        return url, None
+    extracted = parsed.password or parsed.username
+    host = parsed.hostname or ""
+    if parsed.port:
+        host = f"{host}:{parsed.port}"
+    clean_url = urlunsplit((parsed.scheme, host, parsed.path, parsed.query, parsed.fragment))
+    return clean_url, extracted
 
 
 @dataclass
@@ -76,24 +100,134 @@ class GitRepo:
             local_path: Local path for clone (temp dir if not specified)
             token: GitHub token for authentication
         """
-        self.repo_url = repo_url
+        clean_url, embedded_token = _strip_url_credentials(repo_url)
+        self.repo_url = clean_url
         self.local_path = local_path or tempfile.mkdtemp(prefix="mx-repo-")
-        self.token = token
+        self.token = token if token is not None else embedded_token
         self._cloned = False
 
     @property
     def authenticated_url(self) -> str:
-        """Get repo URL with token authentication."""
-        if not self.token:
-            return self.repo_url
+        """Return the credential-free repository URL.
 
-        # Insert token into URL
-        if "https://" in self.repo_url:
-            return self.repo_url.replace(
-                "https://",
-                f"https://x-access-token:{self.token}@"
-            )
+        Authentication is supplied ephemerally per Git subprocess and never embedded
+        in URLs, command arguments, or `.git/config`.
+        """
         return self.repo_url
+
+    def _redact_text(self, text: str, secrets: list[str]) -> str:
+        redacted = _URL_USERINFO_PATTERN.sub(r"\1<REDACTED_CREDENTIALS>@", text)
+        for secret in secrets:
+            if secret:
+                redacted = redacted.replace(secret, "<REDACTED_TOKEN>")
+        return redacted
+
+    def scrub_workspace_credentials(self) -> None:
+        """Ensure no credential material or extraheader config remains in workspace .git metadata."""
+        if not self.local_path or not os.path.isdir(self.local_path):
+            return
+        git_dir = os.path.join(self.local_path, ".git")
+        if not os.path.isdir(git_dir):
+            return
+
+        for cred_file in (
+            os.path.join(git_dir, "credentials"),
+            os.path.join(git_dir, ".git-credentials"),
+            os.path.join(self.local_path, ".git-credentials"),
+        ):
+            if os.path.lexists(cred_file):
+                try:
+                    os.remove(cred_file)
+                except OSError:
+                    pass
+
+        config_path = os.path.join(git_dir, "config")
+        if not os.path.isfile(config_path):
+            return
+        try:
+            with open(config_path, encoding="utf-8") as handle:
+                raw_config = handle.read()
+        except OSError:
+            return
+
+        cleaned_lines: list[str] = []
+        for line in raw_config.splitlines():
+            stripped = line.strip().lower()
+            if stripped.startswith(("extraheader =", "helper =", "askpass =")):
+                continue
+            cleaned_line = _URL_USERINFO_PATTERN.sub(r"\1", line)
+            if self.token:
+                cleaned_line = cleaned_line.replace(self.token, "")
+            cleaned_lines.append(cleaned_line)
+
+        cleaned_config = "\n".join(cleaned_lines) + ("\n" if raw_config.endswith("\n") else "")
+        if cleaned_config != raw_config:
+            try:
+                with open(config_path, "w", encoding="utf-8") as handle:
+                    handle.write(cleaned_config)
+            except OSError:
+                pass
+
+    async def _run_authenticated_git(
+        self,
+        args: list[str],
+        cwd: str | None = None,
+    ) -> GitResult:
+        """Run a remote Git operation using ephemeral process-only authentication."""
+        sanitized_args = [_strip_url_credentials(arg)[0] for arg in args]
+        if not self.token or os.path.isdir(self.repo_url):
+            try:
+                return await run_git(sanitized_args, cwd=cwd)
+            finally:
+                self.scrub_workspace_credentials()
+
+        auth_dir = tempfile.mkdtemp(prefix="mx-git-auth-")
+        os.chmod(auth_dir, 0o700)
+        askpass_path = os.path.join(auth_dir, "git-askpass.sh")
+        basic_secret = base64.b64encode(
+            f"x-access-token:{self.token}".encode()
+        ).decode("ascii")
+
+        try:
+            with open(askpass_path, "w", encoding="utf-8") as handle:
+                handle.write(
+                    "#!/bin/sh\n"
+                    'case "$1" in\n'
+                    '  *Username*|*username*) printf \'%s\\n\' "x-access-token" ;;\n'
+                    '  *) printf \'%s\\n\' "$MX_GIT_EPHEMERAL_TOKEN" ;;\n'
+                    "esac\n"
+                )
+            os.chmod(askpass_path, stat.S_IRWXU)
+
+            auth_env: dict[str, str] = {
+                "GIT_TERMINAL_PROMPT": "0",
+                "GIT_ASKPASS": askpass_path,
+                "MX_GIT_EPHEMERAL_TOKEN": self.token,
+            }
+            parsed = urlsplit(self.repo_url)
+            if parsed.scheme in {"http", "https"} and parsed.netloc:
+                origin_prefix = f"{parsed.scheme}://{parsed.netloc}/"
+                try:
+                    existing_count = int(os.environ.get("GIT_CONFIG_COUNT", "0") or "0")
+                except ValueError:
+                    existing_count = 0
+                auth_env["GIT_CONFIG_COUNT"] = str(existing_count + 1)
+                auth_env[f"GIT_CONFIG_KEY_{existing_count}"] = f"http.{origin_prefix}.extraheader"
+                auth_env[f"GIT_CONFIG_VALUE_{existing_count}"] = (
+                    f"AUTHORIZATION: basic {basic_secret}"
+                )
+
+            result = await run_git(sanitized_args, cwd=cwd, env=auth_env)
+            secrets_to_redact = [self.token, basic_secret]
+            return GitResult(
+                success=result.success,
+                stdout=self._redact_text(result.stdout, secrets_to_redact),
+                stderr=self._redact_text(result.stderr, secrets_to_redact),
+                return_code=result.return_code,
+            )
+        finally:
+            shutil.rmtree(auth_dir, ignore_errors=True)
+            self.scrub_workspace_credentials()
 
     async def clone(self, branch: str | None = None, depth: int = 1) -> GitResult:
         """
@@ -126,10 +260,12 @@ class GitRepo:
             if branch:
                 args.extend(["--branch", branch])
 
-            args.extend([self.authenticated_url, self.local_path])
+            args.extend([self.repo_url, self.local_path])
 
-        result = await run_git(args)
+        result = await self._run_authenticated_git(args)
         self._cloned = result.success
+        if not result.success and os.path.isdir(self.local_path):
+            self.scrub_workspace_credentials()
         return result
 
     async def fetch(self, branch: str | None = None) -> GitResult:
@@ -137,7 +273,7 @@ class GitRepo:
         args = ["fetch", "origin"]
         if branch:
             args.append(branch)
-        return await run_git(args, cwd=self.local_path)
+        return await self._run_authenticated_git(args, cwd=self.local_path)
 
     async def checkout(self, branch: str, create: bool = False) -> GitResult:
         """
@@ -162,7 +298,7 @@ class GitRepo:
         args = ["pull", "origin"]
         if branch:
             args.append(branch)
-        return await run_git(args, cwd=self.local_path)
+        return await self._run_authenticated_git(args, cwd=self.local_path)
 
     async def add(self, paths: list[str] | None = None) -> GitResult:
         """
@@ -216,7 +352,7 @@ class GitRepo:
         if force:
             args.insert(1, "--force")
 
-        return await run_git(args, cwd=self.local_path)
+        return await self._run_authenticated_git(args, cwd=self.local_path)
 
     async def get_current_branch(self) -> str | None:
         """Get current branch name."""

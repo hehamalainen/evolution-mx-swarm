@@ -98,3 +98,109 @@ async def test_run_command_strips_host_credentials_from_environment(
     assert "GITHUB=None" in output
     assert "AETHER=None" in output
     assert "dummy-anthropic-host-secret" not in output
+
+
+@pytest.mark.asyncio
+async def test_acceptance_workspace_cannot_recover_github_token_from_git_config_or_env(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    import base64
+    import subprocess
+    from datetime import UTC, datetime
+
+    from shared.adapters.queue import QueueMessage
+    from shared.schemas import AcceptanceCriteria, TaskContext, TaskContract, TaskType
+
+    # Create a real local bare remote fixture and seed it with an initial commit on 'main'
+    bare_remote = tmp_path / "remote_origin.git"
+    seed_repo = tmp_path / "seed_repo"
+    bare_remote.mkdir()
+    seed_repo.mkdir()
+    git_env = {
+        "PATH": "/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin",
+        "GIT_AUTHOR_NAME": "Seed Author",
+        "GIT_AUTHOR_EMAIL": "seed@example.com",
+        "GIT_COMMITTER_NAME": "Seed Author",
+        "GIT_COMMITTER_EMAIL": "seed@example.com",
+    }
+    subprocess.run(["git", "init", "-q", "--bare", str(bare_remote)], check=True, env=git_env)
+    subprocess.run(["git", "init", "-q", "-b", "main", str(seed_repo)], check=True, env=git_env)
+    (seed_repo / "app_mod.py").write_text("def value() -> int:\n    return 1\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(seed_repo), "add", "app_mod.py"], check=True, env=git_env)
+    subprocess.run(
+        ["git", "-C", str(seed_repo), "commit", "-q", "-m", "initial commit"],
+        check=True,
+        env=git_env,
+    )
+    subprocess.run(
+        ["git", "-C", str(seed_repo), "remote", "add", "origin", str(bare_remote)],
+        check=True,
+        env=git_env,
+    )
+    subprocess.run(["git", "-C", str(seed_repo), "push", "-q", "origin", "main"], check=True, env=git_env)
+
+    # Redirect https://github.com/example/repo.git to the local bare fixture via GIT_CONFIG_*
+    synthetic_token = "ghp_SYNTHETIC_ACCEPTANCE_SECRET_9876543210"
+    basic_secret = base64.b64encode(f"x-access-token:{synthetic_token}".encode()).decode("ascii")
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", f"url.{bare_remote}.insteadOf")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", "https://github.com/example/repo.git")
+
+    config = MXConfig()
+    config.vcs.provider = "github"
+    config.github.token = synthetic_token
+    config.github.repo_owner = "example"
+    config.github.repo_name = "repo"
+    config.github.default_branch = "main"
+
+    queue = StubQueue()
+    llm = StubLLM("```file:app_mod.py\ndef value() -> int:\n    return 2\n```\nUpdated value.")
+    vcs = CapturingVCS()
+    worker = Worker(config=config, worker_id="w-cred-isolation", queue=queue, llm=llm, vcs=vcs)
+
+    # Acceptance check attempts to recover the synthetic token or its base64 form from:
+    # 1. os.environ
+    # 2. .git/config and all files under the workspace (including .git/)
+    # 3. git remote -v and git config --list --local
+    probe_cmd = (
+        "python3 -c \""
+        "import os, pathlib, subprocess, sys; "
+        f"targets = ['{synthetic_token}', '{basic_secret}']; "
+        "env_dump = repr(dict(os.environ)); "
+        "git_cfg = pathlib.Path('.git/config').read_text(encoding='utf-8'); "
+        "remotes = subprocess.check_output(['git', 'remote', '-v'], text=True); "
+        "local_cfg = subprocess.check_output(['git', 'config', '--list', '--local'], text=True); "
+        "all_git_files = '\\n'.join("
+        "p.read_text(encoding='utf-8', errors='ignore') "
+        "for p in pathlib.Path('.git').rglob('*') if p.is_file()"
+        "); "
+        "combined = '\\n'.join([env_dump, git_cfg, remotes, local_cfg, all_git_files]); "
+        "leaked = [t for t in targets if t in combined]; "
+        "sys.exit(1 if leaked else 0)"
+        "\""
+    )
+
+    task = TaskContract.create(
+        task_type=TaskType.BUGFIX,
+        goal="Update app_mod value safely without exposing GitHub credentials",
+        context=TaskContext(files_hint=["app_mod.py"]),
+        acceptance=AcceptanceCriteria(
+            criteria=["No GitHub token recoverable from acceptance workspace"],
+            checks=[probe_cmd],
+        ),
+    )
+    msg = QueueMessage(
+        id="msg-cred-probe",
+        body=task.to_json(),
+        receipt_handle="rh-cred-probe",
+        receive_count=1,
+        enqueued_at=datetime.now(UTC),
+        attributes={},
+    )
+
+    ok = await worker.process_task(msg)
+    assert ok is True
+    assert queue.acks == ["rh-cred-probe"]
+    assert queue.nacks == []
