@@ -1939,6 +1939,9 @@ Example:
             if proc is not None:
                 await self._terminate_subprocess_tree(proc)
             return False, self._describe_exception(e, context="command execution failed")
+        finally:
+            if proc is not None:
+                await self._terminate_subprocess_tree(proc)
 
     async def _repo_has_changes(self, repo: object, changed_files: list[str]) -> bool:
         """Prefer repo-native diff detection but tolerate lightweight repo stubs."""
@@ -2375,27 +2378,38 @@ Example:
         repo: GitRepo,
         task: TaskContract,
     ) -> list[tuple[str, bool, str]]:
-        """Run acceptance check commands."""
+        """Run acceptance check commands while preserving trusted .git metadata."""
         if hasattr(repo, "scrub_workspace_credentials"):
             repo.scrub_workspace_credentials()
+        trusted_git_snapshot = (
+            repo.snapshot_trusted_git_dir()
+            if hasattr(repo, "snapshot_trusted_git_dir")
+            else None
+        )
         results = []
 
-        for check in task.acceptance.checks:
-            passed, output = await self._run_command(
-                check,
-                cwd=repo.local_path,
-                timeout=120,
-            )
+        try:
+            for check in task.acceptance.checks:
+                passed, output = await self._run_command(
+                    check,
+                    cwd=repo.local_path,
+                    timeout=120,
+                )
 
-            # Summarize output
-            lines = output.strip().split("\n")
-            summary = lines[-1] if lines else "No output"
-            if not passed and len(lines) > 1:
-                summary = f"{lines[0]}...{lines[-1]}"
+                # Summarize output
+                lines = output.strip().split("\n")
+                summary = lines[-1] if lines else "No output"
+                if not passed and len(lines) > 1:
+                    summary = f"{lines[0]}...{lines[-1]}"
 
-            results.append((check, passed, summary[:200]))
+                results.append((check, passed, summary[:200]))
 
-        return results
+            return results
+        finally:
+            if hasattr(repo, "restore_trusted_git_dir"):
+                repo.restore_trusted_git_dir(trusted_git_snapshot)
+            elif hasattr(repo, "scrub_workspace_credentials"):
+                repo.scrub_workspace_credentials()
 
     async def _canonicalize_changed_python_files(
         self,

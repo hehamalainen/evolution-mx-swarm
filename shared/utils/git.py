@@ -47,7 +47,7 @@ async def run_git(
     env: dict[str, str] | None = None,
 ) -> GitResult:
     """
-    Run a git command asynchronously.
+    Run a git command asynchronously with workspace hooks and unsafe execution paths disabled.
 
     Args:
         args: Git command arguments (without 'git')
@@ -57,30 +57,52 @@ async def run_git(
     Returns:
         GitResult with output and status
     """
-    cmd = ["git"] + args
+    empty_hooks_dir = tempfile.mkdtemp(prefix="mx-git-hooks-")
+    os.chmod(empty_hooks_dir, 0o700)
+    try:
+        cmd = [
+            "git",
+            "-c",
+            f"core.hooksPath={empty_hooks_dir}",
+            "-c",
+            "core.fsmonitor=false",
+            "-c",
+            "core.sshCommand=false",
+            "-c",
+            "core.pager=cat",
+            "-c",
+            "credential.helper=",
+            "-c",
+            "protocol.ext.allow=never",
+            "-c",
+            "submodule.recurse=false",
+            *args,
+        ]
 
-    # Merge environment
-    full_env = os.environ.copy()
-    if env:
-        full_env.update(env)
+        # Merge environment
+        full_env = os.environ.copy()
+        if env:
+            full_env.update(env)
 
-    proc = await asyncio.create_subprocess_exec(
-        *cmd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-        cwd=cwd,
-        env=full_env,
-    )
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=cwd,
+            env=full_env,
+        )
 
-    stdout, stderr = await proc.communicate()
+        stdout, stderr = await proc.communicate()
 
-    return_code = proc.returncode if proc.returncode is not None else 1
-    return GitResult(
-        success=return_code == 0,
-        stdout=stdout.decode("utf-8", errors="replace"),
-        stderr=stderr.decode("utf-8", errors="replace"),
-        return_code=return_code,
-    )
+        return_code = proc.returncode if proc.returncode is not None else 1
+        return GitResult(
+            success=return_code == 0,
+            stdout=stdout.decode("utf-8", errors="replace"),
+            stderr=stderr.decode("utf-8", errors="replace"),
+            return_code=return_code,
+        )
+    finally:
+        shutil.rmtree(empty_hooks_dir, ignore_errors=True)
 
 
 class GitRepo:
@@ -122,58 +144,155 @@ class GitRepo:
                 redacted = redacted.replace(secret, "<REDACTED_TOKEN>")
         return redacted
 
+    def _canonical_git_config(self) -> str:
+        """Build a trusted, minimal .git/config with no hooks, helpers, or custom commands."""
+        lines = [
+            "[core]",
+            "\trepositoryformatversion = 0",
+            "\tfilemode = true",
+            "\tbare = false",
+            "\tlogallrefupdates = true",
+        ]
+        if self.repo_url:
+            lines.extend(
+                [
+                    '[remote "origin"]',
+                    f"\turl = {self.repo_url}",
+                    "\tfetch = +refs/heads/*:refs/remotes/origin/*",
+                ]
+            )
+        return "\n".join(lines) + "\n"
+
+    @staticmethod
+    def _force_remove_tree_or_file(target_path: str) -> None:
+        """Remove a file, symlink, or directory tree even if permissions were made read-only."""
+        if not os.path.lexists(target_path):
+            return
+        if os.path.islink(target_path) or not os.path.isdir(target_path):
+            try:
+                os.unlink(target_path)
+            except OSError:
+                pass
+            return
+        try:
+            os.chmod(target_path, 0o700)
+        except OSError:
+            pass
+        for root, dirs, files in os.walk(target_path, topdown=False):
+            for name in files:
+                entry = os.path.join(root, name)
+                try:
+                    os.unlink(entry)
+                except OSError:
+                    pass
+            for name in dirs:
+                entry = os.path.join(root, name)
+                try:
+                    if os.path.islink(entry):
+                        os.unlink(entry)
+                    else:
+                        os.chmod(entry, 0o700)
+                        os.rmdir(entry)
+                except OSError:
+                    pass
+        shutil.rmtree(target_path, ignore_errors=True)
+
     def scrub_workspace_credentials(self) -> None:
-        """Ensure no credential material or extraheader config remains in workspace .git metadata."""
-        if not self.local_path or not os.path.isdir(self.local_path):
+        """Restore trusted workspace .git metadata and remove hooks, credentials, or config tampering."""
+        if not self.local_path or not os.path.lexists(self.local_path):
+            return
+        if os.path.islink(self.local_path) or not os.path.isdir(self.local_path):
             return
         git_dir = os.path.join(self.local_path, ".git")
-        if not os.path.isdir(git_dir):
+        if not os.path.lexists(git_dir):
+            return
+        if os.path.islink(git_dir) or not os.path.isdir(git_dir):
+            try:
+                os.unlink(git_dir)
+            except OSError:
+                pass
             return
 
-        for cred_file in (
+        try:
+            os.chmod(git_dir, 0o700)
+        except OSError:
+            pass
+
+        for target in (
             os.path.join(git_dir, "credentials"),
             os.path.join(git_dir, ".git-credentials"),
             os.path.join(self.local_path, ".git-credentials"),
+            os.path.join(git_dir, "info", "attributes"),
+            os.path.join(git_dir, "info", "grafts"),
+            os.path.join(git_dir, "remotes"),
+            os.path.join(git_dir, "branches"),
+            os.path.join(git_dir, "modules"),
+            os.path.join(git_dir, "worktrees"),
         ):
-            if os.path.lexists(cred_file):
-                try:
-                    os.remove(cred_file)
-                except OSError:
-                    pass
+            self._force_remove_tree_or_file(target)
+
+        hooks_dir = os.path.join(git_dir, "hooks")
+        self._force_remove_tree_or_file(hooks_dir)
+        os.makedirs(hooks_dir, mode=0o700, exist_ok=True)
 
         config_path = os.path.join(git_dir, "config")
-        if not os.path.isfile(config_path):
-            return
+        canonical_config = self._canonical_git_config()
         try:
-            with open(config_path, encoding="utf-8") as handle:
-                raw_config = handle.read()
+            if os.path.lexists(config_path):
+                os.unlink(config_path)
+            with open(config_path, "w", encoding="utf-8") as handle:
+                handle.write(canonical_config)
+            os.chmod(config_path, 0o600)
         except OSError:
-            return
+            pass
 
-        cleaned_lines: list[str] = []
-        for line in raw_config.splitlines():
-            stripped = line.strip().lower()
-            if stripped.startswith(("extraheader =", "helper =", "askpass =")):
-                continue
-            cleaned_line = _URL_USERINFO_PATTERN.sub(r"\1", line)
-            if self.token:
-                cleaned_line = cleaned_line.replace(self.token, "")
-            cleaned_lines.append(cleaned_line)
+    def snapshot_trusted_git_dir(self) -> str | None:
+        """Create an out-of-workspace snapshot of the trusted .git directory before untrusted execution."""
+        self.scrub_workspace_credentials()
+        if not self.local_path or not os.path.isdir(self.local_path):
+            return None
+        git_dir = os.path.join(self.local_path, ".git")
+        if not os.path.isdir(git_dir) or os.path.islink(git_dir):
+            return None
+        snapshot_root = tempfile.mkdtemp(prefix="mx-git-trusted-")
+        os.chmod(snapshot_root, 0o700)
+        shutil.copytree(git_dir, os.path.join(snapshot_root, "git"), symlinks=False)
+        return snapshot_root
 
-        cleaned_config = "\n".join(cleaned_lines) + ("\n" if raw_config.endswith("\n") else "")
-        if cleaned_config != raw_config:
-            try:
-                with open(config_path, "w", encoding="utf-8") as handle:
-                    handle.write(cleaned_config)
-            except OSError:
-                pass
+    def restore_trusted_git_dir(self, snapshot_root: str | None) -> None:
+        """Restore the workspace .git directory from a trusted snapshot and scrub metadata."""
+        try:
+            if (
+                snapshot_root
+                and os.path.isdir(snapshot_root)
+                and self.local_path
+                and os.path.isdir(self.local_path)
+            ):
+                snapshot_git = os.path.join(snapshot_root, "git")
+                if os.path.isdir(snapshot_git):
+                    git_dir = os.path.join(self.local_path, ".git")
+                    self._force_remove_tree_or_file(git_dir)
+                    shutil.copytree(snapshot_git, git_dir, symlinks=False)
+        finally:
+            if snapshot_root and os.path.exists(snapshot_root):
+                shutil.rmtree(snapshot_root, ignore_errors=True)
+            self.scrub_workspace_credentials()
+
+    async def _run_local_git(self, args: list[str]) -> GitResult:
+        """Run a non-authenticated repository Git operation after enforcing trusted metadata."""
+        self.scrub_workspace_credentials()
+        try:
+            return await run_git(args, cwd=self.local_path)
+        finally:
+            self.scrub_workspace_credentials()
 
     async def _run_authenticated_git(
         self,
         args: list[str],
         cwd: str | None = None,
     ) -> GitResult:
-        """Run a remote Git operation using ephemeral process-only authentication."""
+        """Run a remote Git operation using ephemeral process-only authentication and trusted config."""
+        self.scrub_workspace_credentials()
         sanitized_args = [_strip_url_credentials(arg)[0] for arg in args]
         if not self.token or os.path.isdir(self.repo_url):
             try:
@@ -183,18 +302,26 @@ class GitRepo:
 
         auth_dir = tempfile.mkdtemp(prefix="mx-git-auth-")
         os.chmod(auth_dir, 0o700)
+        empty_hooks_dir = os.path.join(auth_dir, "empty-hooks")
+        os.makedirs(empty_hooks_dir, mode=0o700, exist_ok=True)
+        token_path = os.path.join(auth_dir, "token")
         askpass_path = os.path.join(auth_dir, "git-askpass.sh")
         basic_secret = base64.b64encode(
             f"x-access-token:{self.token}".encode()
         ).decode("ascii")
 
         try:
+            with open(token_path, "w", encoding="utf-8") as token_handle:
+                token_handle.write(self.token)
+            os.chmod(token_path, stat.S_IRUSR | stat.S_IWUSR)
+
+            quoted_token_path = token_path.replace("'", "'\\''")
             with open(askpass_path, "w", encoding="utf-8") as handle:
                 handle.write(
                     "#!/bin/sh\n"
                     'case "$1" in\n'
                     '  *Username*|*username*) printf \'%s\\n\' "x-access-token" ;;\n'
-                    '  *) printf \'%s\\n\' "$MX_GIT_EPHEMERAL_TOKEN" ;;\n'
+                    f"  *) cat '{quoted_token_path}' ;;\n"
                     "esac\n"
                 )
             os.chmod(askpass_path, stat.S_IRWXU)
@@ -202,20 +329,35 @@ class GitRepo:
             auth_env: dict[str, str] = {
                 "GIT_TERMINAL_PROMPT": "0",
                 "GIT_ASKPASS": askpass_path,
-                "MX_GIT_EPHEMERAL_TOKEN": self.token,
             }
+            config_entries: list[tuple[str, str]] = [
+                ("core.hooksPath", empty_hooks_dir),
+                ("core.fsmonitor", "false"),
+                ("core.sshCommand", "false"),
+                ("core.pager", "cat"),
+                ("credential.helper", ""),
+                ("protocol.ext.allow", "never"),
+                ("submodule.recurse", "false"),
+                ("remote.origin.uploadpack", "git-upload-pack"),
+                ("remote.origin.receivepack", "git-receive-pack"),
+                ("remote.origin.url", self.repo_url),
+            ]
             parsed = urlsplit(self.repo_url)
             if parsed.scheme in {"http", "https"} and parsed.netloc:
                 origin_prefix = f"{parsed.scheme}://{parsed.netloc}/"
-                try:
-                    existing_count = int(os.environ.get("GIT_CONFIG_COUNT", "0") or "0")
-                except ValueError:
-                    existing_count = 0
-                auth_env["GIT_CONFIG_COUNT"] = str(existing_count + 1)
-                auth_env[f"GIT_CONFIG_KEY_{existing_count}"] = f"http.{origin_prefix}.extraheader"
-                auth_env[f"GIT_CONFIG_VALUE_{existing_count}"] = (
-                    f"AUTHORIZATION: basic {basic_secret}"
+                config_entries.append(
+                    (f"http.{origin_prefix}.extraheader", f"AUTHORIZATION: basic {basic_secret}")
                 )
+
+            try:
+                existing_count = int(os.environ.get("GIT_CONFIG_COUNT", "0") or "0")
+            except ValueError:
+                existing_count = 0
+            auth_env["GIT_CONFIG_COUNT"] = str(existing_count + len(config_entries))
+            for offset, (cfg_key, cfg_val) in enumerate(config_entries):
+                idx = existing_count + offset
+                auth_env[f"GIT_CONFIG_KEY_{idx}"] = cfg_key
+                auth_env[f"GIT_CONFIG_VALUE_{idx}"] = cfg_val
 
             result = await run_git(sanitized_args, cwd=cwd, env=auth_env)
             secrets_to_redact = [self.token, basic_secret]
@@ -291,7 +433,7 @@ class GitRepo:
         else:
             args = ["checkout", branch]
 
-        return await run_git(args, cwd=self.local_path)
+        return await self._run_local_git(args)
 
     async def pull(self, branch: str | None = None) -> GitResult:
         """Pull from remote."""
@@ -316,7 +458,7 @@ class GitRepo:
         else:
             args.append("-A")
 
-        return await run_git(args, cwd=self.local_path)
+        return await self._run_local_git(args)
 
     async def commit(self, message: str, author: str | None = None) -> GitResult:
         """
@@ -329,12 +471,12 @@ class GitRepo:
         Returns:
             GitResult
         """
-        args = ["commit", "-m", message]
+        args = ["commit", "--no-verify", "-m", message]
 
         if author:
             args.extend(["--author", author])
 
-        return await run_git(args, cwd=self.local_path)
+        return await self._run_local_git(args)
 
     async def push(self, branch: str, force: bool = False) -> GitResult:
         """
@@ -347,7 +489,7 @@ class GitRepo:
         Returns:
             GitResult
         """
-        args = ["push", "-u", "origin", branch]
+        args = ["push", "--no-verify", "-u", "origin", branch]
 
         if force:
             args.insert(1, "--force")
@@ -356,21 +498,21 @@ class GitRepo:
 
     async def get_current_branch(self) -> str | None:
         """Get current branch name."""
-        result = await run_git(["branch", "--show-current"], cwd=self.local_path)
+        result = await self._run_local_git(["branch", "--show-current"])
         if result.success:
             return result.stdout.strip()
         return None
 
     async def get_status(self) -> GitResult:
         """Get repository status."""
-        return await run_git(["status", "--porcelain"], cwd=self.local_path)
+        return await self._run_local_git(["status", "--porcelain"])
 
     async def get_diff(self, staged: bool = False) -> GitResult:
         """Get diff."""
         args = ["diff"]
         if staged:
             args.append("--staged")
-        return await run_git(args, cwd=self.local_path)
+        return await self._run_local_git(args)
 
     async def diff(self, ref_from: str, ref_to: str) -> GitResult:
         """Get diff between two refs (commits/branches).
@@ -383,14 +525,14 @@ class GitRepo:
             GitResult with unified diff in stdout
         """
         args = ["diff", ref_from, ref_to]
-        return await run_git(args, cwd=self.local_path)
+        return await self._run_local_git(args)
 
     async def get_log(self, count: int = 10, oneline: bool = True) -> GitResult:
         """Get commit log."""
         args = ["log", f"-{count}"]
         if oneline:
             args.append("--oneline")
-        return await run_git(args, cwd=self.local_path)
+        return await self._run_local_git(args)
 
     async def has_changes(self) -> bool:
         """Check if there are uncommitted changes."""

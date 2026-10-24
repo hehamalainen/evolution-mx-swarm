@@ -116,11 +116,22 @@ async def test_authenticated_git_operations_use_ephemeral_auth_and_clean_up_on_s
 
     assert len(captured_calls) == 4
     for args, env, askpass_existed_during_call in captured_calls:
-        # Command arguments never contain the token
+        # Command arguments and raw environment variables never contain the plaintext token
         assert all(synthetic_token not in arg for arg in args)
         assert env is not None
-        assert env.get("MX_GIT_EPHEMERAL_TOKEN") == synthetic_token
+        assert "MX_GIT_EPHEMERAL_TOKEN" not in env
+        assert all(synthetic_token not in val for val in env.values())
         assert askpass_existed_during_call is True
+        # Hardened config overrides disable workspace hooks and external helpers
+        cfg_pairs = {
+            env[f"GIT_CONFIG_KEY_{i}"]: env[f"GIT_CONFIG_VALUE_{i}"]
+            for i in range(int(env["GIT_CONFIG_COUNT"]))
+            if f"GIT_CONFIG_KEY_{i}" in env
+        }
+        assert cfg_pairs.get("core.fsmonitor") == "false"
+        assert cfg_pairs.get("core.sshCommand") == "false"
+        assert cfg_pairs.get("protocol.ext.allow") == "never"
+        assert "core.hooksPath" in cfg_pairs
 
     # Every temporary askpass directory was removed immediately after each git invocation
     assert observed_askpass_paths
