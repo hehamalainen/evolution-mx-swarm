@@ -222,6 +222,10 @@ class GitRepo:
             os.path.join(git_dir, "credentials"),
             os.path.join(git_dir, ".git-credentials"),
             os.path.join(self.local_path, ".git-credentials"),
+            os.path.join(git_dir, "commondir"),
+            os.path.join(git_dir, "gitdir"),
+            os.path.join(git_dir, "common"),
+            os.path.join(git_dir, "config.worktree"),
             os.path.join(git_dir, "info", "attributes"),
             os.path.join(git_dir, "info", "grafts"),
             os.path.join(git_dir, "remotes"),
@@ -257,6 +261,12 @@ class GitRepo:
         snapshot_root = tempfile.mkdtemp(prefix="mx-git-trusted-")
         os.chmod(snapshot_root, 0o700)
         shutil.copytree(git_dir, os.path.join(snapshot_root, "git"), symlinks=False)
+        worktree_meta = os.path.join(snapshot_root, "worktree_meta")
+        os.makedirs(worktree_meta, mode=0o700, exist_ok=True)
+        for meta_name in (".gitattributes", ".gitmodules"):
+            src_meta = os.path.join(self.local_path, meta_name)
+            if os.path.isfile(src_meta) and not os.path.islink(src_meta):
+                shutil.copy2(src_meta, os.path.join(worktree_meta, meta_name))
         return snapshot_root
 
     def restore_trusted_git_dir(self, snapshot_root: str | None) -> None:
@@ -273,6 +283,13 @@ class GitRepo:
                     git_dir = os.path.join(self.local_path, ".git")
                     self._force_remove_tree_or_file(git_dir)
                     shutil.copytree(snapshot_git, git_dir, symlinks=False)
+                worktree_meta = os.path.join(snapshot_root, "worktree_meta")
+                for meta_name in (".gitattributes", ".gitmodules"):
+                    dest_meta = os.path.join(self.local_path, meta_name)
+                    saved_meta = os.path.join(worktree_meta, meta_name)
+                    self._force_remove_tree_or_file(dest_meta)
+                    if os.path.isfile(saved_meta):
+                        shutil.copy2(saved_meta, dest_meta)
         finally:
             if snapshot_root and os.path.exists(snapshot_root):
                 shutil.rmtree(snapshot_root, ignore_errors=True)

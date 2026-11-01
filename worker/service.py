@@ -20,12 +20,17 @@ import shlex
 import shutil
 import signal
 import sys
+import tarfile
 import tempfile
+import time
 import traceback
+import urllib.parse
+import urllib.request
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from io import BytesIO
 from pathlib import Path
 from typing import Any
 
@@ -227,10 +232,19 @@ class Worker:
         self._submission_records: dict[tuple[str, str], dict] = {}
         self._attempt_started_at: dict[tuple[str, str], datetime] = {}
         self._attempt_llm_cost_usd: dict[tuple[str, str], float] = {}
+        self._executed_acceptance_checks: dict[str, list[dict[str, Any]]] = {}
+        self._owned_workspace_roots: set[Path] = set()
         self._capability_registry = get_capability_registry(repo_path=os.getcwd())
 
         # Initialize VCS adapter (Aether or GitHub)
         self._vcs = vcs or create_vcs_adapter(self._build_vcs_config())
+
+    def get_executed_acceptance_checks(self) -> dict[str, list[dict[str, Any]]]:
+        """Return a copy of recorded acceptance check execution outcomes per task."""
+        return {
+            task_id: [dict(entry) for entry in entries]
+            for task_id, entries in self._executed_acceptance_checks.items()
+        }
 
     def _build_vcs_config(self) -> dict:
         """Build VCS config dict from MXConfig."""
@@ -336,6 +350,10 @@ class Worker:
 
     def _get_repo_url(self) -> str:
         """Get repository URL."""
+        local_override = os.environ.get("MX_LOCAL_REPO_PATH", "").strip()
+        if local_override:
+            return local_override
+
         # In Aether mode, always use local filesystem as the source repo.
         if self.config.vcs.provider == "aether":
             return os.getcwd()
@@ -389,6 +407,7 @@ class Worker:
         """Create an isolated worker workspace in /tmp."""
         workspace_root = os.path.join(tempfile.gettempdir(), f"mx_worker_{uuid.uuid4().hex}")
         os.makedirs(workspace_root, exist_ok=True)
+        self._owned_workspace_roots.add(Path(workspace_root).resolve())
         return workspace_root
 
     def _strip_path_wrappers(self, path: str) -> str:
@@ -815,7 +834,14 @@ class Worker:
                 detail=f"Unable to load canned completion fixture {fixture_path}: {self._describe_exception(exc)}",
             ) from exc
 
-        files_payload = payload.get("files")
+        task_specific = payload.get(task.id) or payload.get(task.goal)
+        if isinstance(task_specific, dict):
+            files_payload = task_specific.get("files")
+            note = task_specific.get("note")
+        else:
+            files_payload = payload.get("files")
+            note = payload.get("note")
+
         if not isinstance(files_payload, dict):
             raise WorkerFastFailError(
                 reason=NackReason.ERR_TASK_FAILED.value,
@@ -844,7 +870,7 @@ class Worker:
             fence = "python" if relative_path.endswith(".py") else "file"
             blocks.append(f"```{fence}:{relative_path}\n{content.rstrip()}\n```")
 
-        note = payload.get("note")
+        note = (note if isinstance(note, str) else None) or payload.get("note")
         metadata: dict[str, object] = {
             "fixture_path": fixture_path,
             "emitted_paths": emitted_paths,
@@ -861,6 +887,335 @@ class Worker:
             ),
             metadata,
         )
+
+    @staticmethod
+    def _is_forbidden_snapshot_segment(segment: str) -> bool:
+        """Return True if a path segment refers to .git metadata or any filesystem alias."""
+        cleaned = segment.strip().rstrip(". ").lower()
+        if not cleaned or cleaned in {".", ".."}:
+            return True
+        if cleaned in {".git", ".gitmodules", ".gitattributes", ".gitignore"} or cleaned.startswith(".git"):
+            return True
+        if re.match(r"^\.?git~\d*$", cleaned):
+            return True
+        return False
+
+    @classmethod
+    def _validate_snapshot_member_path(cls, raw_name: str, *, allow_root_dir: bool = False) -> str:
+        """Validate a tar member path and return a normalized POSIX relative path."""
+        if not raw_name or "\x00" in raw_name or "\\" in raw_name or ":" in raw_name:
+            raise WorkerFastFailError(
+                reason=NackReason.ERR_TASK_FAILED.value,
+                detail=f"Malformed or unsafe path detected in tar: {raw_name!r}",
+            )
+        if raw_name.startswith("/") or os.path.isabs(raw_name):
+            raise WorkerFastFailError(
+                reason=NackReason.ERR_TASK_FAILED.value,
+                detail=f"Absolute path detected in tar: {raw_name}",
+            )
+        stripped = raw_name.strip("/")
+        if allow_root_dir and stripped in {"", "."}:
+            return "."
+        parts = [part for part in raw_name.split("/") if part not in {"", "."}]
+        if not parts:
+            raise WorkerFastFailError(
+                reason=NackReason.ERR_TASK_FAILED.value,
+                detail=f"Empty path detected in tar: {raw_name!r}",
+            )
+        for seg in raw_name.split("/"):
+            if seg == "..":
+                raise WorkerFastFailError(
+                    reason=NackReason.ERR_TASK_FAILED.value,
+                    detail=f"Path traversal detected in tar: {raw_name}",
+                )
+            if seg and seg != "." and cls._is_forbidden_snapshot_segment(seg):
+                raise WorkerFastFailError(
+                    reason=NackReason.ERR_TASK_FAILED.value,
+                    detail=f"Disallowed VCS metadata segment {seg!r} in snapshot tar: {raw_name}",
+                )
+        normalized = os.path.normpath("/".join(parts)).replace("\\", "/")
+        if normalized.startswith("..") or "/../" in f"/{normalized}/":
+            raise WorkerFastFailError(
+                reason=NackReason.ERR_TASK_FAILED.value,
+                detail=f"Path traversal detected in tar: {raw_name}",
+            )
+        return normalized
+
+    async def extract_snapshot_securely(
+        self,
+        tar_bytes: bytes,
+        extract_dir: str | Path,
+        repo_id: str | None = None,
+        snapshot_id: str | None = None,
+        tree_hash: str | None = None,
+        *,
+        require_manifest: bool = True,
+        clean_destination: bool = False,
+    ) -> list[str]:
+        """Extract snapshot tar bytes via an empty staging directory, rejecting .git metadata and links."""
+        import hashlib
+
+        max_file_size = 10 * 1024 * 1024
+        max_total_size = 100 * 1024 * 1024
+        max_file_count = 1000
+        raw_extract_path = Path(extract_dir)
+        raw_fspath = os.fspath(raw_extract_path).rstrip("/\\") or os.fspath(raw_extract_path)
+        if os.path.islink(raw_fspath) or raw_extract_path.is_symlink():
+            raise WorkerFastFailError(
+                reason=NackReason.ERR_TASK_FAILED.value,
+                detail=f"Destination root must not be a symlink: {extract_dir}",
+            )
+        system_root_symlinks = {Path("/tmp"), Path("/var"), Path("/etc")}  # nosec B108
+        for anc in raw_extract_path.expanduser().absolute().parents:
+            if anc in system_root_symlinks:
+                continue
+            if anc.exists() and anc.is_symlink():
+                raise WorkerFastFailError(
+                    reason=NackReason.ERR_TASK_FAILED.value,
+                    detail=f"Destination ancestor must not be a symlink: {anc}",
+                )
+        extract_path = raw_extract_path.resolve()
+
+        try:
+            with tarfile.open(fileobj=BytesIO(tar_bytes), mode="r:gz") as tar:
+                members = tar.getmembers()
+                non_dir_members = [m for m in members if not m.isdir()]
+                if len(non_dir_members) > max_file_count:
+                    raise WorkerFastFailError(
+                        reason=NackReason.ERR_TASK_FAILED.value,
+                        detail=f"Tar contains {len(non_dir_members)} files, exceeding limit of {max_file_count}",
+                    )
+
+                total_size = 0
+                manifest_member = None
+                validated_members: list[tuple[tarfile.TarInfo, str]] = []
+                for member in members:
+                    name = member.name
+                    if member.issym() or member.islnk() or not (member.isfile() or member.isdir()):
+                        raise WorkerFastFailError(
+                            reason=NackReason.ERR_TASK_FAILED.value,
+                            detail=f"Symlinks, hardlinks, and special entries are prohibited: {name}",
+                        )
+                    normalized = self._validate_snapshot_member_path(
+                        name,
+                        allow_root_dir=member.isdir(),
+                    )
+                    if normalized == ".":
+                        continue
+                    resolved = (extract_path / normalized).resolve()
+                    try:
+                        resolved.relative_to(extract_path)
+                    except ValueError as exc:
+                        raise WorkerFastFailError(
+                            reason=NackReason.ERR_TASK_FAILED.value,
+                            detail=f"Path traversal resolved outside destination: {name}",
+                        ) from exc
+                    if member.isfile():
+                        if member.size < 0 or member.size > max_file_size:
+                            raise WorkerFastFailError(
+                                reason=NackReason.ERR_TASK_FAILED.value,
+                                detail=f"File {name} size {member.size} exceeds limit of {max_file_size}",
+                            )
+                        total_size += member.size
+                        if total_size > max_total_size:
+                            raise WorkerFastFailError(
+                                reason=NackReason.ERR_TASK_FAILED.value,
+                                detail=f"Total size {total_size} exceeds limit of {max_total_size}",
+                            )
+                    if normalized == ".aether_manifest.json":
+                        manifest_member = member
+                    else:
+                        validated_members.append((member, normalized))
+
+                manifest_files: dict[str, str] | None = None
+                if require_manifest or manifest_member is not None:
+                    if manifest_member is None:
+                        raise WorkerFastFailError(
+                            reason=NackReason.ERR_TASK_FAILED.value,
+                            detail="Tar is missing .aether_manifest.json",
+                        )
+                    extracted_manifest = tar.extractfile(manifest_member)
+                    if extracted_manifest is None:
+                        raise WorkerFastFailError(
+                            reason=NackReason.ERR_TASK_FAILED.value,
+                            detail="Could not extract manifest file",
+                        )
+                    manifest_data = json.loads(extracted_manifest.read().decode("utf-8"))
+                    if repo_id is not None and manifest_data.get("repo_id") != repo_id:
+                        raise WorkerFastFailError(
+                            reason=NackReason.ERR_TASK_FAILED.value,
+                            detail=f"Repo ID mismatch: expected {repo_id}, got {manifest_data.get('repo_id')}",
+                        )
+                    if snapshot_id is not None and manifest_data.get("snapshot_id") != snapshot_id:
+                        raise WorkerFastFailError(
+                            reason=NackReason.ERR_TASK_FAILED.value,
+                            detail=f"Snapshot ID mismatch: expected {snapshot_id}, got {manifest_data.get('snapshot_id')}",
+                        )
+                    if tree_hash is not None and manifest_data.get("tree_hash") != tree_hash:
+                        raise WorkerFastFailError(
+                            reason=NackReason.ERR_TASK_FAILED.value,
+                            detail=f"Tree hash mismatch: expected {tree_hash}, got {manifest_data.get('tree_hash')}",
+                        )
+                    raw_files = manifest_data.get("files")
+                    if not isinstance(raw_files, dict):
+                        raise WorkerFastFailError(
+                            reason=NackReason.ERR_TASK_FAILED.value,
+                            detail="Manifest is missing valid 'files' mapping",
+                        )
+                    manifest_files = {str(k): str(v) for k, v in raw_files.items()}
+
+                copied_rel_paths: list[str] = []
+                with tempfile.TemporaryDirectory(prefix="mx_snapshot_stage_") as stage_dir:
+                    stage_root = Path(stage_dir).resolve()
+                    staged_files: list[tuple[str, Path]] = []
+
+                    for member, normalized in validated_members:
+                        if member.isdir():
+                            continue
+                        if manifest_files is not None and normalized not in manifest_files:
+                            raise WorkerFastFailError(
+                                reason=NackReason.ERR_TASK_FAILED.value,
+                                detail=f"File {normalized} is not listed in manifest.",
+                            )
+                        extracted_file = tar.extractfile(member)
+                        if extracted_file is None:
+                            raise WorkerFastFailError(
+                                reason=NackReason.ERR_TASK_FAILED.value,
+                                detail=f"Could not read file {normalized} from tar.",
+                            )
+                        content = extracted_file.read()
+                        if manifest_files is not None:
+                            expected_sha = manifest_files[normalized]
+                            actual_sha = hashlib.sha256(content).hexdigest()
+                            if actual_sha != expected_sha:
+                                raise WorkerFastFailError(
+                                    reason=NackReason.ERR_TASK_FAILED.value,
+                                    detail=f"SHA-256 mismatch for file {normalized}: expected {expected_sha}, got {actual_sha}",
+                                )
+                        stage_target = (stage_root / normalized).resolve()
+                        stage_target.relative_to(stage_root)
+                        stage_target.parent.mkdir(parents=True, exist_ok=True)
+                        stage_target.write_bytes(content)
+                        staged_files.append((normalized, stage_target))
+
+                    if os.path.islink(raw_fspath) or raw_extract_path.is_symlink() or extract_path.is_symlink():
+                        raise WorkerFastFailError(
+                            reason=NackReason.ERR_TASK_FAILED.value,
+                            detail=f"Destination root must not be a symlink: {extract_dir}",
+                        )
+                    extract_path.mkdir(parents=True, exist_ok=True)
+
+                    if clean_destination:
+                        forbidden_roots = {
+                            Path("/").resolve(),
+                            Path.home().resolve(),
+                            Path.cwd().resolve(),
+                        }
+                        if extract_path in forbidden_roots:
+                            raise WorkerFastFailError(
+                                reason=NackReason.ERR_TASK_FAILED.value,
+                                detail=f"Refusing destructive cleanup on protected root: {extract_path}",
+                            )
+                        owned_roots: set[Path] = getattr(self, "_owned_workspace_roots", set())
+                        git_dir = extract_path / ".git"
+                        allowed_temp_roots = {
+                            Path(tempfile.gettempdir()).resolve(),
+                            Path("/tmp").resolve(),  # nosec B108
+                        }
+                        in_temp_root = any(
+                            extract_path != tr and tr in extract_path.parents
+                            for tr in allowed_temp_roots
+                        )
+                        is_valid_worktree = (
+                            git_dir.is_dir() and not git_dir.is_symlink() and in_temp_root
+                        )
+                        if extract_path not in owned_roots and not is_valid_worktree:
+                            raise WorkerFastFailError(
+                                reason=NackReason.ERR_TASK_FAILED.value,
+                                detail=f"Refusing destructive snapshot cleanup on non-worker-owned directory: {extract_path}",
+                            )
+                        for existing in list(extract_path.iterdir()):
+                            if existing.name == ".git":
+                                continue
+                            if existing.is_symlink() or existing.is_file():
+                                existing.unlink()
+                            elif existing.is_dir():
+                                shutil.rmtree(existing)
+
+                    for normalized, stage_target in staged_files:
+                        if stage_target.is_symlink() or not stage_target.is_file():
+                            raise WorkerFastFailError(
+                                reason=NackReason.ERR_TASK_FAILED.value,
+                                detail=f"Refusing non-regular staged file: {normalized}",
+                            )
+                        cur = extract_path
+                        parts = normalized.split("/")
+                        for seg in parts[:-1]:
+                            if self._is_forbidden_snapshot_segment(seg):
+                                raise WorkerFastFailError(
+                                    reason=NackReason.ERR_TASK_FAILED.value,
+                                    detail=f"Disallowed directory segment {seg!r} on copy",
+                                )
+                            cur = cur / seg
+                            if cur.is_symlink():
+                                raise WorkerFastFailError(
+                                    reason=NackReason.ERR_TASK_FAILED.value,
+                                    detail=f"Refusing to traverse symlink directory: {cur}",
+                                )
+                            cur.mkdir(parents=True, exist_ok=True)
+                        leaf = parts[-1]
+                        if self._is_forbidden_snapshot_segment(leaf):
+                            raise WorkerFastFailError(
+                                reason=NackReason.ERR_TASK_FAILED.value,
+                                detail=f"Disallowed file segment {leaf!r} on copy",
+                            )
+                        dest_file = cur / leaf
+                        if dest_file.is_symlink():
+                            raise WorkerFastFailError(
+                                reason=NackReason.ERR_TASK_FAILED.value,
+                                detail=f"Refusing to overwrite symlink file: {dest_file}",
+                            )
+                        dest_resolved = dest_file.resolve()
+                        dest_resolved.relative_to(extract_path)
+                        shutil.copyfile(stage_target, dest_resolved)
+                        copied_rel_paths.append(normalized)
+
+                return copied_rel_paths
+        except WorkerFastFailError:
+            raise
+        except Exception as exc:
+            raise WorkerFastFailError(
+                reason=NackReason.ERR_TASK_FAILED.value,
+                detail=f"Failed to extract snapshot securely: {exc}",
+            ) from exc
+
+    async def commit_synthetic_baseline(self, repo_dir: str | Path) -> None:
+        """Configure git identity, bypass hooks, and create a synthetic baseline commit."""
+        import subprocess  # nosec B404
+
+        path = Path(repo_dir).resolve()
+
+        def run_git(args: list[str]) -> None:
+            try:
+                subprocess.run(  # nosec B603 B607
+                    ["git", *args],
+                    cwd=path,
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                )
+            except subprocess.CalledProcessError as exc:
+                stderr_str = exc.stderr.strip() if exc.stderr else ""
+                raise WorkerFastFailError(
+                    reason=NackReason.ERR_TASK_FAILED.value,
+                    detail=f"Git command failed: git {' '.join(args)}: {stderr_str}",
+                ) from exc
+
+        run_git(["config", "core.hooksPath", "/dev/null"])
+        run_git(["config", "user.name", "MX Swarm Worker"])
+        run_git(["config", "user.email", "worker@mx-swarm.local"])
+        run_git(["add", "-A"])
+        run_git(["commit", "-m", "Synthetic baseline commit", "--allow-empty"])
 
     def _llm_max_tokens_for_task(self, task: TaskContract) -> int:
         llm_config = self._llm_config_for_task(task)
@@ -2095,6 +2450,44 @@ Example:
         Returns:
             (list of changed files, implementation notes)
         """
+        fixture_path = self._canned_completion_fixture_path()
+        if fixture_path is not None:
+            try:
+                with open(fixture_path, encoding="utf-8") as handle:
+                    payload = json.load(handle)
+            except Exception as exc:
+                raise WorkerFastFailError(
+                    reason=NackReason.ERR_TASK_FAILED.value,
+                    detail=f"Unable to load canned completion fixture {fixture_path}: {self._describe_exception(exc)}",
+                ) from exc
+
+            if not isinstance(payload.get("files"), dict):
+                task_specific = payload.get(task.id) or payload.get(task.goal)
+                if not isinstance(task_specific, dict):
+                    raise WorkerFastFailError(
+                        reason=NackReason.ERR_TASK_FAILED.value,
+                        detail=f"Canned completion fixture {fixture_path} is missing target task ID/goal {task.id}",
+                    )
+                files_payload = task_specific.get("files")
+                note = task_specific.get("note")
+                if not isinstance(files_payload, dict):
+                    raise WorkerFastFailError(
+                        reason=NackReason.ERR_TASK_FAILED.value,
+                        detail=f"Canned completion fixture {fixture_path} is missing a 'files' object.",
+                    )
+                apply_attr = "apply_changes"
+                apply_fn = getattr(self, apply_attr, None)
+                if callable(apply_fn):
+                    changed_files, notes = await apply_fn(repo, task)
+                    return changed_files, str(notes)
+                changed_files = []
+                for relative_path, content in files_payload.items():
+                    if relative_path.endswith(".py"):
+                        self._validate_python_syntax(relative_path, content)
+                    await self._write_file(repo, relative_path, content)
+                    changed_files.append(relative_path)
+                return changed_files, str(note or "Implementation complete (canned).")
+
         context = await self._get_codebase_context(repo, task)
 
         # Read AGENTS.md for guidelines
@@ -2406,6 +2799,14 @@ Example:
 
             return results
         finally:
+            self._executed_acceptance_checks[task.id] = [
+                {
+                    "command": cmd,
+                    "passed": bool(passed),
+                    "summary": summary,
+                }
+                for cmd, passed, summary in results
+            ]
             if hasattr(repo, "restore_trusted_git_dir"):
                 repo.restore_trusted_git_dir(trusted_git_snapshot)
             elif hasattr(repo, "scrub_workspace_credentials"):
@@ -2438,6 +2839,136 @@ Example:
                 suffix = summary[-1] if summary else "No output"
                 print(f"[{self.worker_id}] Canonicalization warning: {command} -> {suffix[:200]}")
 
+    def _contention_barrier_dir(self) -> str:
+        raw = os.environ.get("MX_CONTENTION_BARRIER_DIR", "").strip()
+        return raw or os.path.join(".runtime", "barrier")
+
+    def _contention_barrier_group_id(self, task: TaskContract) -> str:
+        run_id = self._submission_source_run_id(task) or "default_run"
+        repo_id = getattr(self._vcs, "repo_id", None) or "default_repo"
+        return f"semantic-canary:{run_id}:{repo_id}:{task.contention_group_id}"
+
+    def _write_barrier_fail_token(self, task: TaskContract, reason: str) -> None:
+        if not (task.contention_expected_tasks and task.contention_group_id):
+            return
+        barrier_dir = self._contention_barrier_dir()
+        os.makedirs(barrier_dir, exist_ok=True)
+        group_id = self._contention_barrier_group_id(task)
+        fail_file = os.path.join(barrier_dir, f"{group_id}_{task.id}_failed.json")
+        try:
+            with open(fail_file, "w", encoding="utf-8") as handle:
+                json.dump(
+                    {
+                        "task_id": task.id,
+                        "status": "failed",
+                        "reason": reason,
+                        "timestamp": time.time(),
+                    },
+                    handle,
+                )
+            print(f"[{self.worker_id}] Wrote barrier fail-fast token to {fail_file}")
+        except Exception as fe:
+            print(f"[{self.worker_id}] Failed to write barrier fail-fast token: {fe}")
+
+    async def materialize_aether_base_head(
+        self,
+        repo: GitRepo,
+        actual_head: str,
+        workspace_root: str,
+        *,
+        tar_bytes_override: bytes | None = None,
+    ) -> bool:
+        """Download and stage an Aether base head snapshot via the single bounded extractor."""
+        base_url = str(
+            getattr(self._vcs, "base_url", self.config.vcs.aether_base_url)
+        ).rstrip("/")
+        repo_id = str(getattr(self._vcs, "repo_id", self.config.vcs.aether_repo_id))
+        snapshot_id: str | None = actual_head if actual_head.startswith("snap") else None
+
+        if tar_bytes_override is not None:
+            tar_bytes = tar_bytes_override
+            snapshot_id = snapshot_id or "snap_override"
+        else:
+            if not snapshot_id:
+                head_url = f"{base_url}/v1/repos/{repo_id}/head"
+                if urllib.parse.urlparse(head_url).scheme in {"http", "https"}:
+                    req = urllib.request.Request(head_url, method="GET")
+                    with urllib.request.urlopen(req, timeout=5) as response:  # nosec B310
+                        head_data = json.loads(response.read().decode("utf-8"))
+                        if head_data.get("head_id") == actual_head:
+                            snapshot_id = head_data.get("snapshot_id")
+
+            if not snapshot_id:
+                prom_url = f"{base_url}/v1/repos/{repo_id}/promotions"
+                if urllib.parse.urlparse(prom_url).scheme in {"http", "https"}:
+                    req = urllib.request.Request(prom_url, method="GET")
+                    with urllib.request.urlopen(req, timeout=5) as response:  # nosec B310
+                        prom_data = json.loads(response.read().decode("utf-8"))
+                        for prom in prom_data.get("promotions", []):
+                            if prom.get("to_head_id") == actual_head:
+                                snapshot_id = prom.get("snapshot_id")
+                                break
+
+            if not snapshot_id:
+                return False
+
+            dl_url = f"{base_url}/v1/repos/{repo_id}/snapshots/{snapshot_id}/download"
+            if urllib.parse.urlparse(dl_url).scheme not in {"http", "https"}:
+                return False
+            dl_req = urllib.request.Request(dl_url, method="GET")
+            with urllib.request.urlopen(dl_req, timeout=10) as dl_resp:  # nosec B310
+                tar_bytes = dl_resp.read()
+
+        copied_rel_paths = await self.extract_snapshot_securely(
+            tar_bytes,
+            workspace_root,
+            repo_id=repo_id,
+            snapshot_id=snapshot_id,
+            require_manifest=False,
+            clean_destination=True,
+        )
+        if hasattr(repo, "scrub_workspace_credentials"):
+            repo.scrub_workspace_credentials()
+        add_res = await repo.add()
+        if not add_res.success:
+            raise WorkerFastFailError(
+                reason=NackReason.ERR_TASK_FAILED.value,
+                detail=f"Failed to stage materialized Aether base head {actual_head}: {add_res.stderr}",
+            )
+        status_res = await repo.get_status()
+        if status_res.stdout.strip():
+            commit_res = await repo.commit(
+                f"Checkout Aether base head {actual_head}",
+                author="MX Swarm <mx-swarm@automated.local>",
+            )
+            if not commit_res.success:
+                raise WorkerFastFailError(
+                    reason=NackReason.ERR_TASK_FAILED.value,
+                    detail=f"Failed to commit materialized Aether base head {actual_head}: {commit_res.stderr}",
+                )
+        base_checkout_res = await repo.checkout("HEAD", create=False)
+        if not base_checkout_res.success:
+            return False
+
+        ws_path = Path(workspace_root).resolve()
+        expected_set = set(copied_rel_paths)
+        actual_worktree = {
+            p.relative_to(ws_path).as_posix()
+            for p in ws_path.rglob("*")
+            if p.is_file() and ".git" not in p.relative_to(ws_path).parts
+        }
+        ls_res = await repo._run_local_git(["ls-files", "-z"])
+        tracked_set = {entry for entry in ls_res.stdout.split("\0") if entry}
+        if actual_worktree != expected_set or tracked_set != expected_set:
+            raise WorkerFastFailError(
+                reason=NackReason.ERR_TASK_FAILED.value,
+                detail=(
+                    f"Materialized tree mismatch for {actual_head}: "
+                    f"expected={sorted(expected_set)}, worktree={sorted(actual_worktree)}, tracked={sorted(tracked_set)}"
+                ),
+            )
+        return True
+
     async def _submit_to_vcs(
         self,
         repo: GitRepo,
@@ -2448,6 +2979,62 @@ Example:
         draft: bool = False,
     ) -> dict | None:
         """Submit code changes via VCS adapter (Aether or GitHub)."""
+        if task.contention_expected_tasks and task.contention_group_id:
+            barrier_dir = self._contention_barrier_dir()
+            os.makedirs(barrier_dir, exist_ok=True)
+            group_id = self._contention_barrier_group_id(task)
+            ready_file = os.path.join(barrier_dir, f"{group_id}_{task.id}.json")
+            with open(ready_file, "w", encoding="utf-8") as handle:
+                json.dump(
+                    {"task_id": task.id, "status": "ready", "timestamp": time.time()},
+                    handle,
+                )
+            print(f"[{self.worker_id}] Submission Barrier: Wrote ready token to {ready_file}")
+
+            start_time = time.time()
+            timeout_seconds = 120.0
+            poll_interval = 0.5
+            try:
+                while True:
+                    if time.time() - start_time > timeout_seconds:
+                        self._write_barrier_fail_token(task, "timeout")
+                        raise WorkerFastFailError(
+                            reason=NackReason.ERR_BARRIER_TIMEOUT.value,
+                            detail=(
+                                f"Barrier timeout exceeded ({timeout_seconds}s) waiting for "
+                                f"contention tasks: {task.contention_expected_tasks}"
+                            ),
+                        )
+
+                    files = os.listdir(barrier_dir)
+                    fail_files = [
+                        fname
+                        for fname in files
+                        if fname.startswith(f"{group_id}_") and fname.endswith("_failed.json")
+                    ]
+                    if fail_files:
+                        raise WorkerFastFailError(
+                            reason=NackReason.ERR_BARRIER_ABORTED.value,
+                            detail=f"Barrier aborted: Another contention task failed: {fail_files}",
+                        )
+
+                    ready_tasks = [
+                        t_id
+                        for t_id in task.contention_expected_tasks
+                        if os.path.exists(os.path.join(barrier_dir, f"{group_id}_{t_id}.json"))
+                    ]
+                    if len(ready_tasks) == len(task.contention_expected_tasks):
+                        print(
+                            f"[{self.worker_id}] Submission Barrier: All tasks ready. "
+                            f"Proceeding to submit cohort: {task.contention_expected_tasks}"
+                        )
+                        break
+
+                    await asyncio.sleep(poll_interval)
+            except Exception as exc:
+                self._write_barrier_fail_token(task, str(exc))
+                raise
+
         # Generate diff for the commit
         # Try commit diff first, fallback to staged diff for shallow clones
         try:
@@ -2500,6 +3087,16 @@ Example:
                 source_agent_id=self.worker_id,
                 source_attempt_id=task.attempt_id,
                 intent_type=self._submission_intent_type(task),
+                contention_mode=task.contention_mode,
+                contention_group_id=(
+                    self._contention_barrier_group_id(task)
+                    if task.contention_group_id
+                    else None
+                ),
+                contention_policy=task.contention_policy,
+                target_paths=task.contention_target_paths,
+                base_head_id=task.contention_base_head_id,
+                defer_evaluation=task.defer_evaluation,
             )
 
             if result.success:
@@ -2723,6 +3320,31 @@ Example:
                         f"[{self.worker_id}] Overlayed local workspace files: {copied_overlay_files}"
                     )
 
+            if task.contention_base_head_id:
+                actual_head = task.contention_base_head_id
+                print(f"[{self.worker_id}] Contention Mode: Checking out base head {actual_head}")
+                base_checkout_res = await repo.checkout(actual_head, create=False)
+
+                if not base_checkout_res.success and self.config.vcs.provider == "aether":
+                    try:
+                        materialized = await self.materialize_aether_base_head(
+                            repo=repo,
+                            actual_head=actual_head,
+                            workspace_root=workspace_root,
+                        )
+                        if materialized:
+                            base_checkout_res = await repo.checkout("HEAD", create=False)
+                    except WorkerFastFailError:
+                        raise
+                    except Exception as exc:
+                        print(f"[{self.worker_id}] Error materializing Aether base head {actual_head}: {exc}")
+
+                if not base_checkout_res.success:
+                    raise WorkerFastFailError(
+                        reason=NackReason.ERR_TASK_FAILED.value,
+                        detail=f"Base head checkout failed: {base_checkout_res.stderr}",
+                    )
+
             branch_name = task.branch_name()
             checkout_result = await repo.checkout(branch_name, create=True)
             if not checkout_result.success:
@@ -2912,6 +3534,7 @@ Example:
             return True
 
         except WorkerFastFailError as exc:
+            self._write_barrier_fail_token(task, str(exc))
             print(f"[{self.worker_id}] Task {task.id} failed ({exc.reason}): {exc}")
             task.last_error = str(exc)
             await self._settle_failure(task, message, exc.reason)
@@ -2920,6 +3543,7 @@ Example:
             frontier_finish_reason = str(exc.reason)
             return False
         except Exception as e:
+            self._write_barrier_fail_token(task, str(e))
             detail = self._describe_exception(e, context=f"task {task.id} runtime failure")
             print(f"[{self.worker_id}] Task {task.id} failed: {detail}")
             task.last_error = detail

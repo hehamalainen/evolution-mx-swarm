@@ -108,6 +108,8 @@ class NackReason(str, Enum):
     ERR_POST_LANDING_VERIFY = "ERR_POST_LANDING_VERIFY"
     ERR_TASK_FAILED = "ERR_TASK_FAILED"
     ERR_RECON_DIVERGENCE = "ERR_RECON_DIVERGENCE"
+    ERR_BARRIER_TIMEOUT = "ERR_BARRIER_TIMEOUT"
+    ERR_BARRIER_ABORTED = "ERR_BARRIER_ABORTED"
 
 
 @dataclass
@@ -190,6 +192,15 @@ class TaskContract:
     submission_ledger_id: str | None = None
     settlement_reason: NackReason | None = None
 
+    # Contention/Cohort metadata fields
+    contention_mode: bool | None = None
+    contention_group_id: str | None = None
+    contention_policy: str | None = None
+    contention_target_paths: list[str] | None = None
+    contention_base_head_id: str | None = None
+    contention_expected_tasks: list[str] | None = None
+    defer_evaluation: bool | None = None
+
     @classmethod
     def create(
         cls,
@@ -215,6 +226,13 @@ class TaskContract:
         frontier_attempt_count: int = 0,
         prerequisite_requirement_ids: list[str] | None = None,
         prerequisite_task_ids: list[str] | None = None,
+        contention_mode: bool | None = None,
+        contention_group_id: str | None = None,
+        contention_policy: str | None = None,
+        contention_target_paths: list[str] | None = None,
+        contention_base_head_id: str | None = None,
+        contention_expected_tasks: list[str] | None = None,
+        defer_evaluation: bool | None = None,
     ) -> "TaskContract":
         """Factory method to create a new TaskContract."""
         ctx = context or TaskContext()
@@ -246,6 +264,13 @@ class TaskContract:
             frontier_attempt_count=frontier_attempt_count,
             prerequisite_requirement_ids=prerequisite_requirement_ids or [],
             prerequisite_task_ids=prerequisite_task_ids or [],
+            contention_mode=contention_mode,
+            contention_group_id=contention_group_id,
+            contention_policy=contention_policy,
+            contention_target_paths=contention_target_paths,
+            contention_base_head_id=contention_base_head_id,
+            contention_expected_tasks=contention_expected_tasks,
+            defer_evaluation=defer_evaluation,
         )
 
     @staticmethod
@@ -338,6 +363,13 @@ class TaskContract:
             "assigned_worker": self.assigned_worker,
             "submission_ledger_id": self.submission_ledger_id,
             "settlement_reason": self.settlement_reason.value if self.settlement_reason else None,
+            "contention_mode": self.contention_mode,
+            "contention_group_id": self.contention_group_id,
+            "contention_policy": self.contention_policy,
+            "contention_target_paths": self.contention_target_paths,
+            "contention_base_head_id": self.contention_base_head_id,
+            "contention_expected_tasks": self.contention_expected_tasks,
+            "defer_evaluation": self.defer_evaluation,
         }
 
     @classmethod
@@ -445,6 +477,13 @@ class TaskContract:
             assigned_worker=data.get("assigned_worker"),
             submission_ledger_id=data.get("submission_ledger_id"),
             settlement_reason=settlement_reason,
+            contention_mode=data.get("contention_mode"),
+            contention_group_id=data.get("contention_group_id"),
+            contention_policy=data.get("contention_policy"),
+            contention_target_paths=data.get("contention_target_paths"),
+            contention_base_head_id=data.get("contention_base_head_id"),
+            contention_expected_tasks=data.get("contention_expected_tasks"),
+            defer_evaluation=data.get("defer_evaluation"),
         )
 
     def to_json(self) -> str:

@@ -138,9 +138,20 @@ class AetherVCS(VCSAdapter):
         source_agent_id: str | None,
         source_attempt_id: str | None,
         intent_type: str | None,
+        contention_mode: bool | None = None,
+        contention_group_id: str | None = None,
+        contention_policy: str | None = None,
+        target_paths: list[str] | None = None,
+        base_head_id: str | None = None,
+        defer_evaluation: bool | None = None,
     ) -> dict[str, Any]:
         """Build the exact Aether ProposalCreate payload used for submission."""
-        return {
+        idempotency_key = (
+            f"mx-{source_run_id}-{task_id}-{branch_name}"
+            if (contention_mode or contention_group_id or defer_evaluation) and source_run_id
+            else f"mx-{task_id}-{branch_name}"
+        )
+        payload: dict[str, Any] = {
             "agent_id": self.agent_id,
             "task_id": task_id,
             "change_type": "unified_diff",
@@ -152,7 +163,7 @@ class AetherVCS(VCSAdapter):
             "rationale": f"{goal}\n\n{evidence_markdown}",
             "requires_tests": True,
             "requires_security_scan": risk_tier >= 2,
-            "idempotency_key": f"mx-{task_id}-{branch_name}",
+            "idempotency_key": idempotency_key,
             "source": source or "mx_swarm",
             "source_run_id": source_run_id,
             "source_task_id": source_task_id or task_id,
@@ -160,6 +171,19 @@ class AetherVCS(VCSAdapter):
             "source_attempt_id": source_attempt_id,
             "intent_type": intent_type or "other",
         }
+        if contention_mode is not None:
+            payload["contention_mode"] = contention_mode
+        if contention_group_id is not None:
+            payload["contention_group_id"] = contention_group_id
+        if contention_policy is not None:
+            payload["contention_policy"] = contention_policy
+        if target_paths is not None:
+            payload["target_paths"] = target_paths
+        if base_head_id is not None:
+            payload["base_head_id"] = base_head_id
+        if defer_evaluation is not None:
+            payload["defer_evaluation"] = defer_evaluation
+        return payload
 
     async def submit_change(
         self,
@@ -179,6 +203,12 @@ class AetherVCS(VCSAdapter):
         source_agent_id: str | None = None,
         source_attempt_id: str | None = None,
         intent_type: str | None = None,
+        contention_mode: bool | None = None,
+        contention_group_id: str | None = None,
+        contention_policy: str | None = None,
+        target_paths: list[str] | None = None,
+        base_head_id: str | None = None,
+        defer_evaluation: bool | None = None,
     ) -> SubmitResult:
         """Submit a proposal to Aether.
 
@@ -209,6 +239,12 @@ class AetherVCS(VCSAdapter):
             source_agent_id=source_agent_id,
             source_attempt_id=source_attempt_id,
             intent_type=intent_type,
+            contention_mode=contention_mode,
+            contention_group_id=contention_group_id,
+            contention_policy=contention_policy,
+            target_paths=target_paths,
+            base_head_id=base_head_id,
+            defer_evaluation=defer_evaluation,
         )
 
         # Decision Transparency: Log the intent to submit
@@ -503,6 +539,66 @@ class AetherVCS(VCSAdapter):
             return False
 
         return False
+
+    async def get_build_info(self) -> dict[str, Any]:
+        """Fetch system build info from Aether server."""
+        url = f"{self.base_url}/v1/system/build"
+        try:
+            if aiohttp:
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as response:
+                        if response.status == 200:
+                            return _as_dict(await response.json())
+            else:
+                import urllib.request
+
+                _assert_http_url(url)
+                req = urllib.request.Request(url, method="GET")
+                response = urllib.request.urlopen(req, timeout=5)  # nosec B310
+                return _as_dict(json.loads(response.read().decode("utf-8")))
+        except Exception as exc:
+            raise RuntimeError(f"Failed to fetch Aether build info: {exc}") from exc
+        return {}
+
+    async def promote_cohort(self, proposal_ids: list[str]) -> dict[str, Any]:
+        """Promote a cohort of deferred proposals atomically."""
+        if not self.repo_id:
+            raise RuntimeError("Aether repo_id not configured")
+
+        url = f"{self.base_url}/v1/repos/{self.repo_id}/cohort/evaluate"
+        payload = {"proposal_ids": proposal_ids}
+
+        try:
+            if aiohttp:
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(
+                        url,
+                        json=payload,
+                        headers={"Content-Type": "application/json"},
+                        timeout=aiohttp.ClientTimeout(total=30),
+                    ) as response:
+                        body = _as_dict(await response.json())
+                        if response.status in (200, 201):
+                            return body
+                        raise RuntimeError(body.get("detail", f"HTTP {response.status}"))
+            else:
+                import urllib.request
+
+                _assert_http_url(url)
+                req = urllib.request.Request(
+                    url,
+                    data=json.dumps(payload).encode("utf-8"),
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                loop = asyncio.get_event_loop()
+                sync_resp = await loop.run_in_executor(
+                    None,
+                    lambda: urllib.request.urlopen(req, timeout=30),  # nosec B310
+                )
+                return _as_dict(json.loads(sync_resp.read().decode("utf-8")))
+        except Exception as exc:
+            raise RuntimeError(f"Failed to promote cohort: {exc}") from exc
 
 
 # Factory function

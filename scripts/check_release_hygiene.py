@@ -47,6 +47,18 @@ REVOKED_CREDENTIAL_FRAGMENT_SHA256: frozenset[str] = frozenset(
 TOKEN_CANDIDATE_PATTERN = re.compile(r"[A-Za-z0-9_-]{12,}")
 CONCAT_JOIN_PATTERN = re.compile(r"""['"]\s*\+?\s*['"]""")
 PRIVATE_PATH_PATTERN = re.compile(r"/Users/[A-Za-z0-9._-]+")
+MACOS_TEMP_PATH_PATTERN = re.compile(r"(?:/private)?/var/folders/[A-Za-z0-9._/-]+")
+
+EXPECTED_EVIDENCE_BUNDLE_FILES: frozenset[str] = frozenset(
+    {
+        "aether.db",
+        "final_canary_evidence.json",
+        "manifest.json",
+        "merged_runtime.py",
+        "telemetry.log",
+        "SHA256SUMS",
+    }
+)
 
 FORBIDDEN_CREDENTIAL_PATHS: frozenset[str] = frozenset(
     {
@@ -444,6 +456,238 @@ def verify_publication_destination(
     return findings
 
 
+ALLOWED_AETHER_DB_TABLES: frozenset[str] = frozenset(
+    {
+        "aether_conflict_sets",
+        "aether_contention_winners",
+        "aether_gate_results",
+        "aether_heads",
+        "aether_operation_graph_nodes",
+        "aether_promotions",
+        "aether_proposal_contentions",
+        "aether_proposals",
+        "aether_repositories",
+        "aether_snapshots",
+        "aether_system_metric_events",
+    }
+)
+
+
+def scan_evidence_bundle_dir(
+    bundle_dir: Path,
+    *,
+    require_sha256sums: bool = True,
+) -> list[dict[str, object]]:
+    """Scan an exported canary evidence bundle directory for unlisted files, credentials, local paths, and DB scope."""
+    import sqlite3
+
+    findings: list[dict[str, object]] = []
+    target_dir = Path(bundle_dir).resolve()
+    if not target_dir.is_dir():
+        return [{"path": str(bundle_dir), "line": 1, "kind": "missing_bundle_directory"}]
+
+    allowed_files = set(EXPECTED_EVIDENCE_BUNDLE_FILES)
+    required_files = set(EXPECTED_EVIDENCE_BUNDLE_FILES)
+    if not require_sha256sums:
+        required_files.discard("SHA256SUMS")
+
+    expected_repo_id: str | None = None
+    expected_run_id: str | None = None
+    manifest_file = target_dir / "manifest.json"
+    if manifest_file.is_file():
+        try:
+            manifest_obj = json.loads(manifest_file.read_text(encoding="utf-8"))
+            if isinstance(manifest_obj, dict):
+                raw_repo = manifest_obj.get("repo_id")
+                raw_run = manifest_obj.get("run_id")
+                if isinstance(raw_repo, str) and raw_repo.strip():
+                    expected_repo_id = raw_repo.strip()
+                if isinstance(raw_run, str) and raw_run.strip():
+                    expected_run_id = raw_run.strip()
+        except Exception:
+            findings.append({"path": "manifest.json", "line": 1, "kind": "invalid_manifest_json"})
+
+    present_files: set[str] = set()
+    for entry in sorted(target_dir.rglob("*")):
+        rel_path = entry.relative_to(target_dir).as_posix()
+        if entry.is_dir():
+            findings.append({"path": rel_path, "line": 1, "kind": "unlisted_bundle_subdirectory"})
+            continue
+        present_files.add(rel_path)
+        if rel_path not in allowed_files:
+            findings.append({"path": rel_path, "line": 1, "kind": "unlisted_bundle_file"})
+
+        raw_bytes = entry.read_bytes()
+        decoded = raw_bytes.decode("utf-8", errors="replace")
+        findings.extend(scan_text_for_credentials(decoded, rel_path))
+        for line_no, line in enumerate(decoded.splitlines(), start=1):
+            if PRIVATE_PATH_PATTERN.search(line):
+                findings.append({"path": rel_path, "line": line_no, "kind": "bundle_private_path"})
+                break
+            if MACOS_TEMP_PATH_PATTERN.search(line):
+                findings.append({"path": rel_path, "line": line_no, "kind": "bundle_macos_temp_path"})
+                break
+
+        if rel_path == "aether.db":
+            conn = sqlite3.connect(str(entry))
+            try:
+                tables = [
+                    r[0]
+                    for r in conn.execute(
+                        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+                    ).fetchall()
+                ]
+                for table in tables:
+                    if table not in ALLOWED_AETHER_DB_TABLES:
+                        findings.append(
+                            {
+                                "path": f"{rel_path}:{table}",
+                                "line": 1,
+                                "kind": "sqlite_unlisted_table",
+                            }
+                        )
+                    col_names = [
+                        str(r[1])
+                        for r in conn.execute(f'PRAGMA table_info("{table}")').fetchall()
+                    ]
+                    if expected_repo_id is not None:
+                        if table == "aether_repositories" and "id" in col_names:
+                            repo_ids = [
+                                str(r[0])
+                                for r in conn.execute('SELECT id FROM "aether_repositories"').fetchall()
+                            ]
+                            if repo_ids != [expected_repo_id]:
+                                findings.append(
+                                    {
+                                        "path": f"{rel_path}:{table}",
+                                        "line": 1,
+                                        "kind": "sqlite_unrelated_repository",
+                                    }
+                                )
+                        elif "repo_id" in col_names:
+                            bad_repo_count = conn.execute(
+                                f'SELECT count(*) FROM "{table}" WHERE repo_id IS NULL OR repo_id != ?',  # nosec B608
+                                (expected_repo_id,),
+                            ).fetchone()[0]
+                            if bad_repo_count > 0:
+                                findings.append(
+                                    {
+                                        "path": f"{rel_path}:{table}",
+                                        "line": 1,
+                                        "kind": "sqlite_unrelated_repository",
+                                    }
+                                )
+                    if expected_run_id is not None and "source_run_id" in col_names:
+                        if table == "aether_proposals":
+                            bad_run_count = conn.execute(
+                                'SELECT count(*) FROM "aether_proposals" WHERE source_run_id IS NULL OR source_run_id NOT IN (?, ?)',
+                                (expected_run_id, "seed-run"),
+                            ).fetchone()[0]
+                            matching_run_count = conn.execute(
+                                'SELECT count(*) FROM "aether_proposals" WHERE source_run_id = ?',
+                                (expected_run_id,),
+                            ).fetchone()[0]
+                            if bad_run_count > 0 or matching_run_count == 0:
+                                findings.append(
+                                    {
+                                        "path": f"{rel_path}:{table}",
+                                        "line": 1,
+                                        "kind": "sqlite_unrelated_or_missing_run",
+                                    }
+                                )
+                        else:
+                            bad_run_count = conn.execute(
+                                f'SELECT count(*) FROM "{table}" WHERE source_run_id IS NOT NULL AND source_run_id NOT IN (?, ?)',  # nosec B608
+                                (expected_run_id, "seed-run"),
+                            ).fetchone()[0]
+                            if bad_run_count > 0:
+                                findings.append(
+                                    {
+                                        "path": f"{rel_path}:{table}",
+                                        "line": 1,
+                                        "kind": "sqlite_unrelated_or_missing_run",
+                                    }
+                                )
+                    if (
+                        table == "aether_proposal_contentions"
+                        and "aether_proposals" in tables
+                        and "proposal_id" in col_names
+                    ):
+                        orphan_contentions = conn.execute(
+                            'SELECT count(*) FROM "aether_proposal_contentions" WHERE proposal_id NOT IN (SELECT id FROM "aether_proposals")'
+                        ).fetchone()[0]
+                        if orphan_contentions > 0:
+                            findings.append(
+                                {
+                                    "path": f"{rel_path}:{table}",
+                                    "line": 1,
+                                    "kind": "sqlite_unrelated_row",
+                                }
+                            )
+                    if (
+                        table == "aether_contention_winners"
+                        and "aether_proposals" in tables
+                        and "winner_proposal_id" in col_names
+                    ):
+                        orphan_winners = conn.execute(
+                            'SELECT count(*) FROM "aether_contention_winners" WHERE winner_proposal_id IS NULL OR winner_proposal_id NOT IN (SELECT id FROM "aether_proposals")'
+                        ).fetchone()[0]
+                        if orphan_winners > 0:
+                            findings.append(
+                                {
+                                    "path": f"{rel_path}:{table}",
+                                    "line": 1,
+                                    "kind": "sqlite_unrelated_row",
+                                }
+                            )
+                    if (
+                        table == "aether_system_metric_events"
+                        and "aether_proposals" in tables
+                        and "proposal_id" in col_names
+                    ):
+                        orphan_events = conn.execute(
+                            'SELECT count(*) FROM "aether_system_metric_events" WHERE proposal_id IS NOT NULL AND proposal_id NOT IN (SELECT id FROM "aether_proposals")'
+                        ).fetchone()[0]
+                        if orphan_events > 0:
+                            findings.append(
+                                {
+                                    "path": f"{rel_path}:{table}",
+                                    "line": 1,
+                                    "kind": "sqlite_unrelated_row",
+                                }
+                            )
+
+                    for row in conn.execute(f'SELECT * FROM "{table}"').fetchall():  # nosec B608
+                        for val in row:
+                            if isinstance(val, str):
+                                if PRIVATE_PATH_PATTERN.search(val):
+                                    findings.append(
+                                        {
+                                            "path": f"{rel_path}:{table}",
+                                            "line": 1,
+                                            "kind": "sqlite_private_path",
+                                        }
+                                    )
+                                    break
+                                if MACOS_TEMP_PATH_PATTERN.search(val):
+                                    findings.append(
+                                        {
+                                            "path": f"{rel_path}:{table}",
+                                            "line": 1,
+                                            "kind": "sqlite_macos_temp_path",
+                                        }
+                                    )
+                                    break
+            finally:
+                conn.close()
+
+    for req_file in sorted(required_files):
+        if req_file not in present_files:
+            findings.append({"path": req_file, "line": 1, "kind": "missing_bundle_file"})
+
+    return findings
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Verify MX-Swarm release credential and boundary hygiene.")
     parser.add_argument(
@@ -461,6 +705,11 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="Optional git remote name or URL to verify against the 3-ref publication scope.",
     )
+    parser.add_argument(
+        "--scan-bundle-dir",
+        default=None,
+        help="Optional canary evidence bundle directory to scan for unlisted files and private paths.",
+    )
     args = parser.parse_args(argv)
     repo_root = Path(args.repo_root).resolve()
 
@@ -472,7 +721,18 @@ def main(argv: list[str] | None = None) -> int:
         if args.verify_remote
         else []
     )
-    findings = [*cred_findings, *boundary_findings, *history_findings, *remote_findings]
+    bundle_findings = (
+        scan_evidence_bundle_dir(Path(args.scan_bundle_dir))
+        if args.scan_bundle_dir
+        else []
+    )
+    findings = [
+        *cred_findings,
+        *boundary_findings,
+        *history_findings,
+        *remote_findings,
+        *bundle_findings,
+    ]
     if findings:
         print(json.dumps({"ok": False, "findings": findings}, indent=2))
         return 1

@@ -59,6 +59,12 @@ class GitHubVCS(VCSAdapter):
         source_agent_id: str | None = None,
         source_attempt_id: str | None = None,
         intent_type: str | None = None,
+        contention_mode: bool | None = None,
+        contention_group_id: str | None = None,
+        contention_policy: str | None = None,
+        target_paths: list[str] | None = None,
+        base_head_id: str | None = None,
+        defer_evaluation: bool | None = None,
     ) -> SubmitResult:
         """Create a GitHub pull request.
 
