@@ -1,8 +1,11 @@
 
-# Python cache
+# Python cache & packaging metadata
 __pycache__/
 *.py[cod]
 *.class
+*.egg-info/
+/build/
+/dist/
 
 # Virtual environments
 .venv/
@@ -29,8 +32,12 @@ reg_output.txt
 *.log
 logs/
 
-# Test cache
+# Test, lint, and typecheck caches
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
+coverage.xml
+htmlcov/
 
 # Reports (generated at runtime)
 reports/heartbeat/

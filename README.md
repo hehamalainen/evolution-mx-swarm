@@ -49,6 +49,8 @@ python scripts/run_mock_sink_live_proof.py \
 python scripts/run_scale_control_plane.py --logical-lanes 50 --logical-tasks 50 --seed 7
 ```
 
+For the bounded MX Swarm × Project Aether semantic-merge canary ([`docs/aether_semantic_canary_reproduction.md`](docs/aether_semantic_canary_reproduction.md)), AST-level checks run on all platforms while the full behavioral sandbox check requires macOS (`/usr/bin/sandbox-exec`).
+
 ### Configuration
 
 **Option A: Cloud API (Anthropic / OpenAI / Gemini)**

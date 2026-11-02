@@ -487,11 +487,23 @@ async def test_original_dashboard_real_browser_sign_in_visibility_and_expiry_rec
 
     server_port = get_free_port()
     cdp_port = get_free_port()
+    while cdp_port == server_port:
+        cdp_port = get_free_port()
     repo_root = Path(__file__).resolve().parents[1]
 
-    server_env = os.environ.copy()
+    server_env = {
+        k: v
+        for k, v in os.environ.items()
+        if not k.startswith("MX_")
+        and k.upper() not in {"HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"}
+    }
+    existing_py_path = server_env.get("PYTHONPATH", "")
+    server_env["PYTHONPATH"] = (
+        f"{repo_root}{os.pathsep}{existing_py_path}" if existing_py_path else str(repo_root)
+    )
     server_env["MX_DASHBOARD_TOKEN"] = "real-browser-secret"
     server_env["MX_DASHBOARD_PORT"] = str(server_port)
+    server_env["NO_PROXY"] = "127.0.0.1,localhost"
     server_proc = subprocess.Popen(
         [
             sys.executable,
@@ -505,7 +517,7 @@ async def test_original_dashboard_real_browser_sign_in_visibility_and_expiry_rec
             "--log-level",
             "warning",
         ],
-        cwd=str(repo_root),
+        cwd=str(tmp_path),
         env=server_env,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
@@ -514,13 +526,16 @@ async def test_original_dashboard_real_browser_sign_in_visibility_and_expiry_rec
     import tempfile
 
     chrome_proc = None
-    short_profile_dir = tempfile.mkdtemp(prefix="mx-chr-", dir="/tmp")
+    short_profile_dir = tempfile.mkdtemp(prefix="mx-chr-")
+    no_proxy_opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     try:
         # Wait for dashboard server to listen
         server_ready = False
-        for _ in range(40):
+        for _ in range(80):
+            if server_proc.poll() is not None:
+                break
             try:
-                with urllib.request.urlopen(
+                with no_proxy_opener.open(
                     f"http://127.0.0.1:{server_port}/api/auth/status", timeout=0.5
                 ) as resp:
                     if resp.status == 200:
@@ -534,7 +549,13 @@ async def test_original_dashboard_real_browser_sign_in_visibility_and_expiry_rec
             [
                 chrome_bin,
                 "--headless=new",
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-dev-shm-usage",
                 "--disable-gpu",
+                "--disable-extensions",
+                "--disable-background-networking",
+                "--no-proxy-server",
                 "--no-first-run",
                 "--no-default-browser-check",
                 "--remote-allow-origins=*",
@@ -547,9 +568,11 @@ async def test_original_dashboard_real_browser_sign_in_visibility_and_expiry_rec
         )
 
         ws_debugger_url = None
-        for _ in range(50):
+        for _ in range(80):
+            if chrome_proc.poll() is not None:
+                break
             try:
-                with urllib.request.urlopen(
+                with no_proxy_opener.open(
                     f"http://127.0.0.1:{cdp_port}/json", timeout=0.5
                 ) as resp:
                     targets = json.loads(resp.read().decode("utf-8"))
@@ -648,7 +671,7 @@ ws.addEventListener('open', async () => {
       const input = document.getElementById('dashboard-token-input');
       input.value = 'real-browser-secret';
       await submitDashboardLogin(new Event('submit', { cancelable: true }));
-      for (let i = 0; i < 30; i++) {
+      for (let i = 0; i < 80; i++) {
         const statusEl = document.getElementById('connection-status');
         if (statusEl && statusEl.textContent.includes('Connected')) break;
         await new Promise((r) => setTimeout(r, 100));

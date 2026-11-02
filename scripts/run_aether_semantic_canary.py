@@ -516,6 +516,41 @@ RECORDED_FAILED_ATTEMPTS: list[dict[str, Any]] = [
             "`__main__.__dict__` inside a local closure before importing `loglens.runtime`."
         ),
     },
+    {
+        "attempt_number": 20,
+        "run_id": "canary-run-20261102t203713z",
+        "timestamp_utc": "2026-11-02T20:37:27Z",
+        "reviewed_mx_commit": "03283fb3a56476e220da921a56e2174cfb16f6a1",
+        "repo_id": "repo_bab0316eb617",
+        "promotion_id": "prom_30094d0c3176",
+        "snapshot_id": "snap_ef2f5c1335aa",
+        "failed_stage": "independent_cross_platform_round5_review",
+        "failed_check": "promoted_snapshot_ast_and_behavior",
+        "error": (
+            "Independent Linux replay confirmed atomic cohort promotion, zero semantic fallbacks, and "
+            "byte-identical merged_runtime.py (SHA-256 7c53f332f80d653a60bfa017986495f50cf1c88992812368fe9db208e750cadc), "
+            "and identified: (1) two macOS sandbox-exec canary tests failed on Linux CI instead of skipping "
+            "while keeping AST checks cross-platform; (2) reproduction doc section title claimed an unpublished "
+            "final pass; (3) Aether bc924b8's structural merge moved runtime.py's module docstring from line 1 "
+            "to line 8 after imports (__doc__ = None), and MX's _strip_runtime_docstring_and_expected_methods "
+            "masked that bug by stripping matching docstrings from any position; plus minor fixes for "
+            "dashboard browser test isolation, --require-clean-mx untracked files, and *.egg-info gitignore."
+        ),
+        "root_cause": (
+            "Position-insensitive docstring stripping in `_strip_runtime_docstring_and_expected_methods` "
+            "and non-initial string-expression allowance in `_validate_snapshot_ast_safety`; missing "
+            "`skipif(sys.platform != 'darwin')` on macOS Seatbelt unit tests; `--untracked-files=no` in "
+            "`_is_git_dirty`; and shared `repo_root` cwd in the real-browser dashboard test."
+        ),
+        "resolution": (
+            "Made `runtime.py` AST comparison strictly order-sensitive (`_strip_expected_methods_from_class` "
+            "and `ast.get_docstring` equality, rejecting displaced docstrings so the canary intentionally "
+            "fails closed against Aether `bc924b8` until Aether fixes docstring preservation); marked the "
+            "two macOS `sandbox-exec` behavioral tests `skipif` on non-Darwin while running AST tests on all "
+            "platforms; checked untracked files in `_is_git_dirty`; isolated the dashboard browser test "
+            "working directory; gitignored `*.egg-info/`; and updated the reproduction doc history."
+        ),
+    },
 ]
 
 REQUIRED_CANARY_CHECKS = (
@@ -601,9 +636,9 @@ def _get_git_branch(repo_dir: Path) -> str:
 
 
 def _is_git_dirty(repo_dir: Path) -> bool:
-    """Check whether a git working tree has uncommitted tracked changes."""
+    """Check whether a git working tree has uncommitted changes or untracked files."""
     res = subprocess.run(  # nosec B603 B607
-        ["git", "status", "--porcelain", "--untracked-files=no"],
+        ["git", "status", "--porcelain"],
         cwd=repo_dir,
         capture_output=True,
         text=True,
@@ -858,14 +893,15 @@ _FORBIDDEN_SNAPSHOT_AST_CALLS: frozenset[str] = frozenset(
 
 
 def _validate_snapshot_ast_safety(tree: ast.Module) -> str | None:
-    """Reject top-level executable statements, non-allowlisted imports, private attributes, or dangerous calls."""
+    """Reject top-level executable statements, displaced docstrings, non-allowlisted imports, private attributes, or dangerous calls."""
     for idx, stmt in enumerate(tree.body):
         if isinstance(stmt, ast.Expr):
             if idx == 0 and isinstance(stmt.value, ast.Constant) and isinstance(stmt.value.value, str):
                 continue
-            if isinstance(stmt.value, ast.Constant) and isinstance(stmt.value.value, str):
-                continue
-            return f"Disallowed top-level expression statement in snapshot module: {type(stmt.value).__name__}"
+            return (
+                f"Disallowed top-level expression statement at index {idx} in snapshot module: "
+                f"{type(stmt.value).__name__}"
+            )
         if not isinstance(
             stmt,
             (
@@ -956,41 +992,40 @@ _EXPECTED_METHOD_RETURN_VALUES: dict[str, str] = {
 }
 
 
-def _strip_runtime_docstring_and_expected_methods(
+def _strip_expected_methods_from_class(
     tree: ast.Module,
     *,
     class_name: str,
     expected_methods: tuple[str, ...],
-    expected_docstring: str,
 ) -> tuple[ast.Module | None, str | None]:
-    """Return a copy of runtime.py AST with at most one module docstring and expected_methods removed from CommandResult."""
+    """Return an order-preserving copy of runtime.py AST with only expected_methods removed from class_name."""
     cloned = copy.deepcopy(tree)
-    new_body: list[ast.stmt] = []
-    doc_seen = 0
     class_seen = 0
     for stmt in cloned.body:
-        if (
-            isinstance(stmt, ast.Expr)
-            and isinstance(stmt.value, ast.Constant)
-            and isinstance(stmt.value.value, str)
-        ):
-            if stmt.value.value != expected_docstring:
-                return None, f"Unexpected top-level docstring in runtime.py: {stmt.value.value!r}"
-            doc_seen += 1
-            if doc_seen > 1:
-                return None, "Duplicate top-level module docstring in runtime.py"
-            continue
         if isinstance(stmt, ast.ClassDef) and stmt.name == class_name:
             class_seen += 1
-            stmt.body = [
-                sub
-                for sub in stmt.body
-                if not (isinstance(sub, ast.FunctionDef) and sub.name in expected_methods)
-            ]
-        new_body.append(stmt)
+            seen_expected: list[str] = []
+            trailing_phase = False
+            kept_body: list[ast.stmt] = []
+            for sub in stmt.body:
+                if isinstance(sub, ast.FunctionDef) and sub.name in expected_methods:
+                    trailing_phase = True
+                    if sub.name in seen_expected:
+                        return None, f"Duplicate method {sub.name!r} in {class_name!r}"
+                    seen_expected.append(sub.name)
+                else:
+                    if trailing_phase and expected_methods:
+                        return (
+                            None,
+                            f"Unexpected class statement {type(sub).__name__} after expected methods in {class_name!r}",
+                        )
+                    kept_body.append(sub)
+            if set(seen_expected) != set(expected_methods):
+                missing = sorted(set(expected_methods) - set(seen_expected))
+                return None, f"Missing expected methods {missing} in {class_name!r}"
+            stmt.body = kept_body
     if class_seen != 1:
         return None, f"Expected exactly 1 ClassDef {class_name!r}, found {class_seen}"
-    cloned.body = new_body
     return cloned, None
 
 
@@ -1136,32 +1171,28 @@ def _verify_snapshot_files_and_methods(
     if not seed_runtime_file.is_file():
         return "Missing trusted seed file qualification/seed_repos/loglens/src/loglens/runtime.py"
     seed_runtime_tree = ast.parse(seed_runtime_file.read_text(encoding="utf-8"))
-    expected_doc = ast.get_docstring(seed_runtime_tree, clean=False) or ""
+    expected_doc = ast.get_docstring(seed_runtime_tree, clean=False)
+    actual_doc = ast.get_docstring(runtime_tree, clean=False)
+    if actual_doc != expected_doc:
+        return (
+            "Snapshot runtime.py module docstring missing or displaced from statement 0: "
+            f"expected {expected_doc!r}, got {actual_doc!r}"
+        )
 
-    stripped_seed, seed_err = _strip_runtime_docstring_and_expected_methods(
-        seed_runtime_tree,
-        class_name=class_name,
-        expected_methods=(),
-        expected_docstring=expected_doc,
-    )
-    if seed_err is not None or stripped_seed is None:
-        return f"Invalid trusted seed runtime.py: {seed_err}"
-
-    stripped_actual, actual_err = _strip_runtime_docstring_and_expected_methods(
+    stripped_actual, actual_err = _strip_expected_methods_from_class(
         runtime_tree,
         class_name=class_name,
         expected_methods=expected_methods,
-        expected_docstring=expected_doc,
     )
     if actual_err is not None or stripped_actual is None:
         return f"Snapshot runtime.py failed structural seed comparison: {actual_err}"
 
     if ast.dump(stripped_actual, include_attributes=False) != ast.dump(
-        stripped_seed, include_attributes=False
+        seed_runtime_tree, include_attributes=False
     ):
         return (
-            "Snapshot runtime.py AST differs from trusted loglens seed outside "
-            f"permitted methods {list(expected_methods)}"
+            "Snapshot runtime.py AST differs from trusted loglens seed in statement order or "
+            f"content outside permitted methods {list(expected_methods)}"
         )
 
     return None
@@ -3146,7 +3177,7 @@ def parse_args() -> argparse.Namespace:
         "--require-clean-mx",
         action="store_true",
         default=False,
-        help="Fail closed if MX Swarm working tree has uncommitted tracked changes",
+        help="Fail closed if MX Swarm working tree has uncommitted changes or untracked files",
     )
     return parser.parse_args()
 

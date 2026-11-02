@@ -5,6 +5,7 @@ import io
 import json
 import os
 import subprocess
+import sys
 import tarfile
 import tempfile
 from pathlib import Path
@@ -217,6 +218,54 @@ def render_result(result: CommandResult, *, output_format: str) -> str:
         raise NotImplementedError(f"output format '{output_format}' is not available yet")
     return formatter(result.rows, result.columns)
 '''
+    with patch("scripts.run_aether_semantic_canary._http_request") as mock_req:
+        mock_req.return_value = {"content": valid_merged}
+        args = MagicMock()
+        args.require_behavior_check = False
+        out: dict[str, object] = {}
+        assert (
+            await run_aether_semantic_canary.verify_snapshot_markers(
+                args,
+                "repo1",
+                "snap1",
+                "src/loglens/runtime.py",
+                snapshot_verification_out=out,
+            )
+            == 0
+        )
+        ver = out["verification"]
+        assert isinstance(ver, dict)
+        assert ver["ast_verified"] is True
+        assert ver["ast_return_constants"] == {"alpha_method": "alpha", "beta_method": "beta"}
+
+
+@pytest.mark.skipif(
+    sys.platform != "darwin" or not os.path.isfile("/usr/bin/sandbox-exec"),
+    reason="Full behavioral sandbox check requires macOS sandbox-exec",
+)
+@pytest.mark.asyncio
+async def test_snapshot_markers_behavior_sandbox_on_macos():
+    """Full OS-sandboxed behavioral check executes on macOS and verifies method outputs."""
+    run_aether_semantic_canary = get_canary()
+    seed_runtime = (
+        Path(run_aether_semantic_canary.project_root)
+        / "qualification"
+        / "seed_repos"
+        / "loglens"
+        / "src"
+        / "loglens"
+        / "runtime.py"
+    ).read_text(encoding="utf-8")
+    valid_merged = seed_runtime.replace(
+        "    rows: list[dict[str, object]]\n",
+        (
+            "    rows: list[dict[str, object]]\n\n"
+            "    def alpha_method(self) -> str:\n"
+            '        return "alpha"\n\n'
+            "    def beta_method(self) -> str:\n"
+            '        return "beta"\n'
+        ),
+    )
     with patch("scripts.run_aether_semantic_canary._http_request") as mock_req:
         mock_req.return_value = {"content": valid_merged}
         args = MagicMock()
@@ -1036,6 +1085,10 @@ class CommandResult:
         assert not escape_marker.exists()
 
 
+@pytest.mark.skipif(
+    sys.platform != "darwin" or not os.path.isfile("/usr/bin/sandbox-exec"),
+    reason="Full behavioral sandbox check requires macOS sandbox-exec",
+)
 def test_p1_behavior_verifier_uses_only_materialized_snapshot_files():
     """[P1] Behavior verifier fails if loglens.shared.formatting is missing from snapshot_files and passes when included."""
     run_aether_semantic_canary = get_canary()
@@ -1678,6 +1731,152 @@ ended = getattr(operating, "_exit")(0)
         assert details_reassign["behavior_verified"] is False
         assert "differs from trusted loglens seed" in str(details_reassign.get("error", ""))
         mock_subproc2.assert_not_called()
+
+
+def test_verifier_rejects_moved_module_docstring_in_merged_runtime():
+    """Order-sensitive AST comparison rejects runtime.py when module docstring moves after imports."""
+    import ast
+
+    run_aether_semantic_canary = get_canary()
+    displaced_docstring_runtime = '''
+from __future__ import annotations
+
+import argparse
+from dataclasses import dataclass
+
+from loglens.shared import formatting
+"""Shared command result and rendering helpers."""
+
+OUTPUT_FORMATS = ("plain", "table", "json", "csv")
+
+
+@dataclass(frozen=True)
+class CommandResult:
+    """Normalized command payload for every CLI feature."""
+
+    plain_lines: list[str]
+    columns: list[str]
+    rows: list[dict[str, object]]
+    def alpha_method(self) -> str:
+        return "alpha"
+    def beta_method(self) -> str:
+        return "beta"
+
+
+def add_output_format_option(parser: argparse.ArgumentParser) -> None:
+    """Attach the shared output-format option to a command parser."""
+    parser.add_argument(
+        "--format",
+        choices=OUTPUT_FORMATS,
+        default="plain",
+        help="Output format for the command result.",
+    )
+
+
+def render_result(result: CommandResult, *, output_format: str) -> str:
+    """Render a command result in the requested output format."""
+    if output_format == "plain":
+        return formatting.join_lines(result.plain_lines)
+
+    formatter = getattr(formatting, f"render_{output_format}", None)
+    if formatter is None:
+        raise NotImplementedError(f"output format '{output_format}' is not available yet")
+    return formatter(result.rows, result.columns)
+'''
+    assert ast.get_docstring(ast.parse(displaced_docstring_runtime)) is None
+
+    err = run_aether_semantic_canary._verify_snapshot_files_and_methods(
+        displaced_docstring_runtime,
+        None,
+    )
+    assert err is not None
+
+    ok, details = run_aether_semantic_canary.inspect_merged_runtime_ast_and_behavior(
+        displaced_docstring_runtime,
+        require_behavior=False,
+    )
+    assert ok is False
+    assert details["ast_verified"] is False
+
+    # Preserving the docstring on line 1 passes order-sensitive AST verification on all platforms
+    seed_runtime = (
+        Path(run_aether_semantic_canary.project_root)
+        / "qualification"
+        / "seed_repos"
+        / "loglens"
+        / "src"
+        / "loglens"
+        / "runtime.py"
+    ).read_text(encoding="utf-8")
+    preserved_docstring_runtime = seed_runtime.replace(
+        "    rows: list[dict[str, object]]\n",
+        (
+            "    rows: list[dict[str, object]]\n\n"
+            "    def alpha_method(self) -> str:\n"
+            '        return "alpha"\n\n'
+            "    def beta_method(self) -> str:\n"
+            '        return "beta"\n'
+        ),
+    )
+    assert (
+        run_aether_semantic_canary._verify_snapshot_files_and_methods(
+            preserved_docstring_runtime,
+            None,
+        )
+        is None
+    )
+    ok_clean, details_clean = run_aether_semantic_canary.inspect_merged_runtime_ast_and_behavior(
+        preserved_docstring_runtime,
+        require_behavior=False,
+    )
+    assert ok_clean is True
+    assert details_clean["ast_verified"] is True
+
+    # Reordering imports even with line-1 docstring intact is also rejected by order-sensitive AST comparison
+    reordered_imports_runtime = preserved_docstring_runtime.replace(
+        "import argparse\nfrom dataclasses import dataclass\n",
+        "from dataclasses import dataclass\nimport argparse\n",
+    )
+    err_reordered = run_aether_semantic_canary._verify_snapshot_files_and_methods(
+        reordered_imports_runtime,
+        None,
+    )
+    assert err_reordered is not None
+    assert "statement order" in err_reordered
+
+
+def test_is_git_dirty_detects_untracked_and_modified_files():
+    """--require-clean-mx helper _is_git_dirty flags untracked non-gitignored files and tracked edits."""
+    run_aether_semantic_canary = get_canary()
+    with tempfile.TemporaryDirectory() as tmpdir:
+        repo = Path(tmpdir)
+        subprocess.run(["git", "init"], cwd=repo, capture_output=True, check=True)
+        subprocess.run(["git", "config", "user.email", "test@mx.local"], cwd=repo, capture_output=True, check=True)
+        subprocess.run(["git", "config", "user.name", "Test"], cwd=repo, capture_output=True, check=True)
+        (repo / ".gitignore").write_text("*.egg-info/\n", encoding="utf-8")
+        (repo / "tracked.py").write_text("x = 1\n", encoding="utf-8")
+        subprocess.run(["git", "add", "."], cwd=repo, capture_output=True, check=True)
+        subprocess.run(["git", "commit", "-m", "init"], cwd=repo, capture_output=True, check=True)
+
+        assert run_aether_semantic_canary._is_git_dirty(repo) is False
+
+        # Gitignored directory does not mark checkout dirty
+        egg_dir = repo / "mx_swarm.egg-info"
+        egg_dir.mkdir()
+        (egg_dir / "PKG-INFO").write_text("Name: mx-swarm\n", encoding="utf-8")
+        assert run_aether_semantic_canary._is_git_dirty(repo) is False
+
+        # Untracked non-gitignored file marks checkout dirty
+        untracked = repo / "stray_untracked.py"
+        untracked.write_text("y = 2\n", encoding="utf-8")
+        assert run_aether_semantic_canary._is_git_dirty(repo) is True
+
+        # Removing untracked file restores clean status; modifying tracked file marks dirty
+        untracked.unlink()
+        assert run_aether_semantic_canary._is_git_dirty(repo) is False
+        (repo / "tracked.py").write_text("x = 99\n", encoding="utf-8")
+        assert run_aether_semantic_canary._is_git_dirty(repo) is True
+
 
 
 
