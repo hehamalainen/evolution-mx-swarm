@@ -61,7 +61,7 @@ from shared.schemas import (  # noqa: E402
 from shared.utils.config import MXConfig  # noqa: E402
 from worker.service import Worker  # noqa: E402
 
-PINNED_AETHER_COMMIT = "bc924b8b3b3d653ec01f2cdbcfc1332012fc29c6"
+PINNED_AETHER_COMMIT = "fbc995fa36ed0df29189aa5ebedf161bac78c6df"
 
 HISTORICAL_JULY21_PROVENANCE = {
     "label": "historical_pre_public_run",

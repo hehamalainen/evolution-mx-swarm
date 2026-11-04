@@ -14,7 +14,7 @@
 ### 2. Public Clean-Checkout Reproduction
 
 - **Base Public MX Swarm Commit:** `f12fb568b083f8a28b982d68cd662c38718ab2ea`
-- **Pinned Public Project Aether Commit:** `bc924b8b3b3d653ec01f2cdbcfc1332012fc29c6`
+- **Pinned Public Project Aether Commit:** `fbc995fa36ed0df29189aa5ebedf161bac78c6df`
 - **Database Backend:** SQLite (`database_profile="sqlite"`)
 - **Completion Mode:** Deterministic canned completions (`MX_CANNED_COMPLETION_FIXTURE`)
 - **Merge Scope:** Bounded Class-1 structural AST merge on `src/loglens/runtime.py` (`class CommandResult` methods `alpha_method` and `beta_method`)
@@ -39,7 +39,7 @@ Each execution of `scripts/run_aether_semantic_canary.py` reports proposal count
 
 `scripts/run_aether_semantic_canary.py` fails closed (non-zero exit code) if any of the following conditions are violated:
 
-1. **Pinned Aether Commit SHA (`preflight_build_sha_and_flags`):** `/v1/system/build` `commit` must equal `bc924b8b3b3d653ec01f2cdbcfc1332012fc29c6`, `dirty` must be `false`, `database_profile` must be `"sqlite"`, and `semantic_merge_enabled` must be `true`.
+1. **Pinned Aether Commit SHA (`preflight_build_sha_and_flags`):** `/v1/system/build` `commit` must equal `fbc995fa36ed0df29189aa5ebedf161bac78c6df`, `dirty` must be `false`, `database_profile` must be `"sqlite"`, and `semantic_merge_enabled` must be `true`.
 2. **Non-Zero & Non-Skipped Checks (`verify_checks_executed`):** Fails if zero checks execute, if any required canary check is missing or skipped, if any expected promotion (`seed_promotion_id`, `control_promotion_id`, `cohort_promotion_id`) is missing or fails detail retrieval, or if any Aether promotion gate (`syntax`, `build`, `unit_tests`, `lint`) is missing, skipped (`SKIP`), fails, or lacks a matching passing `unit_tests` row with `tests_passed > 0` for that promotion's `snapshot_id` in `aether_gate_results`.
 3. **Same-Promotion Cohort Membership (`verify_promotion_membership`):** Both contending proposals (`task-b` and `task-c`) must be promoted together in the exact same promotion record (`included_proposals == [prop_b, prop_c]`, `excluded_proposals == []`).
 4. **Zero Semantic Fallbacks (`verify_canary_events`):** Both cohort proposals must emit `structural_merge` (`synthesis_engine=None`) and zero `semantic_fallback` events may occur.
@@ -51,7 +51,7 @@ Each execution of `scripts/run_aether_semantic_canary.py` reports proposal count
 ## Clean-Checkout Execution Commands
 
 ```bash
-# 1. Start pinned Project Aether (bc924b8b3b3d653ec01f2cdbcfc1332012fc29c6) with SQLite
+# 1. Start pinned Project Aether (fbc995fa36ed0df29189aa5ebedf161bac78c6df) with SQLite
 cd /tmp/aether-canary-clean-checkout
 export PATH="$(dirname "$(command -v python)"):$PATH"
 export PYTHONPATH="/tmp/aether-canary-clean-checkout"
@@ -67,7 +67,7 @@ python -m uvicorn apps.aether_server.main:app --host 127.0.0.1 --port 8105 >/tmp
 cd /tmp/mx-canary-clean-checkout
 python scripts/run_aether_semantic_canary.py \
   --aether-base-url http://127.0.0.1:8105 \
-  --expected-aether-sha bc924b8b3b3d653ec01f2cdbcfc1332012fc29c6 \
+  --expected-aether-sha fbc995fa36ed0df29189aa5ebedf161bac78c6df \
   --structural-only \
   --require-clean-mx \
   --aether-db-path /tmp/aether-canary-run/aether.db \
@@ -172,7 +172,7 @@ python scripts/run_aether_semantic_canary.py \
 20. **Attempt 20 (`canary-run-20261102t203713z`, `2026-11-02T20:37:27Z`, platform `macOS Darwin` + independent Linux replay, reviewed MX commit `03283fb3a56476e220da921a56e2174cfb16f6a1` against Aether `bc924b8b3b3d653ec01f2cdbcfc1332012fc29c6`, `repo_bab0316eb617`, `prom_30094d0c3176`, `snap_ef2f5c1335aa`, `merged_runtime.py` SHA-256 `7c53f332f80d653a60bfa017986495f50cf1c88992812368fe9db208e750cadc`):**
    - **Stage:** `independent_cross_platform_round5_review`
    - **Findings:** Both the macOS clean-checkout run (`canary-run-20261102t203713z`) and an independent fresh-clone Linux replay reproduced single-promotion cohort membership (`included_proposals == [prop_b, prop_c]`, `excluded_proposals == []`), 2 `structural_merge` events, 0 `semantic_fallback` events, passing promotion gates (`tests_passed=2`), and byte-identical `merged_runtime.py` (`7c53f332…`). Cross-platform review identified: (1) two macOS `sandbox-exec` behavioral unit tests failed on Linux (`ubuntu-latest` CI) instead of skipping on non-Darwin while keeping AST-level tests cross-platform; (2) this section's previous heading claimed a final pass before an evidence tag was published; (3) in `7c53f332…`, Project Aether `bc924b8`'s structural merge moved `runtime.py`'s module docstring from line 1 to line 8 after the imports (where Python sets `__doc__ = None`), and MX's `_strip_runtime_docstring_and_expected_methods` hid that displacement by stripping matching docstrings from any AST body index; plus minor fixes for `test_dashboard_security` working-directory isolation, `--require-clean-mx` untracked-file detection, and gitignoring `*.egg-info/`.
-   - **Resolution & Current Gate Status:** Made `runtime.py` AST comparison strictly order-sensitive (`_strip_expected_methods_from_class` + `ast.get_docstring` equality, rejecting non-initial top-level string expressions), marked the two macOS Seatbelt behavioral tests `skipif(sys.platform != "darwin")` while keeping AST checks running on all platforms, enabled untracked-file detection in `_is_git_dirty`, isolated the browser dashboard test working directory, and gitignored `*.egg-info/`. **Intentional fail-closed status:** against unpatched Project Aether `bc924b8b3b3d653ec01f2cdbcfc1332012fc29c6`, `scripts/run_aether_semantic_canary.py` now intentionally fails at `promoted_snapshot_ast_and_behavior` on the displaced line-8 docstring until Project Aether lands its docstring-preservation merge fix, after which the final clean-checkout macOS pass and public evidence tag will be recorded.
+   - **Resolution:** Made `runtime.py` AST comparison strictly order-sensitive (`_strip_expected_methods_from_class` + `ast.get_docstring` equality, rejecting non-initial top-level string expressions), marked the two macOS Seatbelt behavioral tests `skipif(sys.platform != "darwin")` while keeping AST checks running on all platforms, enabled untracked-file detection in `_is_git_dirty`, isolated the browser dashboard test working directory, and gitignored `*.egg-info/`. Against pre-fix Project Aether, `scripts/run_aether_semantic_canary.py` intentionally failed closed at `promoted_snapshot_ast_and_behavior` on the displaced line-8 docstring until Project Aether landed its docstring-preservation merge fix in `fbc995fa36ed0df29189aa5ebedf161bac78c6df`.
 
 
 
