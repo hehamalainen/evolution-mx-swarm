@@ -45,7 +45,7 @@ async def test_canary_fail_closed_on_unknown():
 async def test_canary_fail_closed_on_mismatched_aether_sha():
     """Canary fails closed when running Aether build SHA differs from pinned SHA."""
     run_aether_semantic_canary = get_canary()
-    pinned = "bc924b8b3b3d653ec01f2cdbcfc1332012fc29c6"
+    pinned = "fbc995fa36ed0df29189aa5ebedf161bac78c6df"
     mock_build_info = {
         "semantic_merge_enabled": True,
         "synthesis_worker_enabled": True,
