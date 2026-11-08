@@ -9,6 +9,10 @@ from scripts.run_aether_live_proof import (
     _copy_worktree,
     _landed_paths_source,
     _materialize_worktree,
+    _model_response_latency_seconds,
+)
+from scripts.run_aether_live_proof import (
+    _checkpoint as _extract_checkpoint,
 )
 
 
@@ -26,7 +30,7 @@ def test_classify_live_failure_identifies_model_execution_gap() -> None:
         "task_selected": _checkpoint(True),
         "model_bypassed_canned": _checkpoint(False),
         "model_started": _checkpoint(True),
-        "first_token_received": _checkpoint(False),
+        "model_response_received": _checkpoint(False),
         "model_timeout": _checkpoint(False),
         "model_completed": _checkpoint(False),
         "submit_started": _checkpoint(False),
@@ -50,7 +54,7 @@ def test_classify_live_failure_identifies_proposal_visibility_gap() -> None:
         "task_selected": _checkpoint(True),
         "model_bypassed_canned": _checkpoint(False),
         "model_started": _checkpoint(True),
-        "first_token_received": _checkpoint(True),
+        "model_response_received": _checkpoint(True),
         "model_timeout": _checkpoint(False),
         "model_completed": _checkpoint(True),
         "submit_started": _checkpoint(True),
@@ -74,7 +78,7 @@ def test_classify_live_failure_identifies_timeout_explicitly() -> None:
         "task_selected": _checkpoint(True),
         "model_bypassed_canned": _checkpoint(False),
         "model_started": _checkpoint(True),
-        "first_token_received": _checkpoint(False),
+        "model_response_received": _checkpoint(False),
         "model_timeout": _checkpoint(True),
         "model_completed": _checkpoint(False),
         "submit_started": _checkpoint(False),
@@ -98,7 +102,7 @@ def test_classify_live_failure_allows_canned_bypass() -> None:
         "task_selected": _checkpoint(True),
         "model_bypassed_canned": _checkpoint(True),
         "model_started": _checkpoint(False),
-        "first_token_received": _checkpoint(True),
+        "model_response_received": _checkpoint(True),
         "model_timeout": _checkpoint(False),
         "model_completed": _checkpoint(False),
         "submit_started": _checkpoint(True),
@@ -207,3 +211,72 @@ def test_materialize_worktree_can_clone_prepared_snapshot_repo(tmp_path: Path) -
         text=True,
     )
     assert branch.stdout.strip() == "main"
+
+
+def test_model_response_latency_measures_real_completion_and_excludes_synthetic() -> None:
+    real_spans = [
+        {
+            "operation": "llm_chat",
+            "status": "started",
+            "timestamp": "2026-11-08T20:00:00+00:00",
+            "attributes": {},
+        },
+        {
+            "operation": "model_response_received",
+            "status": "ok",
+            "timestamp": "2026-11-08T20:00:02.500000+00:00",
+            "attributes": {"synthetic": False, "response_chars": 42},
+        },
+    ]
+    real_checkpoints = {
+        "model_bypassed_canned": _extract_checkpoint(real_spans, operation="model_bypassed_canned"),
+        "model_started": _extract_checkpoint(real_spans, operation="llm_chat", status="started"),
+        "model_response_received": _extract_checkpoint(
+            real_spans, operation="model_response_received"
+        ),
+    }
+    assert real_checkpoints["model_response_received"]["reached"] is True
+    assert _model_response_latency_seconds(real_checkpoints) == 2.5
+
+    synthetic_spans = [
+        {
+            "operation": "llm_chat",
+            "status": "started",
+            "timestamp": "2026-11-08T20:00:00+00:00",
+            "attributes": {},
+        },
+        {
+            "operation": "model_response_received",
+            "status": "ok",
+            "timestamp": "2026-11-08T20:00:00.010000+00:00",
+            "attributes": {"synthetic": True},
+        },
+    ]
+    synthetic_checkpoints = {
+        "model_bypassed_canned": {
+            "reached": False,
+            "timestamp": None,
+            "status": None,
+            "attributes": {},
+        },
+        "model_started": _extract_checkpoint(
+            synthetic_spans, operation="llm_chat", status="started"
+        ),
+        "model_response_received": _extract_checkpoint(
+            synthetic_spans, operation="model_response_received"
+        ),
+    }
+    assert synthetic_checkpoints["model_response_received"]["attributes"]["synthetic"] is True
+    assert _model_response_latency_seconds(synthetic_checkpoints) is None
+
+    bypassed_checkpoints = {
+        **real_checkpoints,
+        "model_bypassed_canned": {
+            "reached": True,
+            "timestamp": "2026-11-08T20:00:00+00:00",
+            "status": "ok",
+            "attributes": {},
+        },
+    }
+    assert _model_response_latency_seconds(bypassed_checkpoints) is None
+

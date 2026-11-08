@@ -2568,7 +2568,7 @@ Example:
                 append_trace_span(
                     trace_id=task.trace_id,
                     service="worker",
-                    operation="first_token_received",
+                    operation="model_response_received",
                     actor_id=self.worker_id,
                     task_id=task.id,
                     attempt_id=task.attempt_id,
@@ -2593,7 +2593,7 @@ Example:
                     append_trace_span(
                         trace_id=task.trace_id,
                         service="worker",
-                        operation="first_token_received",
+                        operation="model_response_received",
                         actor_id=self.worker_id,
                         task_id=task.id,
                         attempt_id=task.attempt_id,

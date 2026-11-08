@@ -345,6 +345,30 @@ def _checkpoint(trace_spans: list[dict[str, Any]], *, operation: str, status: st
     }
 
 
+def _model_response_latency_seconds(checkpoints: dict[str, dict[str, Any]]) -> float | None:
+    if bool((checkpoints.get("model_bypassed_canned") or {}).get("reached")):
+        return None
+    started = checkpoints.get("model_started") or {}
+    received = checkpoints.get("model_response_received") or {}
+    if not bool(started.get("reached")) or not bool(received.get("reached")):
+        return None
+    attributes = received.get("attributes") or {}
+    if bool(attributes.get("synthetic")):
+        return None
+    started_raw = str(started.get("timestamp") or "").strip()
+    received_raw = str(received.get("timestamp") or "").strip()
+    if not started_raw or not received_raw:
+        return None
+    try:
+        started_dt = datetime.fromisoformat(started_raw.replace("Z", "+00:00"))
+        received_dt = datetime.fromisoformat(received_raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if received_dt < started_dt:
+        return None
+    return round((received_dt - started_dt).total_seconds(), 6)
+
+
 def _landed_paths_source(payload: dict[str, Any] | None) -> str:
     if not isinstance(payload, dict):
         return "missing"
@@ -503,7 +527,7 @@ def main() -> int:
         "task_selected": {"reached": False, "timestamp": None, "status": None, "attributes": {}},
         "model_bypassed_canned": {"reached": False, "timestamp": None, "status": None, "attributes": {}},
         "model_started": {"reached": False, "timestamp": None, "status": None, "attributes": {}},
-        "first_token_received": {"reached": False, "timestamp": None, "status": None, "attributes": {}},
+        "model_response_received": {"reached": False, "timestamp": None, "status": None, "attributes": {}},
         "model_timeout": {"reached": False, "timestamp": None, "status": None, "attributes": {}},
         "model_completed": {"reached": False, "timestamp": None, "status": None, "attributes": {}},
         "submit_started": {"reached": False, "timestamp": None, "status": None, "attributes": {}},
@@ -537,7 +561,9 @@ def main() -> int:
                 stage_checkpoints["task_selected"] = _checkpoint(trace_spans, operation="task_selected")
                 stage_checkpoints["model_bypassed_canned"] = _checkpoint(trace_spans, operation="model_bypassed_canned")
                 stage_checkpoints["model_started"] = _checkpoint(trace_spans, operation="llm_chat", status="started")
-                stage_checkpoints["first_token_received"] = _checkpoint(trace_spans, operation="first_token_received")
+                stage_checkpoints["model_response_received"] = _checkpoint(
+                    trace_spans, operation="model_response_received"
+                )
                 stage_checkpoints["model_timeout"] = _checkpoint(trace_spans, operation="model_timeout")
                 stage_checkpoints["model_completed"] = _checkpoint(trace_spans, operation="llm_chat", status="ok")
                 stage_checkpoints["submit_started"] = _checkpoint(trace_spans, operation="submit_change", status="started")
@@ -625,6 +651,7 @@ def main() -> int:
     }
     physics_window_seconds = physics.get("window_seconds")
     physics_windowed_mx_swarm = ((physics.get("by_source") or {}).get("mx_swarm"))
+    model_response_latency_seconds = _model_response_latency_seconds(stage_checkpoints)
 
     summary = {
         "generated_at": datetime.now(UTC).isoformat(),
@@ -643,6 +670,7 @@ def main() -> int:
         "copied_report_dir": str(copied_report_dir) if copied_report_dir else None,
         "delivery_payload": delivery_payload,
         "stage_checkpoints": stage_checkpoints,
+        "model_response_latency_seconds": model_response_latency_seconds,
         "failure_stage": failure_stage,
         "post_landing_verify": post_landing_verify,
         "landed_paths_source": landed_paths_source,
@@ -667,6 +695,7 @@ def main() -> int:
         f"- repo_id: `{repo_id}`",
         f"- proof_exit_code: `{proof_result.returncode}`",
         f"- copied_report_dir: `{summary['copied_report_dir']}`",
+        f"- model_response_latency_seconds: `{model_response_latency_seconds}`",
         f"- failure_stage: `{failure_stage}`",
         f"- post_landing_verify: `{post_landing_verify}`",
         f"- landed_paths_source: `{landed_paths_source}`",
