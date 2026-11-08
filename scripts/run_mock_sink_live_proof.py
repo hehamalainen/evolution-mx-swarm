@@ -25,6 +25,7 @@ from scripts.run_aether_live_proof import (  # noqa: E402
     _find_latest_report,
     _latest_submission_by_task,
     _materialize_worktree,
+    _model_response_latency_seconds,
     _read_json,
     _read_jsonl,
 )
@@ -136,7 +137,7 @@ def main() -> int:
         "task_selected": {"reached": False, "timestamp": None, "status": None, "attributes": {}},
         "model_bypassed_canned": {"reached": False, "timestamp": None, "status": None, "attributes": {}},
         "model_started": {"reached": False, "timestamp": None, "status": None, "attributes": {}},
-        "first_token_received": {"reached": False, "timestamp": None, "status": None, "attributes": {}},
+        "model_response_received": {"reached": False, "timestamp": None, "status": None, "attributes": {}},
         "model_timeout": {"reached": False, "timestamp": None, "status": None, "attributes": {}},
         "model_completed": {"reached": False, "timestamp": None, "status": None, "attributes": {}},
         "submit_started": {"reached": False, "timestamp": None, "status": None, "attributes": {}},
@@ -170,7 +171,9 @@ def main() -> int:
                 stage_checkpoints["task_selected"] = _checkpoint(trace_spans, operation="task_selected")
                 stage_checkpoints["model_bypassed_canned"] = _checkpoint(trace_spans, operation="model_bypassed_canned")
                 stage_checkpoints["model_started"] = _checkpoint(trace_spans, operation="llm_chat", status="started")
-                stage_checkpoints["first_token_received"] = _checkpoint(trace_spans, operation="first_token_received")
+                stage_checkpoints["model_response_received"] = _checkpoint(
+                    trace_spans, operation="model_response_received"
+                )
                 stage_checkpoints["model_timeout"] = _checkpoint(trace_spans, operation="model_timeout")
                 stage_checkpoints["model_completed"] = _checkpoint(trace_spans, operation="llm_chat", status="ok")
                 stage_checkpoints["submit_started"] = _checkpoint(trace_spans, operation="submit_change", status="started")
@@ -258,6 +261,8 @@ def main() -> int:
         "intent_type": proof_payload.get("intent_type"),
     }
 
+    model_response_latency_seconds = _model_response_latency_seconds(stage_checkpoints)
+
     summary = {
         "generated_at": datetime.now(UTC).isoformat(),
         "phase": phase,
@@ -269,6 +274,7 @@ def main() -> int:
         "copied_report_dir": str(copied_report_dir) if copied_report_dir else None,
         "delivery_payload": delivery_payload,
         "stage_checkpoints": stage_checkpoints,
+        "model_response_latency_seconds": model_response_latency_seconds,
         "failure_stage": failure_stage,
         "post_landing_verify": post_landing_verify,
         "normalized_merge_diff_gap": normalized_merge_gap,
@@ -288,6 +294,7 @@ def main() -> int:
         "- sink_mode: `mock_github`",
         f"- proof_exit_code: `{proof_result.returncode}`",
         f"- copied_report_dir: `{summary['copied_report_dir']}`",
+        f"- model_response_latency_seconds: `{model_response_latency_seconds}`",
         f"- failure_stage: `{failure_stage}`",
         f"- post_landing_verify: `{post_landing_verify}`",
         f"- normalized_merge_diff_gap: `{normalized_merge_gap}`",

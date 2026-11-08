@@ -1538,3 +1538,151 @@ async def test_run_command_rewrites_python_module_ruff_to_binary(monkeypatch) ->
     assert ok is True
     assert output == "ok"
     assert captured["command"] == f'"{expected_ruff}" check tools/jsonpeek.py'
+
+
+@pytest.mark.asyncio
+async def test_implement_task_emits_model_response_received_only_after_chat_completion(
+    monkeypatch, tmp_path
+) -> None:
+    spans: list[dict] = []
+
+    def capture_span(**kwargs) -> None:
+        spans.append(kwargs)
+
+    monkeypatch.setattr(worker_service, "append_trace_span", capture_span)
+    monkeypatch.setattr(worker_service, "append_llm_usage_event", lambda **kwargs: None)
+
+    in_flight_operations: list[str] = []
+
+    class GatedLLM:
+        async def chat(self, *args, **kwargs):
+            in_flight_operations.extend(span["operation"] for span in spans)
+            await asyncio.sleep(0)
+            resp = _LLMResponse("```python:tools/jsonpeek.py\nprint('ok')\n```\nImplemented.")
+            resp.usage = {"input_tokens": 11, "output_tokens": 7}  # type: ignore[attr-defined]
+            return resp
+
+    repo = SuccessfulRepo(local_path=str(tmp_path / "repo"))
+    worker = Worker(
+        config=MXConfig(),
+        worker_id="w-telemetry",
+        queue=StubQueue(),
+        llm=GatedLLM(),
+        vcs=CapturingVCS(),
+    )
+    task = TaskContract.create(
+        task_type=TaskType.FEATURE,
+        goal="Implement jsonpeek",
+        context=TaskContext(files_hint=["tools/jsonpeek.py"]),
+    )
+
+    changed_files, _notes = await worker._implement_task(repo, task)
+
+    assert changed_files == ["tools/jsonpeek.py"]
+    assert in_flight_operations == ["llm_chat"]
+    assert "model_response_received" not in in_flight_operations
+
+    operations = [(span["operation"], span.get("status")) for span in spans]
+    assert operations == [
+        ("llm_chat", "started"),
+        ("model_response_received", None),
+        ("llm_chat", "ok"),
+    ]
+    assert all(span["operation"] != "first_token_received" for span in spans)
+    response_span = spans[1]
+    assert response_span["attributes"]["synthetic"] is False
+    assert response_span["attributes"]["response_chars"] > 0
+    assert worker.metrics.total_tokens == 18
+
+
+@pytest.mark.asyncio
+async def test_process_task_llm_timeout_never_emits_model_response_received(monkeypatch) -> None:
+    spans: list[dict] = []
+
+    def capture_span(**kwargs) -> None:
+        spans.append(kwargs)
+
+    monkeypatch.setattr(worker_service, "GitRepo", SuccessfulRepo)
+    monkeypatch.setattr(worker_service, "append_trace_span", capture_span)
+
+    config = MXConfig()
+    config.llm.provider = "ollama"
+    config.llm.model = "mistral:7b"
+    worker = Worker(
+        config=config,
+        worker_id="w-timeout",
+        queue=StubQueue(),
+        llm=SlowLLM(),
+        vcs=CapturingVCS(),
+    )
+    monkeypatch.setattr(worker, "_llm_chat_timeout_seconds", lambda _task: 0.01)
+
+    task = TaskContract.create(
+        task_type=TaskType.BUGFIX,
+        goal="Timeout check",
+        acceptance=AcceptanceCriteria(criteria=["should timeout"], checks=[]),
+    )
+    message = QueueMessage(
+        id="m-timeout",
+        body=task.to_json(),
+        receipt_handle="rh-timeout",
+        receive_count=1,
+        enqueued_at=datetime.now(UTC),
+        attributes={},
+    )
+
+    result = await worker.process_task(message)
+
+    assert result is False
+    emitted_ops = [span["operation"] for span in spans]
+    assert "model_timeout" in emitted_ops
+    assert "model_response_received" not in emitted_ops
+    assert "first_token_received" not in emitted_ops
+
+
+@pytest.mark.asyncio
+async def test_implement_task_canned_completion_marks_model_response_received_synthetic(
+    monkeypatch, tmp_path
+) -> None:
+    spans: list[dict] = []
+
+    def capture_span(**kwargs) -> None:
+        spans.append(kwargs)
+
+    monkeypatch.setattr(worker_service, "append_trace_span", capture_span)
+    monkeypatch.setattr(worker_service, "append_llm_usage_event", lambda **kwargs: None)
+
+    fixture_path = tmp_path / "canned.json"
+    fixture_path.write_text(
+        json.dumps(
+            {
+                "note": "synthetic worker proof",
+                "files": {"tools/jsonpeek.py": "print('ok')\n"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("MX_CANNED_COMPLETION_FIXTURE", str(fixture_path))
+
+    repo = SuccessfulRepo(local_path=str(tmp_path / "repo"))
+    worker = Worker(
+        config=MXConfig(),
+        worker_id="w-canned",
+        queue=StubQueue(),
+        llm=RaisingLLM(AssertionError("chat() must not be called for canned completion")),
+        vcs=CapturingVCS(),
+    )
+    task = TaskContract.create(
+        task_type=TaskType.FEATURE,
+        goal="Implement jsonpeek",
+        context=TaskContext(files_hint=["tools/jsonpeek.py"]),
+    )
+
+    changed_files, _notes = await worker._implement_task(repo, task)
+
+    assert changed_files == ["tools/jsonpeek.py"]
+    assert all(span["operation"] != "first_token_received" for span in spans)
+    canned_spans = [span for span in spans if span["operation"] == "model_response_received"]
+    assert len(canned_spans) == 1
+    assert canned_spans[0]["attributes"]["synthetic"] is True
+
